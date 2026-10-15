@@ -196,6 +196,7 @@ export function publicConfig(): PublicConfig {
   const s = systemSettings();
   return {
     demo: demoAllowed(),
+    demoHours: s.demoHours,
     signup: s.signupEnabled,
     announcement: s.announcement.enabled && s.announcement.text.trim() ? { text: s.announcement.text.trim(), tone: s.announcement.tone } : null,
     maintenance: s.maintenance.enabled ? s.maintenance.message : null,

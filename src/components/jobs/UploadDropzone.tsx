@@ -1,21 +1,27 @@
 import React, { useRef, useState } from 'react';
-import { FileArchive, FileText, Image as ImageIcon, Loader2, UploadCloud, X } from 'lucide-react';
+import { FileArchive, FileAudio, FileSpreadsheet, FileText, FileVideo, Image as ImageIcon, Loader2, Mail, Presentation, UploadCloud, X } from 'lucide-react';
 import { processUploadFiles } from '../../lib/extractText';
 import { formatFileSize, toPersianDigits } from '../../lib/normalizeFa';
 import { toast } from '../ui';
-
-/** Per-file ceiling: a giant scan must never freeze the tab before upload. */
-export const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const ACCEPT = '.pdf,.docx,.doc,.txt,.rtf,.md,.odt,.zip,.jpg,.jpeg,.png,.webp,.heic,.heif,.bmp,.tif,.tiff';
+import { usePublicConfig } from '../../lib/config';
 
 function iconFor(name: string) {
   const ext = name.split('.').pop()?.toLowerCase() || '';
-  if (['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'bmp', 'tif', 'tiff'].includes(ext)) return ImageIcon;
-  if (ext === 'zip') return FileArchive;
+  if (['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'bmp', 'tif', 'tiff', 'gif', 'avif', 'svg'].includes(ext)) return ImageIcon;
+  if (['zip', 'rar', '7z', 'tar', 'gz', 'tgz'].includes(ext)) return FileArchive;
+  if (['xlsx', 'xls', 'ods', 'csv', 'numbers'].includes(ext)) return FileSpreadsheet;
+  if (['pptx', 'ppt', 'odp', 'key'].includes(ext)) return Presentation;
+  if (['eml', 'msg'].includes(ext)) return Mail;
+  if (['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac', 'opus', 'amr'].includes(ext)) return FileAudio;
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi', 'wmv', '3gp'].includes(ext)) return FileVideo;
   return FileText;
 }
 
-/** Drag & drop / pick resumes (PDF, Word, images, text, or a ZIP of them). */
+/**
+ * Drag & drop / pick resumes in ANY format — PDF, Word, scans and photos,
+ * Excel, PowerPoint, e-mails, web pages, audio/video, or a ZIP of them.
+ * The size and batch limits come from /admin › تنظیمات سامانه.
+ */
 export function UploadDropzone({
   files,
   onChange,
@@ -27,6 +33,8 @@ export function UploadDropzone({
   disabled?: boolean;
   compact?: boolean;
 }) {
+  const { maxFileMb, maxFilesPerBatch } = usePublicConfig();
+  const maxBytes = maxFileMb * 1024 * 1024;
   const [dragging, setDragging] = useState(false);
   const [unpacking, setUnpacking] = useState<{ current: number; total: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -41,9 +49,14 @@ export function UploadDropzone({
       const next = [...files];
       let tooBig = 0;
       let dupes = 0;
+      let overBatch = 0;
       for (const f of unpacked) {
-        if (f.size > MAX_FILE_BYTES) {
+        if (f.size > maxBytes) {
           tooBig++;
+          continue;
+        }
+        if (next.length >= maxFilesPerBatch) {
+          overBatch++;
           continue;
         }
         const key = `${f.name}_${f.size}_${f.lastModified}`;
@@ -55,7 +68,8 @@ export function UploadDropzone({
         next.push(f);
       }
       onChange(next);
-      if (tooBig) toast(`${toPersianDigits(tooBig)} فایل بیش از ۲۰ مگابایت بود و اضافه نشد.`, 'error');
+      if (tooBig) toast(`${toPersianDigits(tooBig)} فایل بیش از ${toPersianDigits(maxFileMb)} مگابایت بود و اضافه نشد.`, 'error');
+      if (overBatch) toast(`در هر نوبت حداکثر ${toPersianDigits(maxFilesPerBatch)} فایل؛ ${toPersianDigits(overBatch)} فایل اضافه نشد.`, 'error');
       if (dupes) toast(`${toPersianDigits(dupes)} فایل تکراری کنار گذاشته شد.`, 'info');
     } finally {
       setUnpacking(null);
@@ -95,13 +109,12 @@ export function UploadDropzone({
             : 'رزومه‌ها را اینجا رها کنید یا برای انتخاب بزنید'}
         </p>
         <p className="text-[12.5px] text-ink-3 mt-1.5 leading-relaxed">
-          PDF، Word، تصویر اسکن‌شده، متن یا یک فایل ZIP شامل چند رزومه — هر فایل حداکثر ۲۰ مگابایت
+          هر قالبی پذیرفته می‌شود: PDF، Word، عکس و اسکن، اکسل، پاورپوینت، ایمیل، صفحه وب، فایل صوتی/ویدیویی یا یک ZIP از چند رزومه — هر فایل حداکثر {toPersianDigits(maxFileMb)} مگابایت
         </p>
         <input
           ref={inputRef}
           type="file"
           multiple
-          accept={ACCEPT}
           className="hidden"
           onChange={(e) => {
             if (e.target.files?.length) void add(e.target.files);

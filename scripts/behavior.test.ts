@@ -83,6 +83,8 @@ async function main() {
   assert(edited.industries.some((i) => i.id === 'aviation' && !i.builtin) && !edited.industries.some((i) => i.name === ''), 'custom industry added, empty ones dropped');
   assert(!b.currentBehavior().industries.some((i) => i.id === 'retail'), 'a removed built-in industry stays removed');
   assert(b.detectIndustry({ roleTitle: 'خلبان ارشد', departmentName: 'عملیات پرواز' })?.profile.id === 'aviation', 'custom industry is detected');
+  const { behaviorHistory } = await import('../server/platform');
+  assert(behaviorHistory().some((h) => h.version === 1 && h.note === 'تنظیمات پیش‌فرض هویدا'), 'first save also records the shipped defaults (v1) in history');
   const restored = b.restoreBehaviorVersion(2, 'مدیر');
   assert(restored?.version === 3 && restored.strictness === 'lenient', 'restore makes a new version with the old content');
   const reset = b.resetBehavior('مدیر');

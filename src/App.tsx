@@ -1,5 +1,6 @@
 import React, { Suspense, lazy, useEffect } from 'react';
 import { AuthProvider, useAuth } from './lib/auth';
+import { ConfigProvider } from './lib/config';
 import { AnalysisProvider } from './lib/analysis';
 import { matchPath, navigate, useLocation } from './lib/router';
 import { Toaster } from './components/ui';
@@ -55,6 +56,7 @@ const Compare = lazyPage(() => import('./pages/Compare'));
 const Talent = lazyPage(() => import('./pages/Talent'));
 const Reports = lazyPage(() => import('./pages/Reports'));
 const Settings = lazyPage(() => import('./pages/Settings'));
+const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
 function Redirect({ to }: { to: string }) {
   useEffect(() => {
@@ -115,6 +117,14 @@ function Routes() {
   const { status } = useAuth();
 
   if (pathname === '/') return <Landing />;
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) {
+    if (status === 'loading') return <FullScreenLoader />;
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری پنل مدیریت…" />}>
+        <AdminApp pathname={pathname} />
+      </Suspense>
+    );
+  }
   if (pathname === '/login' || pathname === '/signup') {
     if (status === 'authed') {
       const next = new URLSearchParams(search).get('next');
@@ -138,12 +148,14 @@ function Routes() {
 export default function App() {
   return (
     <ErrorBoundary>
-      <AuthProvider>
-        <AnalysisProvider>
-          <Routes />
-          <Toaster />
-        </AnalysisProvider>
-      </AuthProvider>
+      <ConfigProvider>
+        <AuthProvider>
+          <AnalysisProvider>
+            <Routes />
+            <Toaster />
+          </AnalysisProvider>
+        </AuthProvider>
+      </ConfigProvider>
     </ErrorBoundary>
   );
 }

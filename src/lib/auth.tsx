@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import type { AiStatus, AuthPayload, OrgPublic, UserPublic } from '../types/app';
+import type { AiStatus, AuthPayload, MeResponse, OrgPublic, UserPublic } from '../types/app';
 import { api, getToken, lastSessionWasDemo, setToken, TOKEN_KEY, UNAUTHORIZED_EVENT } from './api';
 import { clearCompare } from './compare';
 import { navigate } from './router';
@@ -16,6 +16,19 @@ export function onBeforeSignOut(fn: () => Promise<unknown> | unknown): () => voi
   };
 }
 
+/**
+ * «ورود پشتیبانی» in /admin opens /app#support=<token> in a new tab. That
+ * session lives in this tab's memory only — the admin's own stored session
+ * (other tabs, reloads) is never touched.
+ */
+if (typeof window !== 'undefined') {
+  const m = window.location.hash.match(/^#support=([A-Za-z0-9_-]{20,256})$/);
+  if (m) {
+    setToken(m[1], { persist: false });
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+}
+
 const EXPIRED_NOTICE = 'نشست شما به پایان رسیده است؛ لطفاً دوباره وارد شوید.';
 const DEMO_EXPIRED_NOTICE = 'مهلت نسخه نمایشی به پایان رسیده است. می‌توانید یک نسخه نمایشی تازه بسازید یا وارد حساب خود شوید.';
 const SIGNED_OUT_ELSEWHERE = 'از حساب کاربری خود در زبانه‌ای دیگر خارج شدید.';
@@ -30,6 +43,8 @@ interface AuthValue {
   unread: number;
   /** Persian notice shown on the login page (e.g. expired session). */
   notice: string | null;
+  /** Set while a platform admin uses this tab as a support session. */
+  support: MeResponse['support'];
   signIn: (payload: AuthPayload) => void;
   signOut: (opts?: { silent?: boolean }) => Promise<void>;
   refresh: () => Promise<void>;
@@ -48,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [unread, setUnread] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const [support, setSupport] = useState<MeResponse['support']>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
   const isDemoRef = useRef(false);
@@ -60,6 +76,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setOrg(null);
     setAi(null);
     setUnread(0);
+    setSupport(null);
     setStatus('anon');
   }, []);
 
@@ -76,6 +93,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setOrg(me.org);
       setAi(me.ai);
       setUnread(me.unread);
+      setSupport(me.support ?? null);
       setStatus('authed');
     } catch (err: any) {
       if (getToken() !== token) return;
@@ -94,10 +112,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const onUnauthorized = () => {
+    const onUnauthorized = (e: Event) => {
+      const detail = ((e as CustomEvent).detail || {}) as { code?: string | null; message?: string | null };
       const wasDemo = isDemoRef.current || lastSessionWasDemo();
       reset();
-      setNotice(wasDemo ? DEMO_EXPIRED_NOTICE : EXPIRED_NOTICE);
+      // Disabled account / suspended workspace: show the operator's explanation.
+      if ((detail.code === 'ACCOUNT_DISABLED' || detail.code === 'ORG_SUSPENDED') && detail.message) setNotice(detail.message);
+      else setNotice(wasDemo ? DEMO_EXPIRED_NOTICE : EXPIRED_NOTICE);
       if (window.location.pathname.startsWith('/app')) navigate('/login', { replace: true });
     };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
@@ -178,6 +199,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ai,
       unread,
       notice,
+      support,
       signIn,
       signOut,
       refresh,
@@ -186,7 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUnread,
       clearNotice: () => setNotice(null),
     }),
-    [status, user, org, ai, unread, notice, signIn, signOut, refresh]
+    [status, user, org, ai, unread, notice, support, signIn, signOut, refresh]
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;

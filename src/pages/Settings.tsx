@@ -406,7 +406,7 @@ function MessagesTab() {
 }
 
 function AiTab() {
-  const { ai, refresh } = useAuth();
+  const { ai, refresh, user } = useAuth();
   const canEdit = useCan('admin');
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; latencyMs: number; error: string | null } | null>(null);
@@ -459,22 +459,37 @@ function AiTab() {
         )}
       </Card>
       <Card>
-        <CardHeader title="راهنمای مدیر سامانه" subtitle="تنظیم از طریق متغیرهای محیطی سرور" />
-        <pre className="hv-latin text-left text-[12px] leading-[1.9] bg-[#1f2622] text-[#dff5e5] rounded-[12px] p-4 overflow-x-auto" dir="ltr">
-{`# Google Gemini
-AI_PROVIDER=gemini
-GEMINI_API_KEY=AIza...
-GEMINI_MODEL=gemini-3.5-flash-lite   # optional
-
-# OpenAI-compatible gateway (e.g. an Iranian provider)
-AI_PROVIDER=openai
-OPENAI_BASE_URL=https://api.example.ir/v1
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini`}
-        </pre>
-        <p className="text-[12.5px] text-ink-3 mt-3 leading-relaxed">
-          با <span className="hv-latin">AI_PROVIDER=auto</span> (پیش‌فرض) اگر کلید Gemini موجود باشد از آن و در غیر این صورت از سرویس سازگار با OpenAI استفاده می‌شود. کلیدها هرگز به مرورگر ارسال نمی‌شوند.
-        </p>
+        {user?.platformAdmin ? (
+          <>
+            <CardHeader title="مدیریت هوش مصنوعی" subtitle="شما مدیر سامانه هستید؛ کلیدها و رفتار هوش مصنوعی را از پنل مدیریت تنظیم کنید." />
+            <ul className="text-[13px] text-ink-2 leading-[2] list-disc pr-5">
+              <li>تا ۵ کلید Gemini یا سازگار با OpenAI با جابه‌جایی خودکار هنگام محدودیت</li>
+              <li>سقف درخواست در دقیقه/روز برای هر کلید و آزمایش اتصال</li>
+              <li>دستورالعمل‌های تحلیل، سطح سخت‌گیری و راهنمای تخصصی ۲۷ صنعت</li>
+            </ul>
+            <div className="flex flex-wrap gap-2 mt-4">
+              <Button icon={KeyRound} onClick={() => navigate('/admin/ai')}>
+                کلیدهای هوش مصنوعی
+              </Button>
+              <Button variant="secondary" icon={Sparkles} onClick={() => navigate('/admin/behavior')}>
+                رفتار هوش مصنوعی
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <CardHeader title="چه کسی هوش مصنوعی را تنظیم می‌کند؟" subtitle="مدیر سامانه (میزبان هویدا) از پنل مدیریت" />
+            <p className="text-[13px] text-ink-2 leading-[1.9]">
+              کلیدهای سرویس، جابه‌جایی خودکار بین آن‌ها و دستورالعمل‌های تحلیل در پنل مدیریت سامانه تنظیم می‌شود. اطلاعات کلیدها هرگز به مرورگر ارسال نمی‌شود.
+            </p>
+          </>
+        )}
+        <div className="mt-5 pt-4 border-t border-line-2">
+          <p className="text-[13px] font-bold text-ink mb-1.5">قالب‌های قابل تحلیل</p>
+          <p className="text-[12.5px] text-ink-3 leading-[1.9]">
+            PDF (متنی و اسکن‌شده)، Word (DOCX و DOC)، OpenDocument، RTF، عکس و اسکن (JPG، PNG، HEIC، TIFF، BMP، GIF، WebP، AVIF)، اکسل و CSV، پاورپوینت، صفحه وب، ایمیل (EML و MSG همراه پیوست‌ها)، EPUB، XPS، JSON و XML، فایل‌های فشرده ZIP و TAR و حتی رزومه صوتی یا ویدیویی.
+          </p>
+        </div>
       </Card>
     </div>
   );

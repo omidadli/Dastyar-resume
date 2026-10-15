@@ -10,11 +10,14 @@ import {
   LayoutDashboard,
   Library,
   LogOut,
+  Megaphone,
   Menu as MenuIcon,
   Plus,
   Search,
   Settings,
+  ShieldCheck,
   Sparkles,
+  Wrench,
   UserRound,
   Users,
   X,
@@ -23,6 +26,7 @@ import {
 import { HovidaLogo, HovidaMark } from '../brand/Logo';
 import { Link, navigate, useLocation } from '../../lib/router';
 import { useAuth } from '../../lib/auth';
+import { usePublicConfig } from '../../lib/config';
 import { useAnalysis } from '../../lib/analysis';
 import { useCompare } from '../../lib/compare';
 import { Button, IconButton, Menu, Monogram } from '../ui';
@@ -68,8 +72,9 @@ function AiStatusChip() {
 }
 
 function UserCard({ compact }: { compact?: boolean }) {
-  const { user, org, signOut } = useAuth();
+  const { user, org, signOut, support } = useAuth();
   if (!user || !org) return null;
+  const isPlatformAdmin = Boolean(user.platformAdmin) && !support;
   return (
     <Menu
       align="start"
@@ -83,6 +88,7 @@ function UserCard({ compact }: { compact?: boolean }) {
       items={[
         { label: 'حساب کاربری', icon: UserRound, onClick: () => navigate('/app/settings/account') },
         { label: 'تنظیمات سازمان', icon: Settings, onClick: () => navigate('/app/settings/org') },
+        ...(isPlatformAdmin ? [{ label: 'پنل مدیریت سامانه', icon: ShieldCheck, onClick: () => navigate('/admin') }] : []),
         'divider',
         { label: 'خروج از حساب', icon: LogOut, tone: 'danger', onClick: () => void signOut() },
       ]}
@@ -257,7 +263,7 @@ function MobileNav({ onMore }: { onMore: () => void }) {
 }
 
 function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { signOut, user, org } = useAuth();
+  const { signOut, user, org, support } = useAuth();
   if (!open) return null;
   const go = (to: string) => {
     onClose();
@@ -282,6 +288,7 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
             { to: '/app/talent', label: 'بانک استعداد', icon: Library },
             { to: '/app/reports', label: 'گزارش‌ها', icon: BarChart3 },
             { to: '/app/settings', label: 'تنظیمات', icon: Settings },
+            ...(user?.platformAdmin && !support ? [{ to: '/admin', label: 'پنل مدیریت سامانه', icon: ShieldCheck }] : []),
           ].map((it) => (
             <button key={it.to} onClick={() => go(it.to)} className="flex items-center gap-3 h-12 px-3 rounded-[12px] text-[15px] font-semibold text-ink-2 hover:bg-line-2">
               <it.icon className="w-5 h-5 text-ink-3" strokeWidth={1.8} />
@@ -304,6 +311,90 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
+function demoTimeLeft(expiresAt: string | null): string {
+  const ms = expiresAt ? new Date(expiresAt).getTime() - Date.now() : 0;
+  if (!Number.isFinite(ms) || ms <= 0) return 'به‌زودی';
+  const hours = Math.ceil(ms / 3600_000);
+  return hours >= 48 ? `حدود ${Math.round(hours / 24).toLocaleString('fa-IR')} روز دیگر` : `حدود ${hours.toLocaleString('fa-IR')} ساعت دیگر`;
+}
+
+const BANNER_TONES = {
+  info: 'bg-[#EAF2F7] text-[#24485E] border-[#D5E3EC]',
+  warning: 'bg-review-soft text-[#7A4A0B] border-review/25',
+  success: 'bg-brand-tint text-brand-stronger border-brand/20',
+} as const;
+
+/** Support session, maintenance notice and the operator's announcement. */
+function PlatformBanners() {
+  const cfg = usePublicConfig();
+  const { support, user, signOut } = useAuth();
+  const annKey = cfg.announcement?.text || '';
+  const [dismissed, setDismissed] = useState<string | null>(() => {
+    try {
+      return sessionStorage.getItem('hovida.announcement.dismissed');
+    } catch {
+      return null;
+    }
+  });
+  return (
+    <>
+      {support && (
+        <div className="bg-[#5B3A0A] text-white text-[12.5px]">
+          <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-2 text-center">
+            <span className="inline-flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#FCD34D]" />
+              نشست پشتیبانی: شما با حساب <b className="font-bold">{user?.name}</b> کار می‌کنید (گشوده‌شده توسط {support.adminName}). همه کارها به نام این کاربر ثبت می‌شود.
+            </span>
+            <button
+              onClick={async () => {
+                await signOut({ silent: true });
+                window.close();
+                navigate('/admin', { replace: true });
+              }}
+              className="font-bold text-[#FCD34D] hover:text-white underline-offset-4 hover:underline"
+            >
+              پایان نشست پشتیبانی
+            </button>
+          </div>
+        </div>
+      )}
+      {cfg.maintenance && (
+        <div className={`border-b text-[12.5px] ${BANNER_TONES.warning}`}>
+          <div className="flex items-center justify-center gap-2 px-4 py-2 text-center">
+            <Wrench className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              {cfg.maintenance}
+              {user?.platformAdmin ? ' (شما به‌عنوان مدیر سامانه همچنان دسترسی کامل دارید.)' : ''}
+            </span>
+          </div>
+        </div>
+      )}
+      {cfg.announcement && dismissed !== annKey && (
+        <div className={`border-b text-[12.5px] ${BANNER_TONES[cfg.announcement.tone]}`}>
+          <div className="flex items-center justify-center gap-2 px-4 py-2 text-center">
+            <Megaphone className="w-3.5 h-3.5 shrink-0" />
+            <span className="leading-relaxed">{cfg.announcement.text}</span>
+            <button
+              onClick={() => {
+                setDismissed(annKey);
+                try {
+                  sessionStorage.setItem('hovida.announcement.dismissed', annKey);
+                } catch {
+                  /* storage blocked */
+                }
+              }}
+              aria-label="بستن اطلاعیه"
+              className="w-6 h-6 rounded-md flex items-center justify-center opacity-70 hover:opacity-100"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function DemoBanner() {
   const { org, signOut } = useAuth();
   if (!org?.isDemo) return null;
@@ -312,7 +403,7 @@ function DemoBanner() {
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-2 text-center">
         <span className="inline-flex items-center gap-1.5">
           <Sparkles className="w-3.5 h-3.5 text-[#7ee29a]" />
-          شما در <b className="font-bold">نسخه نمایشی</b> هستید؛ همه داده‌ها ساختگی‌اند و این فضای کاری پس از ۲۴ ساعت پاک می‌شود.
+          شما در <b className="font-bold">نسخه نمایشی</b> هستید؛ همه داده‌ها ساختگی‌اند و این فضای کاری {demoTimeLeft(org.demoExpiresAt)} پاک می‌شود.
         </span>
         <button
           onClick={async () => {
@@ -356,6 +447,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-canvas" dir="rtl">
       <Sidebar />
       <div className="lg:pr-[256px] min-h-screen flex flex-col">
+        <PlatformBanners />
         <DemoBanner />
         <Topbar onSearch={() => setSearchOpen(true)} onBell={() => setBellOpen(true)} onMenu={() => setMoreOpen(true)} />
         <main className={`flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-1 pb-28 ${trayVisible ? 'lg:pb-28' : 'lg:pb-12'}`}>{children}</main>

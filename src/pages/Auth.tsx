@@ -4,6 +4,7 @@ import { HovidaLogo, HovidaMark } from '../components/brand/Logo';
 import { Button, Callout, TextInput } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { usePublicConfig } from '../lib/config';
 import { Link, navigate, useLocation } from '../lib/router';
 import { useDemoLogin } from '../lib/useDemo';
 import { useTitle } from '../lib/useTitle';
@@ -51,13 +52,7 @@ function AuthLayout({ children, title, subtitle }: { children: React.ReactNode; 
 
 function DemoButton() {
   const demo = useDemoLogin();
-  const [enabled, setEnabled] = useState(true);
-  useEffect(() => {
-    api.auth
-      .config()
-      .then((c) => setEnabled(c.demo))
-      .catch(() => {});
-  }, []);
+  const { demo: enabled, demoHours } = usePublicConfig();
   if (!enabled) return null;
   return (
     <>
@@ -69,7 +64,9 @@ function DemoButton() {
       <Button variant="secondary" block size="lg" icon={Sparkles} onClick={demo.start} loading={demo.loading}>
         ورود به نسخه نمایشی
       </Button>
-      <p className="text-[12px] text-ink-3 text-center mt-2.5 leading-relaxed">یک فضای کاری نمونه با داده‌های ساختگی که پس از ۲۴ ساعت پاک می‌شود.</p>
+      <p className="text-[12px] text-ink-3 text-center mt-2.5 leading-relaxed">
+        یک فضای کاری نمونه با داده‌های ساختگی که پس از {demoHours.toLocaleString('fa-IR')} ساعت پاک می‌شود.
+      </p>
     </>
   );
 }
@@ -163,6 +160,40 @@ export function SignupPage() {
   };
 
   const fieldError = (f: string) => (error?.field === f ? error.message : null);
+  const { signup: signupOpen, supportEmail } = usePublicConfig();
+
+  if (!signupOpen) {
+    return (
+      <AuthLayout
+        title="ثبت‌نام فعلاً بسته است"
+        subtitle={
+          <>
+            ساخت فضای کاری تازه موقتاً متوقف شده است. اگر حساب دارید{' '}
+            <Link to="/login" className="font-bold text-brand-ink hover:underline">
+              وارد شوید
+            </Link>
+            .
+          </>
+        }
+      >
+        <Callout tone="info" title="دریافت دسترسی">
+          برای ساخت فضای کاری سازمان خود
+          {supportEmail ? (
+            <>
+              {' '}به{' '}
+              <a href={`mailto:${supportEmail}`} className="font-bold underline hv-latin">
+                {supportEmail}
+              </a>{' '}
+              پیام دهید.
+            </>
+          ) : (
+            ' با تیم هویدا تماس بگیرید.'
+          )}
+        </Callout>
+        <DemoButton />
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

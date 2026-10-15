@@ -2,6 +2,7 @@ import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { normalizePersianText } from './normalizeFa';
 import { assemblePageText, type PdfTextItem } from './pdfLayout';
 import { rtfToText } from './rtf';
+import { docxText, odfText } from './officeText';
 
 /** Lazy loaded to avoid bloating initial bundle on page load */
 let mammothPromise: Promise<any> | null = null;
@@ -232,6 +233,16 @@ async function extractFromPdfWithCoordinates(buffer: ArrayBuffer): Promise<strin
  * Extract text from DOCX using mammoth with fallback to direct XML extraction
  */
 async function extractFromDocx(buffer: ArrayBuffer): Promise<string> {
+  // Shared extractor (also used on the server): body + headers/footers (where
+  // contact details often are) + text boxes exactly once.
+  try {
+    const JSZip = await loadJSZip();
+    const zip: any = await withTimeout(new JSZip().loadAsync(buffer.slice(0)), 15_000, 'باز کردن فایل Word');
+    const text = await docxText(zip);
+    if (text.trim().length > 30) return text;
+  } catch (err) {
+    console.warn('DOCX XML extraction failed, trying mammoth:', err);
+  }
   try {
     const mammoth = await loadMammoth();
     const result: any = await withTimeout(
@@ -286,19 +297,7 @@ async function extractFromOdt(buffer: ArrayBuffer): Promise<string> {
   try {
     const JSZip = await loadJSZip();
     const zip: any = await new JSZip().loadAsync(buffer.slice(0));
-    const xml: string | undefined = await zip.files['content.xml']?.async('string');
-    if (!xml) return '';
-    return xml
-      .replace(/<text:(?:s|tab)[^>]*\/>/g, ' ')
-      .replace(/<text:line-break[^>]*\/>/g, '\n')
-      .replace(/<\/text:(?:p|h)>/g, '\n')
-      .replace(/<[^>]+>/g, '')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&apos;/g, "'")
-      .replace(/&amp;/g, '&')
-      .trim();
+    return await odfText(zip);
   } catch (err) {
     console.warn('ODT extraction failed:', err);
     return '';
@@ -472,14 +471,11 @@ export async function processUploadFiles(
         const loaded: any = await withTimeout(zip.loadAsync(f), 120_000, 'باز کردن فایل فشرده');
         const entries = Object.keys(loaded.files);
 
-        // Filter valid resume entries
+        // Every real file is a candidate (the server reads any format);
+        // only folders and OS junk are skipped.
         const validKeys = entries.filter((relPath) => {
           const entry = loaded.files[relPath];
-          if (entry.dir || relPath.includes('__MACOSX') || relPath.startsWith('.') || relPath.includes('/.')) {
-            return false;
-          }
-          const entryExt = getExtension(entry.name);
-          return ['pdf', 'docx', 'doc', 'txt', 'rtf', 'md', 'jpg', 'jpeg', 'png', 'webp', 'heic', 'heif', 'bmp', 'tiff', 'tif', 'odt'].includes(entryExt);
+          return !entry.dir && !JUNK_ENTRY.test(relPath);
         });
 
         let count = 0;
@@ -491,7 +487,7 @@ export async function processUploadFiles(
             type: blob.type || 'application/octet-stream',
             lastModified: zipEntry.date?.getTime() || Date.now(),
           });
-          flattened.push(unpackedFile);
+          flattened.push(await normalizeImageFile(unpackedFile));
           count++;
           if (onProgress) {
             onProgress(count, validKeys.length, innerFileName);
@@ -505,9 +501,70 @@ export async function processUploadFiles(
         flattened.push(f);
       }
     } else {
-      flattened.push(f);
+      flattened.push(await normalizeImageFile(f));
     }
   }
 
   return flattened;
+}
+
+const JUNK_ENTRY = /(^|\/)(__MACOSX|\.DS_Store|Thumbs\.db|desktop\.ini)(\/|$)|(^|\/)\./i;
+
+/** Images the AI can't take and the server can't decode, but the browser can. */
+const BROWSER_CONVERT = ['avif', 'svg', 'ico', 'cur'];
+const BIG_PHOTO_BYTES = 8 * 1024 * 1024;
+const MAX_SIDE = 2400;
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const timer = setTimeout(() => reject(new Error('image timeout')), 15_000);
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve(img);
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
+      reject(new Error('image decode failed'));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * AVIF / SVG / ICO → JPEG, and huge phone photos → a sharp 2400px JPEG, so
+ * every picture reaches the AI in a format it reads. Anything the browser
+ * can't decode (HEIC on Chrome, TIFF) is left for the server to convert.
+ */
+export async function normalizeImageFile(file: File): Promise<File> {
+  const ext = getExtension(file.name);
+  const convert = BROWSER_CONVERT.includes(ext);
+  const big = ['jpg', 'jpeg', 'png', 'webp'].includes(ext) && file.size > BIG_PHOTO_BYTES;
+  if ((!convert && !big) || typeof document === 'undefined') return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await loadImage(url);
+    let w = img.naturalWidth || 1654;
+    let h = img.naturalHeight || 2339; // SVG without a size: an A4 page
+    // Vector drawings render at a legible 1800px; rasters only ever shrink.
+    const target = ext === 'svg' ? 1800 : Math.min(MAX_SIDE, Math.max(w, h));
+    const factor = target / Math.max(w, h);
+    w *= factor;
+    h *= factor;
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w));
+    canvas.height = Math.max(1, Math.round(h));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob: Blob | null = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.88));
+    if (!blob) return file;
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, '')}.jpg`, { type: 'image/jpeg', lastModified: file.lastModified });
+  } catch {
+    return file; // the server still reads what it can (e.g. SVG text)
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }

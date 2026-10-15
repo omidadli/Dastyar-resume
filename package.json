@@ -13,7 +13,8 @@
     "test": "tsx scripts/unit.test.ts && tsx scripts/ingest.test.ts && tsx scripts/behavior.test.ts && tsx scripts/keypool.test.ts && tsx scripts/server.test.ts && tsx scripts/api-timeout.test.ts",
     "test:api": "node scripts/smoke.mjs",
     "test:mount": "vite build --config vite.mount.config.ts && node scripts/run-mount.mjs",
-    "brand": "python3 scripts/brand/make_logo.py"
+    "brand": "python3 scripts/brand/make_logo.py",
+    "test:admin": "tsx scripts/admin-api.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -351,6 +351,11 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
           <EngineBadge engine={record.engine} />
           <ConfidenceBadge confidence={record.confidence} />
           {record.inBank && <Chip tone="brand" icon={Archive}>بانک استعداد</Chip>}
+          {record.analysisMeta?.format && (
+            <Chip tone="outline" icon={FileText} title="قالب فایلی که هویدا خواند">
+              {record.analysisMeta.format}
+            </Chip>
+          )}
         </div>
         <div className="flex items-center gap-2 mt-4">
           <Button variant={inCompare ? 'soft' : 'secondary'} size="sm" icon={Columns3} onClick={compareClick} className="flex-1">
@@ -411,6 +416,16 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
       <div className={`${pad} py-5`}>
         {tab === 'summary' && (
           <div className="flex flex-col gap-6">
+            {record.flags?.multipleCandidates && (
+              <Callout tone="warning" title="چند رزومه در یک فایل">
+                این فایل رزومه بیش از یک نفر را دارد؛ هویدا رزومه اول (اصلی) را ارزیابی کرد. برای سنجش بقیه، هر رزومه را جداگانه بارگذاری کنید.
+              </Callout>
+            )}
+            {record.flags?.partiallyReadable && (
+              <Callout tone="info" title="بخشی از سند خوانا نبود">
+                کیفیت اسکن یا عکس در بخش‌هایی پایین بود؛ اطمینان این تحلیل کمتر است. فایل اصلی را هم نگاه کنید.
+              </Callout>
+            )}
             {insufficient ? (
               <Callout tone="warning" title={meta.label}>
                 {record.unjudgeableReason || record.errorMessage || meta.hint}
@@ -592,6 +607,17 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
                 </div>
                 <IconButton icon={Download} label="دانلود" size="sm" onClick={download} disabled={!record.filePath} />
               </div>
+              {record.analysisMeta && (record.analysisMeta.format || record.analysisMeta.industry || record.analysisMeta.warnings.length > 0) && (
+                <div className="mt-3 rounded-[12px] bg-canvas border border-line-2 p-3 text-[12.5px] text-ink-2 leading-relaxed">
+                  <p className="font-bold text-ink mb-1">نحوه خواندن و تحلیل</p>
+                  {record.analysisMeta.format && <p>قالب: {record.analysisMeta.format}</p>}
+                  {record.analysisMeta.industry && <p>راهنمای تخصصی به‌کاررفته: {record.analysisMeta.industry}</p>}
+                  {record.analysisMeta.behaviorVersion && <p className="text-ink-3">نسخه دستورالعمل هوش مصنوعی: {faNumber(record.analysisMeta.behaviorVersion)}</p>}
+                  {record.analysisMeta.warnings.map((w, i) => (
+                    <p key={i} className="text-ink-3">• {w}</p>
+                  ))}
+                </div>
+              )}
             </section>
             <section>
               <SectionTitle icon={Archive}>بانک استعداد</SectionTitle>

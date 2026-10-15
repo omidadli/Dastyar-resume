@@ -469,6 +469,9 @@ export function currentBehavior(): BehaviorConfig {
 }
 
 export function saveBehavior(input: unknown, by: string, note = ''): BehaviorConfig {
+  // The first edit also records the shipped defaults as version 1, so they
+  // stay restorable from the history list.
+  if (!storedBehavior() && !behaviorHistory().length) saveBehaviorConfig(defaultBehavior(), 'تنظیمات پیش‌فرض هویدا');
   const current = currentBehavior();
   const next = sanitizeBehavior(input, current);
   next.version = current.version + 1;

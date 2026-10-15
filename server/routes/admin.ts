@@ -272,8 +272,10 @@ export function adminRoutes(): express.Router {
         return res.status(400).json({ error: 'فضای کاری خودتان را نمی‌توانید تعلیق کنید.' });
       }
       const reason = str(req.body?.suspendedReason, 300);
+      // Sessions are kept on purpose: the next request of each member is
+      // refused with the suspension reason (requireAuth) instead of a vague
+      // «session expired», and the session is dropped right then.
       db.setOrgSuspended(org.id, req.body.suspended, reason || null);
-      if (req.body.suspended) for (const u of db.listMembers(org.id)) if (!isPlatformAdmin(u)) db.deleteSessionsOfUser(u.id);
       log(req, req.body.suspended ? 'org.suspend' : 'org.unsuspend', org.name, reason);
     }
     res.json({ org: orgRow(db.getOrg(org.id)!) });
@@ -369,7 +371,7 @@ export function adminRoutes(): express.Router {
       if (target.id === me.id) return res.status(400).json({ error: 'حساب خودتان را نمی‌توانید غیرفعال کنید.' });
       patch.disabled = req.body.disabled;
       changes.push(req.body.disabled ? 'غیرفعال شد' : 'فعال شد');
-      if (req.body.disabled) db.deleteSessionsOfUser(target.id);
+      // Open sessions end on their next request, with the «disabled» message.
     }
     if (typeof req.body?.platformAdmin === 'boolean' && req.body.platformAdmin !== Boolean(target.platformAdmin)) {
       if (target.id === me.id && !req.body.platformAdmin) return res.status(400).json({ error: 'نقش مدیر سامانه را از خودتان نمی‌توانید بگیرید.' });

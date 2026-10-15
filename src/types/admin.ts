@@ -115,6 +115,7 @@ export interface SystemSettings {
 /** Public, unauthenticated subset (GET /api/auth/config). */
 export interface PublicConfig {
   demo: boolean;
+  demoHours: number;
   signup: boolean;
   announcement: { text: string; tone: BannerTone } | null;
   maintenance: string | null;

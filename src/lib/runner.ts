@@ -1,13 +1,17 @@
 import type { ResumeFileItem, ScreeningProgressUpdate } from '../types/screening';
 import { extractResumeContent, type TextExtractionResult } from './extractText';
 import { api, fileToBase64 } from './api';
+import { assessText } from './officeText';
+import { getPublicConfig } from './config';
 
 /**
- * Above this size the original document is not sent inline with the
- * evaluation request (its text still is) — keeps a single huge scan from
- * blowing up the payload and stalling the queue.
+ * The original file travels with the evaluation when the browser could not
+ * extract trustworthy text itself; the limit is the per-file size the
+ * platform admin allows (/admin › تنظیمات سامانه).
  */
-export const MAX_INLINE_FILE_BYTES = 20 * 1024 * 1024;
+export function maxInlineFileBytes(): number {
+  return getPublicConfig().maxFileMb * 1024 * 1024;
+}
 
 /** If nothing has moved for this long, tell the user instead of spinning silently. */
 const STALL_WARNING_MS = 60_000;
@@ -213,10 +217,12 @@ export async function runJobAnalysis(
       while (next < items.length) {
         throwIfAborted();
         const item = items[next++];
-        // With clean extracted text the base64 file is NOT sent (≈5KB vs MBs);
-        // scans/images without text go multimodal so the AI can read them.
-        const hasCleanText = Boolean(item.extractedText && item.extractedText.trim().length >= 40);
-        const needAttachment = !hasCleanText && item.file && item.file.size <= MAX_INLINE_FILE_BYTES;
+        // With clean extracted text the base64 file is NOT sent (≈5KB vs MBs).
+        // Everything else — scans, photos, PowerPoint/Excel, e-mails, audio,
+        // unknown formats and PDFs whose text layer is garbled — goes to the
+        // server's universal intake, which reads the original.
+        const hasCleanText = assessText(item.extractedText || '').usable;
+        const needAttachment = !hasCleanText && item.file && item.file.size <= maxInlineFileBytes();
         const attachment = needAttachment && item.file ? await fileToBase64(item.file).catch(() => undefined) : undefined;
 
         if (item.status === 'unjudgeable') {
@@ -268,7 +274,7 @@ export async function runJobAnalysis(
           }
           // Text-only fast path: upload the original quietly afterwards so it
           // stays available for preview/download without blocking the queue.
-          if (hasCleanText && item.file && item.file.size <= MAX_INLINE_FILE_BYTES) {
+          if (hasCleanText && item.file && item.file.size <= maxInlineFileBytes()) {
             const file = item.file;
             const recId = record.id;
             fileToBase64(file)

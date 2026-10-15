@@ -31,6 +31,22 @@ import type {
   TeamMember,
   UserPublic,
 } from '../types/app';
+import type {
+  AdminMe,
+  AdminOrgRow,
+  AdminOverview,
+  AdminUserRow,
+  AiCallLog,
+  AiKeyInput,
+  AiSettingsPublic,
+  AuditItem,
+  BehaviorConfig,
+  BehaviorPayload,
+  KeyStrategy,
+  LabResult,
+  PublicConfig,
+  SystemSettings,
+} from '../types/admin';
 
 export const TOKEN_KEY = 'hovida.session.v1';
 const SESSION_KIND_KEY = 'hovida.session.kind';
@@ -148,7 +164,9 @@ async function request<T>(method: string, url: string, body?: unknown, opts: Req
     // Only a rejection of the *current* session signs the tab out: a late 401
     // for a token that a fresh login has since replaced must not wipe it.
     if (res.status === 401 && token && token === getToken()) {
-      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { code: (data as any)?.code ?? null } }));
+      window.dispatchEvent(
+        new CustomEvent(UNAUTHORIZED_EVENT, { detail: { code: (data as any)?.code ?? null, message: (data as any)?.error ?? null } })
+      );
     }
     throw new ApiError((data as any)?.error || `خطای سرور (${res.status})`, res.status, data);
   }
@@ -199,7 +217,7 @@ export interface FileUrlInfo {
 
 export const api = {
   auth: {
-    config: () => get<{ demo: boolean }>('/api/auth/config', { timeoutMs: 10_000, anonymous: true }),
+    config: () => get<PublicConfig>('/api/auth/config', { timeoutMs: 10_000, anonymous: true }),
     signup: (b: { orgName: string; name: string; email: string; password: string }) =>
       post<AuthPayload>('/api/auth/signup', b, { anonymous: true }),
     login: (b: { email: string; password: string }) => post<AuthPayload>('/api/auth/login', b, { anonymous: true }),
@@ -299,6 +317,64 @@ export const api = {
     activity: (limit = 30) => get<ActivityFeed>(`/api/activity?limit=${limit}`),
     markSeen: () => post<{ unread: number }>('/api/activity/seen'),
   },
+};
+
+export interface KeyTestResult {
+  id: string;
+  label: string;
+  ok: boolean;
+  latencyMs: number;
+  model: string;
+  error: string | null;
+}
+
+/** Platform administration (/admin) — platform admins only. */
+export const adminApi = {
+  me: () => get<AdminMe>('/api/admin/me', { timeoutMs: 15_000 }),
+  claim: (code: string) => post<{ ok: boolean }>('/api/admin/claim', { code }),
+  overview: () => get<AdminOverview>('/api/admin/overview'),
+  orgs: (p: { q?: string; filter?: string } = {}) => get<{ items: AdminOrgRow[] }>(`/api/admin/orgs${qs(p)}`),
+  updateOrg: (id: string, b: { name?: string; suspended?: boolean; suspendedReason?: string }) => patch<{ org: AdminOrgRow }>(`/api/admin/orgs/${id}`, b),
+  extendDemo: (id: string, hours: number) => post<{ org: AdminOrgRow }>(`/api/admin/orgs/${id}/extend-demo`, { hours }),
+  convertDemo: (id: string) => post<{ org: AdminOrgRow }>(`/api/admin/orgs/${id}/convert-demo`),
+  deleteOrg: (id: string, confirm: string) => request<{ ok: boolean }>('DELETE', `/api/admin/orgs/${id}`, { confirm }),
+  support: (id: string) => post<{ token: string; expiresAt: number; user: UserPublic; org: OrgPublic }>(`/api/admin/orgs/${id}/support`),
+  users: (p: { q?: string; filter?: string; orgId?: string } = {}) => get<{ items: AdminUserRow[] }>(`/api/admin/users${qs(p)}`),
+  updateUser: (id: string, b: { name?: string; role?: Role; disabled?: boolean; platformAdmin?: boolean }) => patch<{ user: AdminUserRow }>(`/api/admin/users/${id}`, b),
+  resetPassword: (id: string) => post<{ tempPassword: string }>(`/api/admin/users/${id}/reset-password`),
+  revokeSessions: (id: string) => post<{ user: AdminUserRow }>(`/api/admin/users/${id}/revoke-sessions`),
+  deleteUser: (id: string) => del<{ ok: boolean }>(`/api/admin/users/${id}`),
+  ai: () => get<AiSettingsPublic>('/api/admin/ai'),
+  updateAi: (b: Partial<{ enabled: boolean; strategy: KeyStrategy; useEnvKeys: boolean; temperature: number; fastTimeoutSec: number; deepTimeoutSec: number }>) =>
+    patch<AiSettingsPublic>('/api/admin/ai', b),
+  addKey: (b: AiKeyInput) => post<AiSettingsPublic>('/api/admin/ai/keys', b),
+  updateKey: (id: string, b: AiKeyInput) => patch<AiSettingsPublic>(`/api/admin/ai/keys/${id}`, b),
+  deleteKey: (id: string) => del<AiSettingsPublic>(`/api/admin/ai/keys/${id}`),
+  reorderKeys: (ids: string[]) => post<AiSettingsPublic>('/api/admin/ai/keys/reorder', { ids }),
+  testKey: (id: string) => post<{ result: KeyTestResult; ai: AiSettingsPublic }>(`/api/admin/ai/keys/${id}/test`, {}, { timeoutMs: 60_000 }),
+  resetKey: (id: string) => post<AiSettingsPublic>(`/api/admin/ai/keys/${id}/reset`),
+  calls: (limit = 200) => get<{ items: AiCallLog[] }>(`/api/admin/ai/calls?limit=${limit}`),
+  behavior: () => get<BehaviorPayload>('/api/admin/behavior'),
+  saveBehavior: (config: BehaviorConfig, note: string) => put<BehaviorPayload>('/api/admin/behavior', { config, note }),
+  resetBehavior: () => post<BehaviorPayload>('/api/admin/behavior/reset'),
+  restoreBehavior: (version: number) => post<BehaviorPayload>('/api/admin/behavior/restore', { version }),
+  previewBehavior: (b: { config?: BehaviorConfig; roleTitle: string; departmentName: string; extraNotes?: string; deep?: boolean }) =>
+    post<{ industry: { id: string; name: string; score: number } | null; systemPrompt: string }>('/api/admin/behavior/preview', b),
+  lab: (b: {
+    config?: BehaviorConfig;
+    jobId?: string;
+    roleTitle?: string;
+    departmentName?: string;
+    extraNotes?: string;
+    resumeText?: string;
+    fileName?: string;
+    fileBase64?: string;
+    mode?: 'standard' | 'deep';
+  }) => post<LabResult>('/api/admin/behavior/lab', b, { timeoutMs: 270_000 }),
+  jobs: () => get<{ items: Array<{ id: string; orgId: string | null; orgName: string; title: string; departmentName: string }> }>('/api/admin/jobs'),
+  system: () => get<SystemSettings>('/api/admin/system'),
+  updateSystem: (b: Partial<SystemSettings>) => patch<SystemSettings>('/api/admin/system', b),
+  audit: (p: { q?: string; limit?: number } = {}) => get<{ items: AuditItem[] }>(`/api/admin/audit${qs(p)}`),
 };
 
 export function fileToBase64(file: File | Blob): Promise<string> {

@@ -102,6 +102,7 @@ export default function AiKeys() {
       const { result, ai } = await adminApi.testKey(id);
       setResults((r) => ({ ...r, [id]: result }));
       setData(ai);
+      calls.reload();
       toast(result.ok ? `«${result.label}» پاسخ داد (${faNumber(result.latencyMs)} میلی‌ثانیه).` : result.error || 'آزمایش ناموفق بود.', result.ok ? 'success' : 'error');
     } catch (err: any) {
       toast(err?.message || 'آزمایش انجام نشد.', 'error');
@@ -424,6 +425,12 @@ export default function AiKeys() {
   );
 }
 
+/** The provider's own message, without the Persian reason already shown above it. */
+function technicalDetail(lastError: string): string {
+  const i = lastError.indexOf(' — ');
+  return (i >= 0 ? lastError.slice(i + 3) : lastError).slice(0, 160);
+}
+
 function TimeoutInput({ label, value, min, max, onSave }: { label: string; value: number; min: number; max: number; onSave: (v: number) => void }) {
   const [v, setV] = useState(String(value));
   useEffect(() => setV(String(value)), [value]);
@@ -518,7 +525,14 @@ function KeyCard({
               {runtime.cooldownUntil ? ` — بازگشت خودکار ${faIn(runtime.cooldownUntil)}` : ''}
             </p>
           )}
-          {runtime?.lastError && health !== 'ready' && <p className="mt-1.5 text-[11.5px] text-ink-3 leading-relaxed line-clamp-2 hv-latin text-right">{runtime.lastError}</p>}
+          {runtime?.lastError && health !== 'ready' && (
+            <p className="mt-1.5 text-[11.5px] text-ink-3 leading-relaxed">
+              جزئیات فنی:{' '}
+              <span dir="ltr" className="hv-latin inline-block max-w-full truncate align-bottom">
+                {technicalDetail(runtime.lastError)}
+              </span>
+            </p>
+          )}
           {result && (
             <p className={`mt-2 text-[12.5px] font-semibold ${result.ok ? 'text-high-ink' : 'text-low-ink'}`}>
               آزمایش: {result.ok ? `موفق — ${faNumber(result.latencyMs)} میلی‌ثانیه (${result.model})` : result.error}

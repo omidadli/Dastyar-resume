@@ -1120,6 +1120,18 @@ export function finalizeEvaluation(
   else if (score >= understanding.thresholds.review) recommendation = 'REVIEW';
   else recommendation = 'REJECT';
 
+  // Not a resume: whatever the model guessed about «the candidate» is noise.
+  if (flags.notResume) {
+    facts.yearsExperience = null;
+    facts.education = null;
+    facts.lastRole = null;
+    facts.skills = [];
+    facts.expectedSalary = null;
+    contact.phone = null;
+    contact.email = null;
+    contact.city = null;
+  }
+
   const deepFindings: DeepFindings | null = options?.deep
     ? (() => {
         const list = (v: any, limit: number) =>
@@ -1136,7 +1148,7 @@ export function finalizeEvaluation(
     : null;
 
   return {
-    candidateName: str(raw.candidateName),
+    candidateName: flags.notResume ? null : str(raw.candidateName),
     contact,
     facts,
     criterionScores,
@@ -1149,7 +1161,7 @@ export function finalizeEvaluation(
     strengths,
     weaknesses,
     knockoutMisses,
-    tags: arr<any>(raw.tags).map((t) => String(t)).filter(Boolean).slice(0, 6),
+    tags: flags.notResume ? [] : arr<any>(raw.tags).map((t) => String(t)).filter(Boolean).slice(0, 6),
     bankSuggested: Boolean(raw.bankSuggested) && !flags.notResume,
     flags,
     deepFindings,

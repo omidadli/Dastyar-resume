@@ -24,14 +24,14 @@ export function MiniStat({ icon: Icon, label, value, note, tone = 'neutral' }: {
     low: 'bg-low-soft text-low-ink',
   }[tone];
   return (
-    <div className="hv-card p-4 flex items-start gap-3">
-      <span className={`w-10 h-10 rounded-[12px] flex items-center justify-center shrink-0 ${chip}`}>
-        <Icon className="w-5 h-5" strokeWidth={1.8} />
+    <div className="hv-card p-3 sm:p-4 flex flex-col sm:flex-row items-start gap-2 sm:gap-3">
+      <span className={`w-8 h-8 sm:w-10 sm:h-10 rounded-[10px] sm:rounded-[12px] flex items-center justify-center shrink-0 ${chip}`}>
+        <Icon className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.8} />
       </span>
       <div className="min-w-0">
-        <p className="text-[12px] text-ink-3 font-medium">{label}</p>
-        <p className="text-[21px] font-extrabold text-ink leading-tight mt-1 hv-num">{value}</p>
-        {note && <p className="text-[11.5px] text-ink-3 mt-1 leading-snug">{note}</p>}
+        <p className="text-[12px] text-ink-3 font-medium leading-snug">{label}</p>
+        <p className="text-[18px] sm:text-[21px] font-extrabold text-ink leading-tight mt-1 hv-num">{value}</p>
+        {note && <p className="text-[11px] sm:text-[11.5px] text-ink-3 mt-1 leading-snug">{note}</p>}
       </div>
     </div>
   );

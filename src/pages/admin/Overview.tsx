@@ -4,7 +4,7 @@ import { Button, Card, CardHeader, Callout, ErrorState, Skeleton } from '../../c
 import { adminApi } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
 import { navigate } from '../../lib/router';
-import { faNumber } from '../../lib/format';
+import { faNumber, toPersianDigits } from '../../lib/format';
 import { AdminHeader, MiniStat, Row, faBytes, faDateTime } from './shared';
 
 export default function Overview() {
@@ -72,7 +72,7 @@ export default function Overview() {
           note={ai.cooling ? `${faNumber(ai.cooling)} کلید موقتاً در استراحت` : 'همه کلیدها در دسترس'}
           tone={ai.ready ? 'brand' : 'review'}
         />
-        <MiniStat icon={BrainCircuit} label="درخواست‌های امروز به هوش مصنوعی" value={faNumber(ai.callsToday)} note={ai.failuresToday ? `${faNumber(ai.failuresToday)} خطا (با جابه‌جایی خودکار کلید)` : 'بدون خطا'} />
+        <MiniStat icon={BrainCircuit} label="درخواست‌های هوش مصنوعی امروز" value={faNumber(ai.callsToday)} note={ai.failuresToday ? `${faNumber(ai.failuresToday)} خطا (با جابه‌جایی خودکار کلید)` : 'بدون خطا'} />
         <MiniStat icon={AlertTriangle} label="اطلاعات ناکافی / تحلیل محلی" value={`${faNumber(data.resumes.unjudgeable)} / ${faNumber(data.resumes.localEngine)}`} note={`${faNumber(data.resumes.aiEngine)} رزومه با هوش مصنوعی`} tone="review" />
         <MiniStat icon={HardDrive} label="فضای ذخیره‌سازی" value={faBytes(data.storageBytes)} note={`${faNumber(data.orgs.suspended)} فضای کاری معلق`} />
       </div>
@@ -82,7 +82,7 @@ export default function Overview() {
           <CardHeader title="فعالیت ۱۴ روز اخیر" subtitle="رزومه‌های تحلیل‌شده و فضاهای کاری تازه در هر روز" icon={Activity} />
           <div className="mt-4 flex items-end gap-1.5 h-[170px]" role="img" aria-label="نمودار رزومه‌های روزانه">
             {data.daily.map((d) => (
-              <div key={d.day} className="flex-1 flex flex-col items-center gap-1 min-w-0 h-full justify-end" title={`${d.day}: ${d.resumes} رزومه، ${d.signups} ثبت‌نام`}>
+              <div key={d.day} className="flex-1 flex flex-col items-center gap-1 min-w-0 h-full justify-end" title={`${toPersianDigits(d.day)}: ${faNumber(d.resumes)} رزومه، ${faNumber(d.signups)} ثبت‌نام`}>
                 <span className="text-[10px] text-ink-3 hv-num">{d.resumes ? faNumber(d.resumes) : ''}</span>
                 <div className="w-full rounded-t-[5px] bg-brand/80" style={{ height: `${Math.max(2, (d.resumes / maxDaily) * 130)}px` }} />
                 <span className={`w-1.5 h-1.5 rounded-full ${d.signups ? 'bg-review' : 'bg-transparent'}`} />
@@ -90,8 +90,8 @@ export default function Overview() {
             ))}
           </div>
           <div className="flex justify-between text-[10.5px] text-ink-4 mt-1.5 hv-num">
-            <span>{data.daily[0]?.day}</span>
-            <span>{data.daily[data.daily.length - 1]?.day}</span>
+            <span>{toPersianDigits(data.daily[0]?.day || '')}</span>
+            <span>{toPersianDigits(data.daily[data.daily.length - 1]?.day || '')}</span>
           </div>
           <p className="text-[11.5px] text-ink-3 mt-2 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-review" /> روزهایی که فضای کاری تازه ساخته شد

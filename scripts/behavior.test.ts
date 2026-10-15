@@ -134,6 +134,13 @@ async function main() {
     'ai'
   );
   assert(nr.flags.notResume === true && nr.score === 0 && nr.recommendation === 'REJECT' && nr.meta?.documentType === 'certificate', 'certificate → notResume, score 0');
+  const nr2 = finalizeEvaluation(
+    { document: { isResume: false, type: 'certificate' }, candidateName: 'علی', facts: { yearsExperience: 6, lastRole: 'سرپرست فروش', skills: ['CRM'] }, contact: { email: 'a@b.c' }, tags: ['فروش'], criterionScores: [] },
+    understanding,
+    {},
+    'ai'
+  );
+  assert(nr2.candidateName === null && nr2.facts.yearsExperience === null && nr2.facts.skills.length === 0 && nr2.contact.email === null && nr2.tags.length === 0, 'non-resume: guessed candidate facts are cleared');
   assert(db.unjudgeableReasonOf(nr)?.includes('گواهی‌نامه') === true, 'Persian reason names the document type', db.unjudgeableReasonOf(nr) || '');
   const pf = finalizeEvaluation({ document: { isResume: false, type: 'portfolio' }, score: 60, criterionScores: [] }, understanding, {}, 'ai');
   assert(!pf.flags.notResume, 'a portfolio is still judged');

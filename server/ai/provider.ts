@@ -85,6 +85,16 @@ function ensurePoolLoaded() {
   });
 }
 
+/** Shutdown: hand pending key health/usage to the store before it is flushed. */
+export function flushAiState() {
+  if (!poolLoaded) return;
+  if (persistTimer) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  db.setAiStatsBlob(pool.exportState());
+}
+
 // ------------------------------------------------------------------- calls ----
 
 const CALL_LOG_CAP = 400;
@@ -363,6 +373,9 @@ function geminiClient(e: PoolEntry): GoogleGenAI {
   return client;
 }
 
+/** Models that rejected our thinking config (base URL|model) — sent without it from then on. */
+const noThinking = new Set<string>();
+
 function thinkingFor(model: string, deep: boolean): Record<string, unknown> | undefined {
   if (/^gemini-3/.test(model) || /latest$/.test(model)) {
     return { thinkingConfig: { thinkingLevel: deep ? ThinkingLevel.HIGH : ThinkingLevel.LOW } };
@@ -388,36 +401,49 @@ async function callGemini(
     : prompt;
   let lastError: any = null;
   for (const model of models) {
-    const remaining = deadline - Date.now();
-    if (remaining < 1500) break;
-    const controller = new AbortController();
-    try {
-      const res = await withTimeout(
-        client.models.generateContent({
+    const memo = `${e.baseUrl}|${model}`;
+    let thinking = noThinking.has(memo) ? undefined : thinkingFor(model, opts.depth === 'deep');
+    // At most two tries per model: the second only without a rejected thinking config.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const remaining = deadline - Date.now();
+      if (remaining < 1500) throw lastError || new Error(`Timeout before ${model} could be tried`);
+      const controller = new AbortController();
+      try {
+        const res = await withTimeout(
+          client.models.generateContent({
+            model,
+            contents,
+            config: {
+              temperature: opts.temperature ?? 0.1,
+              responseMimeType: opts.json === false ? 'text/plain' : 'application/json',
+              ...(opts.system ? { systemInstruction: opts.system } : {}),
+              ...(thinking || {}),
+              abortSignal: controller.signal,
+            },
+          }),
+          Math.max(2_000, Math.min(perCall, remaining)),
           model,
-          contents,
-          config: {
-            temperature: opts.temperature ?? 0.1,
-            responseMimeType: opts.json === false ? 'text/plain' : 'application/json',
-            ...(opts.system ? { systemInstruction: opts.system } : {}),
-            ...(thinkingFor(model, opts.depth === 'deep') || {}),
-            abortSignal: controller.signal,
-          },
-        }),
-        Math.max(2_000, Math.min(perCall, remaining)),
-        model,
-        () => controller.abort()
-      );
-      if (res.text) return { text: res.text, model };
-      lastError = Object.assign(new Error(`مدل ${model} پاسخ متنی برنگرداند`), { status: 502 });
-    } catch (err: any) {
-      lastError = err;
-      const kind = pool.classifyError(err);
-      // Same key, next model: unknown model or a model-level overload. Gemini
-      // free-tier limits are per model, so on the last usable key a 429 may
-      // still pass on a sibling model.
-      if (kind === 'model' || kind === 'transient' || (kind === 'rate_limit' && lastResort)) continue;
-      throw err;
+          () => controller.abort()
+        );
+        if (res.text) return { text: res.text, model };
+        lastError = Object.assign(new Error(`مدل ${model} پاسخ متنی برنگرداند`), { status: 502 });
+        break;
+      } catch (err: any) {
+        lastError = err;
+        const kind = pool.classifyError(err);
+        // e.g. «Thinking level is not supported for this model» / «Budget 0 is
+        // invalid. This model only works in thinking mode»: same model, no config.
+        if (thinking && (kind === 'request' || kind === 'model' || kind === 'unknown') && /thinking|budget/i.test(String(err?.message || ''))) {
+          thinking = undefined;
+          noThinking.add(memo);
+          continue;
+        }
+        // Same key, next model: unknown model or a model-level overload. Gemini
+        // free-tier limits are per model, so on the last usable key a 429 may
+        // still pass on a sibling model.
+        if (kind === 'model' || kind === 'transient' || (kind === 'rate_limit' && lastResort)) break;
+        throw err;
+      }
     }
   }
   throw lastError || new Error('All Gemini models are temporarily unavailable.');
@@ -450,13 +476,18 @@ function retryAfterHeader(res: Response): number | null {
   return null;
 }
 
+/** Models that reject a custom `temperature` (GPT-5, o-series…) — base URL|model. */
+const noTemperature = new Set<string>();
+
 async function callOpenAI(e: PoolEntry, prompt: string, files: AiFile[], opts: GenerateOptions, deadline: number): Promise<{ text: string; model: string }> {
   const base = (e.baseUrl || OPENAI_DEFAULT_BASE).replace(/\/+$/, '');
   const model = modelOf(e);
   const perCall = opts.timeoutMs ?? 20_000;
   const wantJson = opts.json !== false;
+  const memo = `${base}|${model}`;
   let useFiles = files.length > 0;
   let jsonMode = wantJson;
+  let sendTemperature = !noTemperature.has(memo);
   let lastError: any = null;
   const systemText = [
     opts.system || 'You are HOVIDA, a careful, evidence-based HR screening assistant.',
@@ -465,7 +496,7 @@ async function callOpenAI(e: PoolEntry, prompt: string, files: AiFile[], opts: G
     .filter(Boolean)
     .join('\n\n');
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < 4; attempt++) {
     const remaining = deadline - Date.now();
     if (remaining < 1500) break;
     const controller = new AbortController();
@@ -473,7 +504,7 @@ async function callOpenAI(e: PoolEntry, prompt: string, files: AiFile[], opts: G
     try {
       const body: any = {
         model,
-        temperature: opts.temperature ?? 0.1,
+        ...(sendTemperature ? { temperature: opts.temperature ?? 0.1 } : {}),
         messages: [
           { role: 'system', content: systemText },
           { role: 'user', content: openAIContent(prompt, useFiles ? files : []) },
@@ -507,6 +538,13 @@ async function callOpenAI(e: PoolEntry, prompt: string, files: AiFile[], opts: G
         retryAfterMs: retryAfterHeader(res),
       });
       if (res.status === 400 || res.status === 415 || res.status === 422) {
+        if (sendTemperature && /temperature/i.test(raw)) {
+          // «Unsupported value: 'temperature' does not support 0.1 with this model»
+          sendTemperature = false;
+          noTemperature.add(memo);
+          lastError = err;
+          continue;
+        }
         if (jsonMode && /response_format|json_object|json mode/i.test(raw)) {
           jsonMode = false; // gateway doesn't support JSON mode — the prompt still demands JSON
           lastError = err;
@@ -610,6 +648,12 @@ export function friendlyAiError(err: any, entry?: PoolEntry): string {
     case 'region':
       return `سرویس${where} از منطقه جغرافیایی این سرور پشتیبانی نمی‌کند؛ برای Gemini یک آدرس پراکسی/درگاه در تنظیمات کلید وارد کنید یا از درگاه سازگار با OpenAI استفاده کنید.`;
     case 'model':
+      if (/\blimit\s*[:=]\s*0\b/i.test(String(err?.message || ''))) {
+        return `این مدل${where} برای سطح فعلی کلید سهمیه‌ای ندارد؛ مدل دیگری انتخاب کنید (یا فیلد مدل را خالی بگذارید تا مدل‌های جایگزین خودکار امتحان شوند).`;
+      }
+      if (entry?.provider === 'openai' && Number(err?.status) === 404 && !/model/i.test(String(err?.message || '').replace(/^OpenAI-compatible 404:\s*/, ''))) {
+        return `آدرس سرویس${where} پیدا نشد (۴۰۴)؛ آدرس پایه را بررسی کنید — بیشتر درگاه‌ها به «/v1» در انتهای آدرس نیاز دارند.`;
+      }
       return `مدل انتخاب‌شده${where} یافت نشد یا برای این کلید در دسترس نیست؛ نام مدل را بررسی کنید.`;
     case 'rate_limit':
       return 'محدودیت نرخ سرویس هوش مصنوعی پر شده است؛ چند لحظه دیگر دوباره تلاش کنید.';

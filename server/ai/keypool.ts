@@ -227,11 +227,34 @@ export function retryAfterOf(err: any): number | null {
   const msg = String(err?.message || '');
   const delay = msg.match(/"retryDelay"\s*:\s*"([\d.]+s)"/);
   if (delay) return parseDurationMs(delay[1]);
-  const again = msg.match(/try again in\s+([\dhms.]+)/i);
+  const again = msg.match(/(?:try again|retry) in\s+([\dhms.]+)/i);
   if (again) return parseDurationMs(again[1].replace(/\.$/, ''));
   const after = msg.match(/retry after\s+(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec|seconds?)?/i);
   if (after) return Math.round(Number(after[1]) * (/^ms|milli/i.test(after[2] || '') ? 1 : 1000));
   return null;
+}
+
+/**
+ * A 429 / RESOURCE_EXHAUSTED is usually a short per-minute limit — even when
+ * Gemini words it as «You exceeded your current quota, please check your plan
+ * and billing details» (its free-tier per-minute message, with a retryDelay of
+ * a few seconds). Only real exhaustion benches a key for an hour: no credit
+ * left, or a per-day quota.
+ */
+function classifyLimit(err: any, msg: string): FailureKind {
+  // Out of money/credit (OpenAI «insufficient_quota», gateways' balance errors).
+  if (/insufficient_quota|insufficient.?(balance|credit|funds)|out of credit|credit balance|payment required/i.test(msg)) return 'quota';
+  // «limit: 0»: this model has no quota at all on the key's tier — another model may.
+  if (/\blimit\s*[:=]\s*0\b/i.test(msg)) return 'model';
+  const perDay = /PerDay|per.?day|\bdaily\b|\bRPD\b/i.test(msg);
+  const perMinute = /PerMinute|per.?min(ute)?\b|\bRPM\b|\bTPM\b/i.test(msg);
+  if (perDay && !perMinute) return 'quota';
+  if (perMinute) return 'rate_limit';
+  // Ambiguous («exceeded your current quota» with no details): only a long
+  // provider hint means exhaustion. Otherwise treat it as a rate limit — the
+  // request moves to the next key anyway, and repeated hits back off further.
+  const hint = retryAfterOf(err);
+  return hint !== null && hint > 10 * 60_000 ? 'quota' : 'rate_limit';
 }
 
 export function classifyError(err: any): FailureKind {
@@ -239,10 +262,7 @@ export function classifyError(err: any): FailureKind {
   const status = Number(err?.status ?? (typeof err?.code === 'number' ? err.code : 0)) || 0;
   const msg = String(err?.message || err || '');
   if (err?.name === 'AbortError' || /\btimeout\b|timed? ?out|ETIMEDOUT|aborted/i.test(msg)) return 'timeout';
-  if (status === 429 || /RESOURCE_EXHAUSTED|rate.?limit|too many requests/i.test(msg)) {
-    if (/insufficient_quota|exceeded your current quota|billing|credit|balance|PerDay|per.?day|daily/i.test(msg)) return 'quota';
-    return 'rate_limit';
-  }
+  if (status === 429 || /RESOURCE_EXHAUSTED|rate.?limit|too many requests/i.test(msg)) return classifyLimit(err, msg);
   if (status === 402 || /insufficient_quota|insufficient.?(balance|credit|funds)|payment required|out of credit/i.test(msg)) return 'quota';
   if (/location is not supported|unsupported_country|not available in your (country|region)|unsupported.?region/i.test(msg)) return 'region';
   if (
@@ -280,30 +300,39 @@ export function kindMessage(kind: FailureKind): string {
 }
 
 /**
- * Records a failed call and decides what happens next. `hasFiles`: the
- * request carried attachments, so a 4xx may only mean *this* provider cannot
- * read them — another key/provider deserves a try.
+ * Records a failed call and decides what happens next. The same request
+ * continues on the next key for every kind of failure: even a 4xx «request»
+ * error may be specific to one provider/model (an unsupported parameter, a
+ * file type it cannot read), so another key deserves a try — without benching
+ * this one.
  */
-export function markFailure(e: PoolEntry, err: any, ctx: { hasFiles?: boolean } = {}): FailureVerdict {
+export function markFailure(e: PoolEntry, err: any, _ctx: { hasFiles?: boolean } = {}): FailureVerdict {
   const s = stateOf(e);
   const now = Date.now();
   const kind = classifyError(err);
+  if (kind === 'unsupported') {
+    // Not the key's fault (the file type, not the key): no strike, no error shown on the key.
+    return { kind, tryNext: true, cooldownMs: 0, message: KIND_MESSAGE[kind] };
+  }
   const raw = String(err?.message || err || '').replace(/\s+/g, ' ').slice(0, 180);
   s.failures++;
   s.todayFailures++;
   s.lastErrorAt = now;
   s.lastError = `${KIND_MESSAGE[kind]} — ${raw}`;
   let cooldownMs = 0;
-  let tryNext = true;
   const hint = retryAfterOf(err);
 
   switch (kind) {
-    case 'rate_limit':
+    case 'rate_limit': {
       s.rateLimits++;
       s.limitStrikes++;
-      cooldownMs = hint ?? Math.min(10 * 60_000, 30_000 * 2 ** Math.max(0, s.limitStrikes - 1));
+      const backoff = Math.min(10 * 60_000, 30_000 * 2 ** Math.max(0, s.limitStrikes - 1));
+      // The provider's hint wins — unless the key keeps hitting the limit right
+      // after every cooldown (e.g. a hidden daily cap): then back off further.
+      cooldownMs = hint === null ? backoff : s.limitStrikes >= 3 ? Math.max(hint, backoff) : hint;
       cooldownMs = Math.max(5_000, Math.min(cooldownMs, 60 * 60_000));
       break;
+    }
     case 'quota':
       s.rateLimits++;
       cooldownMs = Math.max(hint ?? 0, 60 * 60_000);
@@ -328,13 +357,8 @@ export function markFailure(e: PoolEntry, err: any, ctx: { hasFiles?: boolean } 
       if (/ENOTFOUND|EAI_AGAIN/i.test(raw)) cooldownMs = 5 * 60_000;
       else if (s.strikes >= 2) cooldownMs = 60_000;
       break;
-    case 'unsupported':
-      // Not the key's fault and not a reason to bench it.
-      s.failures--;
-      s.todayFailures--;
-      break;
     case 'request':
-      tryNext = Boolean(ctx.hasFiles);
+      // Rejected by this provider/model only: try the next key, keep this one.
       break;
   }
   if (cooldownMs > 0) {
@@ -343,7 +367,7 @@ export function markFailure(e: PoolEntry, err: any, ctx: { hasFiles?: boolean } 
     s.cooldownReason = KIND_MESSAGE[kind];
   }
   onChange?.();
-  return { kind, tryNext, cooldownMs, message: KIND_MESSAGE[kind] };
+  return { kind, tryNext: true, cooldownMs, message: KIND_MESSAGE[kind] };
 }
 
 /** Admin «reset»: clears health (not counters). */

@@ -498,15 +498,25 @@ export function isPlatformAdmin(user: db.UserRecord | null | undefined): boolean
   return user.platformAdmin === true || isEnvAdmin(user);
 }
 
+/** An actual, usable platform admin account exists (an ADMIN_EMAILS entry nobody signed up with does not count). */
 export function platformAdminExists(): boolean {
-  if (adminEmails().length) return true;
-  return db.allUsers().some((u) => u.platformAdmin === true && !u.disabled);
+  return db.allUsers().some((u) => isPlatformAdmin(u));
+}
+
+/** ADMIN_EMAILS entries that no account uses yet. */
+export function unclaimedAdminEmails(): string[] {
+  return adminEmails().filter((e) => !db.findUserByEmail(e));
 }
 
 let setupCode: string | null = null;
 
 /** Called at startup: without any platform admin, print a one-time setup code. */
 export function initPlatform() {
+  const unclaimed = unclaimedAdminEmails();
+  if (unclaimed.length) {
+    // Accounts are not e-mail-verified: whoever signs up first with this address gets the role.
+    console.warn(`[admin] ADMIN_EMAILS: no account yet for ${unclaimed.join(', ')} — sign up with that address now (the first sign-up with it becomes platform admin).`);
+  }
   if (platformAdminExists()) {
     setupCode = null;
     return;
@@ -517,7 +527,7 @@ export function initPlatform() {
   console.log('──────────────────────────────────────────────────────────────');
   console.log('[admin] هنوز مدیر سامانه‌ای تعریف نشده است. / No platform admin yet.');
   console.log(`[admin] Sign in, open /admin and enter this one-time setup code: ${setupCode}`);
-  console.log('[admin] (Or set ADMIN_EMAILS=you@company.com and restart.)');
+  console.log('[admin] (Or set ADMIN_EMAILS=you@company.com and sign up with that address.)');
   console.log('──────────────────────────────────────────────────────────────');
 }
 

@@ -6,6 +6,7 @@
  */
 import zlib from 'zlib';
 import { ingestDocument, sniff } from '../server/ingest';
+import { newInflateBudget, zipEntryCount } from '../server/ingest/zipGuard';
 import { assessText, decodeTextBytes, wordXmlToText } from '../src/lib/officeText';
 import { decodeBmp } from '../server/ingest/images';
 import { parseMime } from '../server/ingest/mime';
@@ -267,6 +268,65 @@ async function main() {
   assert(empty.kind === 'empty' && /خالی/.test(empty.unreadable || ''), 'empty file → reason');
   const broken = await ingestDocument(Buffer.concat([Buffer.from('PK\x03\x04', 'latin1'), Buffer.alloc(100, 1)]), 'broken.docx');
   assert(broken.unreadable !== null, 'corrupt zip → unreadable, no crash', broken.unreadable || '');
+
+  // ---------------- Decompression bombs (bug audit) ----------------
+  {
+    const JSZip = await lib('jszip');
+    const small = () => newInflateBudget(8 * 1024 * 1024, 4 * 1024 * 1024);
+    const TOO_BIG = /بیش از حد بزرگ/;
+
+    const bz = new JSZip();
+    bz.file('cv.txt', Buffer.alloc(10 * 1024 * 1024, 0x20));
+    const bomb = await bz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    const rb = await ingestDocument(bomb, 'bomb.zip', 0, small());
+    assert(bomb.length < 200_000 && rb.unreadable !== null && TOO_BIG.test(rb.unreadable), 'zip whose only file inflates past the limit → refused with a clear reason', `${bomb.length} B → ${rb.unreadable}`);
+
+    const dz = new JSZip();
+    dz.file('[Content_Types].xml', '<?xml version="1.0"?><Types/>');
+    dz.file('word/document.xml', `<?xml version="1.0"?><w:document ${W_NS}><w:body>${p('علی رضایی')}${' '.repeat(10 * 1024 * 1024)}</w:body></w:document>`);
+    const docBomb = await dz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    const rd = await ingestDocument(docBomb, 'bomb.docx', 0, small());
+    assert(rd.unreadable !== null && TOO_BIG.test(rd.unreadable), 'DOCX bomb → refused before mammoth/regex parsing', rd.unreadable || '');
+    const rdOk = await ingestDocument(docBomb, 'big.docx');
+    assert(rdOk.text.includes('علی رضایی'), 'the same 10 MB document.xml is fine under the default limits');
+
+    // A lying header: declares 1 000 bytes, inflates to 6 MB → stopped mid-stream.
+    const lz = new JSZip();
+    lz.file('cv.txt', Buffer.alloc(6 * 1024 * 1024, 0x41));
+    const liar = Buffer.from(await lz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+    liar.writeUInt32LE(1000, 22); // local header: uncompressed size
+    const cd = liar.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    liar.writeUInt32LE(1000, cd + 24); // central directory: uncompressed size
+    const rl = await ingestDocument(liar, 'liar.zip', 0, small());
+    assert(rl.unreadable !== null && TOO_BIG.test(rl.unreadable), 'a size-lying entry is cut off while inflating', rl.unreadable || '');
+
+    // Entry count is checked from the end record, before JSZip builds the directory.
+    const many = Buffer.from(await new JSZip().file('a.txt', 'x').generateAsync({ type: 'nodebuffer' }));
+    const eocd = many.lastIndexOf(Buffer.from([0x50, 0x4b, 0x05, 0x06]));
+    many.writeUInt16LE(60000, eocd + 8);
+    many.writeUInt16LE(60000, eocd + 10);
+    assert(zipEntryCount(many) === 60000, 'end-of-central-directory entry count read', String(zipEntryCount(many)));
+    const rm = await ingestDocument(many, 'many.zip');
+    assert(rm.unreadable !== null && TOO_BIG.test(rm.unreadable), '60 000 entries → refused', rm.unreadable || '');
+
+    const gz = zlib.gzipSync(Buffer.alloc(10 * 1024 * 1024, 0x20));
+    const rg = await ingestDocument(gz, 'cv.txt.gz', 0, small());
+    assert(rg.unreadable !== null && TOO_BIG.test(rg.unreadable), 'gzip bomb → refused', rg.unreadable || '');
+
+    // One oversized file inside a normal package is skipped, the resume is still read.
+    const mz = new JSZip();
+    mz.file('cv.txt', 'سارا کریمی — کارشناس منابع انسانی با ۶ سال سابقه جذب و استخدام');
+    mz.file('intro.mp4', Buffer.alloc(5 * 1024 * 1024, 0));
+    const rmz = await ingestDocument(await mz.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), 'package.zip', 0, small());
+    assert(rmz.text.includes('سارا کریمی') && rmz.warnings.some((w) => /بیش از حد بزرگ/.test(w) && w.includes('intro.mp4')), 'oversized entry skipped with a note; the resume is read', rmz.warnings.join(' | '));
+
+    // A big archive: only the most relevant few files are inflated.
+    const az2 = new JSZip();
+    for (let i = 0; i < 30; i++) az2.file(`attachments/photo-${i}.txt`, `یادداشت ${i}`);
+    az2.file('Resume-Neda.txt', 'ندا احمدی — حسابدار ارشد');
+    const r30 = await ingestDocument(await az2.generateAsync({ type: 'nodebuffer' }), 'many-files.zip');
+    assert(r30.text.startsWith('— ') && r30.text.includes('ندا احمدی') && r30.warnings[0].includes('۳۱'), 'resume picked first; warning counts every file', r30.warnings[0]);
+  }
 
   // ---------------- Sniffing & quality ----------------
   assert(sniff(Buffer.from('From: a@b.c\nTo: d@e.f\nSubject: hi\nDate: x\n\nbody'), 'x.txt').kind === 'eml', 'sniff: e-mail headers');

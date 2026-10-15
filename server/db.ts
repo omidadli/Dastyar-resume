@@ -885,7 +885,7 @@ export function recomputeJob(jobId: string, persist = true): Job | null {
 
 function categoryFromEvaluation(ev: CandidateEvaluation, extractionReason: string | null): ResumeCategory {
   if (extractionReason) return 'UNJUDGEABLE';
-  if (ev.flags.scannedNoText || ev.flags.insufficientInfo || ev.flags.notResume) return 'UNJUDGEABLE';
+  if (ev.flags.scannedNoText || ev.flags.insufficientInfo || ev.flags.notResume || ev.flags.needsAi) return 'UNJUDGEABLE';
   return ev.recommendation;
 }
 
@@ -1002,6 +1002,7 @@ const DOCUMENT_TYPE_LABELS: Record<string, string> = {
 
 /** Persian reason shown for UNJUDGEABLE evaluations (null when judgeable). */
 export function unjudgeableReasonOf(ev: CandidateEvaluation): string | null {
+  if (ev.flags.needsAi) return ev.summary;
   if (ev.flags.notResume) {
     const type = ev.meta?.documentType || 'other';
     return `این فایل رزومه نیست؛ به نظر می‌رسد ${DOCUMENT_TYPE_LABELS[type] || DOCUMENT_TYPE_LABELS.other}.`;
@@ -1397,9 +1398,14 @@ export function reports(orgId: string, range: ReportRange): ReportsData {
 
   // Timeline buckets — continuous (empty buckets included) so the chart is honest.
   const buckets = new Map<string, { key: string; label: string; analyzed: number; high: number; approved: number }>();
-  const startTs = days
-    ? cutoff
-    : Math.min(Date.now(), ...analyzed.map((r) => new Date(r.createdAtISO).getTime()));
+  // A loop, not Math.min(...spread): a spread of 100k+ arguments overflows the stack.
+  let startTs = days ? cutoff : Date.now();
+  if (!days) {
+    for (const r of analyzed) {
+      const t = new Date(r.createdAtISO).getTime();
+      if (Number.isFinite(t) && t < startTs) startTs = t;
+    }
+  }
   const step = mode === 'day' ? 86400_000 : mode === 'week' ? 7 * 86400_000 : 28 * 86400_000;
   for (let t = startTs; t <= Date.now() + step; t += step) {
     const { key, label } = jalaliLabel(new Date(Math.min(t, Date.now())).toISOString(), mode);

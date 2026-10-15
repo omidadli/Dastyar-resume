@@ -16,7 +16,12 @@ export interface Rgba {
 
 /** Long side the models read comfortably (text stays legible, payload small). */
 const MAX_SIDE = 2200;
-const MAX_PIXELS = 80_000_000;
+/**
+ * Largest image we decode (RGBA = 4 bytes per pixel ⇒ ~160 MB). An A4 page
+ * scanned at 600 dpi is ~35 MP; anything bigger is either a mistake or a
+ * decompression bomb meant to exhaust the server's memory.
+ */
+export const MAX_PIXELS = 40_000_000;
 
 async function lib<T = any>(name: string): Promise<T> {
   const mod: any = await import(name);
@@ -175,14 +180,17 @@ export async function decodeGifFirstFrame(buf: Buffer): Promise<Rgba> {
   return { data, width: reader.width, height: reader.height };
 }
 
-/** Pages of a (multi-page) TIFF — CCITT fax, LZW, Deflate, PackBits, JPEG. */
-export async function decodeTiffPages(buf: Buffer, maxPages = 5): Promise<Rgba[]> {
+/**
+ * Pages of a (multi-page) TIFF — CCITT fax, LZW, Deflate, PackBits, JPEG —
+ * handed to `onPage` one at a time, so only one decoded page is in memory.
+ */
+export async function forEachTiffPage(buf: Buffer, onPage: (page: Rgba, index: number) => Promise<void>, maxPages = 5): Promise<number> {
   const UTIF = await lib<any>('utif2');
   const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   const ifds: any[] = UTIF.decode(ab);
-  const pages: Rgba[] = [];
+  let count = 0;
   for (const ifd of ifds) {
-    if (pages.length >= maxPages) break;
+    if (count >= maxPages) break;
     const w = ifd.t256?.[0];
     const h = ifd.t257?.[0];
     if (!w || !h || w * h > MAX_PIXELS) continue;
@@ -190,15 +198,35 @@ export async function decodeTiffPages(buf: Buffer, maxPages = 5): Promise<Rgba[]
     if (ifd.t254 && ifd.t254[0] & 1) continue;
     UTIF.decodeImage(ab, ifd);
     const rgba: Uint8Array = UTIF.toRGBA8(ifd);
-    if (rgba?.length) pages.push({ data: rgba, width: ifd.width || w, height: ifd.height || h });
+    ifd.data = null; // the raw page buffer is no longer needed
+    if (rgba?.length) await onPage({ data: rgba, width: ifd.width || w, height: ifd.height || h }, count++);
   }
+  return count;
+}
+
+/** All pages at once (tests/tools; the intake uses forEachTiffPage). */
+export async function decodeTiffPages(buf: Buffer, maxPages = 5): Promise<Rgba[]> {
+  const pages: Rgba[] = [];
+  await forEachTiffPage(buf, async (p) => void pages.push(p), maxPages);
   return pages;
 }
 
 export async function heicToJpeg(buf: Buffer): Promise<Buffer> {
   const decode = await lib<any>('heic-decode');
-  const img = await decode({ buffer: buf });
-  return rgbaToJpeg({ data: img.data, width: img.width, height: img.height });
+  // Read the dimensions first: a crafted HEIC can declare a gigantic canvas.
+  const images = await decode.all({ buffer: buf });
+  try {
+    const first = images[0];
+    if (!first || !first.width || !first.height || first.width * first.height > MAX_PIXELS) throw new Error('HEIC size not supported');
+    const img = await first.decode();
+    return await rgbaToJpeg({ data: img.data, width: img.width, height: img.height });
+  } finally {
+    try {
+      images.dispose?.();
+    } catch {
+      /* already freed */
+    }
+  }
 }
 
 // --------------------------------------------------------------- entry ----
@@ -222,7 +250,7 @@ export async function imageToAiFiles(buf: Buffer, mime: string, fileName = 'imag
       // Huge phone photos: decode, downscale, re-encode.
       try {
         const jpeg = await lib('jpeg-js');
-        const img = jpeg.decode(buf, { useTArray: true, maxMemoryUsageInMB: 1024, maxResolutionInMP: 120 });
+        const img = jpeg.decode(buf, { useTArray: true, maxMemoryUsageInMB: 512, maxResolutionInMP: MAX_PIXELS / 1_000_000 });
         return [await asJpeg(img)];
       } catch {
         /* send as is */
@@ -233,9 +261,11 @@ export async function imageToAiFiles(buf: Buffer, mime: string, fileName = 'imag
   if (mime === 'image/gif') return [await asJpeg(await decodeGifFirstFrame(buf))];
   if (mime === 'image/bmp') return [await asJpeg(decodeBmp(buf))];
   if (mime === 'image/tiff') {
-    const pages = await decodeTiffPages(buf);
-    if (!pages.length) return null;
-    return Promise.all(pages.map((p, i) => asJpeg(p, pages.length > 1 ? `-p${i + 1}` : '')));
+    const out: AiFile[] = [];
+    await forEachTiffPage(buf, async (page, i) => void out.push(await asJpeg(page, `-p${i + 1}`)));
+    if (!out.length) return null;
+    if (out.length === 1) out[0].fileName = `${fileName}.jpg`;
+    return out;
   }
   return null;
 }

@@ -25,7 +25,7 @@ import { AdminHeader, HealthBadge, PURPOSE_LABEL, faAgo, faIn } from './shared';
 
 const MODEL_HINTS: Record<AiProviderKind, string[]> = {
   gemini: ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-2.5-flash'],
-  openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-4o', 'gemini-2.5-flash', 'deepseek-chat'],
+  openai: ['gpt-4o-mini', 'gpt-4.1-mini', 'gpt-5-mini', 'gpt-4o', 'gemini-2.5-flash', 'deepseek-chat'],
 };
 
 const PROVIDER_LABEL: Record<AiProviderKind, string> = {

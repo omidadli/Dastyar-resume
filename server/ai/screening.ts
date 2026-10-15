@@ -956,14 +956,48 @@ ${evaluationSchema(deep)}`;
       purpose: input.purpose || (deep ? 'deep' : 'evaluate'),
     });
     const parsed = cleanAndParseJson<any>(raw, null);
-    if (!parsed) throw new Error('malformed evaluation');
+    if (!looksLikeEvaluation(parsed)) throw new Error('malformed evaluation');
     return withMeta(finalizeEvaluation(parsed, understanding, answers, 'ai', normalized, { deep, maxPoints }));
   } catch (err: any) {
     if (err?.message !== CIRCUIT_OPEN && err?.name !== 'AiUnavailableError') {
       console.log(`[evaluateResume] «${fileName}» → local engine (${String(err?.message || 'err').slice(0, 160)})`);
     }
-    return withMeta(evaluateResumeLocal((hasText ? normalized : '') || fileName, understanding, answers, fileName));
+    // Scans, photos, audio… have no text for the keyword engine — and the file
+    // name is not evidence. Say honestly that it needs the AI and can be re-run.
+    if (!hasText) return withMeta(aiOnlyEvaluation(source, err));
+    return withMeta(evaluateResumeLocal(normalized, understanding, answers, fileName));
   }
+}
+
+/** A JSON reply that is really an evaluation (not `{"ok":true}`, an array or an echo). */
+function looksLikeEvaluation(v: any): boolean {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  return ['criterionScores', 'score', 'summary', 'recommendation', 'document', 'flags'].some((k) => k in v);
+}
+
+/**
+ * The file can only be read by the AI (scan, photo, audio/video…) and the AI
+ * was not reachable: UNJUDGEABLE with an honest, actionable reason.
+ */
+function aiOnlyEvaluation(source: string, err: any): CandidateEvaluation {
+  const why =
+    err?.name === 'AiUnavailableError'
+      ? 'هوش مصنوعی روی این سرور فعال نیست'
+      : err?.message === CIRCUIT_OPEN
+      ? 'همه کلیدهای هوش مصنوعی موقتاً به محدودیت خورده بودند'
+      : err?.code === 'UNSUPPORTED_INPUT'
+      ? 'سرویس هوش مصنوعیِ فعلی این نوع فایل را نمی‌خواند'
+      : 'سرویس هوش مصنوعی در آن لحظه پاسخ نداد';
+  const next =
+    err?.name === 'AiUnavailableError'
+      ? 'پس از فعال شدن هوش مصنوعی، «تلاش دوباره برای تحلیل» را بزنید.'
+      : 'کمی بعد «تلاش دوباره برای تحلیل» را بزنید.';
+  const reason = `این فایل (${source}) متن قابل‌انتخاب ندارد و فقط با هوش مصنوعی خوانده می‌شود، اما ${why}. ${next}`;
+  const ev = emptyEvaluation(reason);
+  ev.engine = 'local';
+  ev.weaknesses = [];
+  ev.flags.needsAi = true;
+  return ev;
 }
 
 export interface FinalizeOptions {
@@ -983,17 +1017,34 @@ export function finalizeEvaluation(
   options?: FinalizeOptions
 ): CandidateEvaluation {
   const maxPoints = Math.max(1, Math.min(8, options?.maxPoints || 4));
-  const num = (v: any, d = 0) => {
-    const n = Math.round(Number(toEnglishDigits(String(v ?? '')).replace(/[^\d.-]/g, '')));
-    return Number.isFinite(n) ? n : d;
+  // A missing or non-numeric value («نامشخص», "") falls back to the default —
+  // it must never silently become 0 (a 0 on a must-have criterion caps the
+  // whole score). "85/100" or "۷۸٪" read as their first number.
+  const num = <D extends number | null>(v: any, d: D): number | D => {
+    if (typeof v === 'number') return Number.isFinite(v) ? Math.round(v) : d;
+    if (typeof v !== 'string') return d;
+    const m = toEnglishDigits(v).replace(/[٫]/g, '.').match(/-?\d+(?:\.\d+)?/);
+    return m ? Math.round(Number(m[0])) : d;
   };
   const arr = <T>(v: any): T[] => (Array.isArray(v) ? v : []);
   const str = (v: any) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  /** Lists the model sometimes returns as strings or as {name}/{label} objects. */
+  const words = (v: any): string[] =>
+    arr<any>(v)
+      .map((x) => (typeof x === 'string' ? x : typeof x === 'number' ? String(x) : str(x?.name) || str(x?.label) || str(x?.title) || str(x?.skill) || str(x?.point) || ''))
+      .map((x) => x.trim())
+      .filter(Boolean);
+  // criterionScores may arrive as {"c1": 80, ...} or {"c1": {score, rationale}} instead of an array.
+  const scoreList: any[] = Array.isArray(raw?.criterionScores)
+    ? raw.criterionScores.filter((x: any) => x && typeof x === 'object')
+    : raw?.criterionScores && typeof raw.criterionScores === 'object'
+    ? Object.entries(raw.criterionScores).map(([criterionId, v]) => (v && typeof v === 'object' ? { criterionId, ...(v as object) } : { criterionId, score: v }))
+    : [];
 
   const criteria: Criterion[] = understanding.criteria;
   const criterionScores: CriterionScore[] = criteria.map((c) => {
-    const found = arr<any>(raw.criterionScores).find(
-      (s) => String(s.criterionId) === c.id || (s.title && String(s.title).includes(c.title.slice(0, 8)))
+    const found = scoreList.find(
+      (s) => String(s.criterionId ?? s.id ?? '') === c.id || (s.title && String(s.title).includes(c.title.slice(0, 8)))
     );
     return {
       criterionId: c.id,
@@ -1031,33 +1082,31 @@ export function finalizeEvaluation(
   };
 
   const severityOf = (v: any) => (['knockout', 'major', 'minor'].includes(v) ? v : 'minor') as 'knockout' | 'major' | 'minor';
-  const strengths: EvidencePoint[] = arr<any>(raw.strengths)
-    .slice(0, maxPoints)
-    .map((s) => ({
-      point: str(s.point) || 'نقطه قوت',
-      evidence: str(s.evidence) || 'شاهد در رزومه ثبت نشده.',
-      severity: severityOf(s.severity),
-    }));
-  const weaknesses: EvidencePoint[] = arr<any>(raw.weaknesses)
-    .slice(0, maxPoints)
-    .map((w) => ({
-      point: str(w.point) || 'مورد نیازمند بررسی',
-      evidence: str(w.evidence) || 'شاهد در رزومه ثبت نشده.',
-      severity: severityOf(w.severity),
-    }));
-  const knockoutMisses = arr<string>(raw.knockoutMisses)
-    .map((k) => str(k))
-    .filter((k): k is string => Boolean(k));
+  // Points may come back as plain strings instead of {point, evidence, severity}.
+  const points = (v: any, fallback: string): EvidencePoint[] =>
+    arr<any>(v)
+      .filter((x) => typeof x === 'string' ? x.trim() : x && typeof x === 'object')
+      .slice(0, maxPoints)
+      .map((x) =>
+        typeof x === 'string'
+          ? { point: x.trim(), evidence: 'شاهد در رزومه ثبت نشده.', severity: 'minor' as const }
+          : {
+              point: str(x.point) || str(x.title) || str(x.text) || fallback,
+              evidence: str(x.evidence) || 'شاهد در رزومه ثبت نشده.',
+              severity: severityOf(x.severity),
+            }
+      );
+  const strengths: EvidencePoint[] = points(raw.strengths, 'نقطه قوت');
+  const weaknesses: EvidencePoint[] = points(raw.weaknesses, 'مورد نیازمند بررسی');
+  const knockoutMisses = words(raw.knockoutMisses);
 
+  const years = num(raw.facts?.yearsExperience, null);
   const facts = {
-    yearsExperience:
-      raw.facts?.yearsExperience == null || raw.facts?.yearsExperience === ''
-        ? null
-        : Math.min(50, Math.max(0, num(raw.facts.yearsExperience, 0))),
+    yearsExperience: years === null ? null : Math.min(50, Math.max(0, years)),
     education: str(raw.facts?.education),
     lastRole: str(raw.facts?.lastRole),
-    skills: arr<any>(raw.facts?.skills).map((s) => String(s)).filter(Boolean).slice(0, 8),
-    expectedSalary: str(raw.facts?.expectedSalary),
+    skills: words(raw.facts?.skills).slice(0, 8),
+    expectedSalary: str(raw.facts?.expectedSalary) ?? (typeof raw.facts?.expectedSalary === 'number' ? String(raw.facts.expectedSalary) : null),
   };
   const contact = {
     phone: str(raw.contact?.phone),
@@ -1098,7 +1147,7 @@ export function finalizeEvaluation(
         /(\d{1,2})\s*سال\s*(?:سابقه|تجربه)|سابقه\s*(?:کار|کاری)?\s*[:：]\s*(\d{1,2})\s*سال|(\d{1,2})\+?\s*years?\s*(?:of\s*)?experience/i
       );
       if (expMatch) {
-        const stated = num(expMatch[1] || expMatch[2] || expMatch[3]);
+        const stated = num(expMatch[1] || expMatch[2] || expMatch[3], 0);
         if (stated > 0 && stated <= 45) facts.yearsExperience = stated;
       }
     }
@@ -1161,7 +1210,7 @@ export function finalizeEvaluation(
     strengths,
     weaknesses,
     knockoutMisses,
-    tags: flags.notResume ? [] : arr<any>(raw.tags).map((t) => String(t)).filter(Boolean).slice(0, 6),
+    tags: flags.notResume ? [] : words(raw.tags).slice(0, 6),
     bankSuggested: Boolean(raw.bankSuggested) && !flags.notResume,
     flags,
     deepFindings,

@@ -125,6 +125,20 @@ async function main() {
   });
   assert(garbledPrompt.includes('درهم و ناخوانا') && !garbledPrompt.includes('Ø³Ù„Ø§Ù…'), 'mojibake text is dropped; the AI reads the original file instead');
 
+  // a scan/photo with no AI available: honest «needs the AI», never judged from the file name
+  const photo = await evaluateResume({
+    orgName: 'آزمایشگاه',
+    job: { departmentName: 'فروش', roleTitle: 'کارشناس فروش', extraNotes: '', understanding, answers: {} },
+    resumeText: '',
+    fileName: 'کارشناس فروش ۱۰ سال سابقه فروش مویرگی.jpg',
+    attachments: [{ mimeType: 'image/jpeg', base64: Buffer.from([0xff, 0xd8, 0xff, 0xe0]).toString('base64'), fileName: 'cv.jpg' }],
+    sourceLabel: 'تصویر',
+  });
+  const photoReason = db.unjudgeableReasonOf(photo);
+  assert(photo.flags.needsAi === true && photo.engine === 'local' && photo.score === 0, 'image + no AI → flagged «needs AI», not scored from the file name', `score=${photo.score} engine=${photo.engine}`);
+  assert(Boolean(photoReason && /فقط با هوش مصنوعی/.test(photoReason) && /فعال نیست/.test(photoReason) && /تلاش دوباره/.test(photoReason)), 'reason says why and how to retry', photoReason || '');
+  assert(photo.criterionScores.every((c) => !/سابقه فروش مویرگی/.test(c.evidence || '')), 'the file name is never quoted as evidence');
+
   // finalize: a non-resume document becomes «اطلاعات ناکافی», never a match
   const { finalizeEvaluation } = await import('../server/ai/screening');
   const nr = finalizeEvaluation(

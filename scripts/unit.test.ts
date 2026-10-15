@@ -68,6 +68,56 @@ const u: JobUnderstanding = {
   assert(ev.score <= 45 && ev.recommendation === 'REJECT', 'a missing must-have caps the score at 45', `score=${ev.score}`);
 }
 
+// ---- finalizeEvaluation: messy model output never zeroes or crashes (bug audit) ----
+{
+  const ev = finalizeEvaluation({ score: '78/100', criterionScores: [{ criterionId: 'c1', score: '' }, { criterionId: 'c2', score: '85/100' }] }, u, {}, 'ai');
+  const c1 = ev.criterionScores.find((c) => c.criterionId === 'c1')!;
+  const c2 = ev.criterionScores.find((c) => c.criterionId === 'c2')!;
+  assert(c1.score === 40, 'an empty criterion score falls back to 40 (not 0 → must-have cap)', String(c1.score));
+  assert(c2.score === 85, '«85/100» reads as 85 (not 85100 → 100)', String(c2.score));
+
+  const map = finalizeEvaluation({ score: 75, criterionScores: { c1: 80, c2: { score: '۷۰٪', rationale: 'مذاکره با مشتریان کلیدی' } } }, u, {}, 'ai');
+  assert(
+    map.criterionScores.find((c) => c.criterionId === 'c1')?.score === 80 && map.criterionScores.find((c) => c.criterionId === 'c2')?.score === 70,
+    'criterionScores as an object map are understood',
+    JSON.stringify(map.criterionScores.map((c) => c.score))
+  );
+
+  let threw = '';
+  let messy: ReturnType<typeof finalizeEvaluation> | null = null;
+  try {
+    messy = finalizeEvaluation(
+      {
+        score: 70,
+        criterionScores: [null, { criterionId: 'c1', score: 72 }, { criterionId: 'c2', score: 68 }],
+        strengths: ['ارتباط قوی با مشتری', null, { point: 'مذاکره', evidence: 'قرارداد سالانه' }],
+        weaknesses: [null, 'سابقه مدیریتی ذکر نشده'],
+        knockoutMisses: [null],
+        tags: [{ label: 'فروش' }, 'B2B', null],
+        facts: { yearsExperience: 'نامشخص', skills: [{ name: 'Excel' }, 'CRM', null, { skill: 'مذاکره' }], expectedSalary: 45 },
+      },
+      u,
+      {},
+      'ai'
+    );
+  } catch (e: any) {
+    threw = e.message;
+  }
+  assert(!threw && messy !== null, 'null entries and plain strings in lists do not throw (the AI result is kept)', threw);
+  if (messy) {
+    assert(messy.strengths.length === 2 && messy.strengths[0].point === 'ارتباط قوی با مشتری', 'string strengths become points', JSON.stringify(messy.strengths));
+    assert(messy.weaknesses.length === 1 && messy.weaknesses[0].point === 'سابقه مدیریتی ذکر نشده', 'string weaknesses become points');
+    assert(messy.facts.yearsExperience === null, 'non-numeric years → unknown (not 0)', String(messy.facts.yearsExperience));
+    assert(messy.facts.skills.join(',') === 'Excel,CRM,مذاکره', 'skills given as objects are named, not «[object Object]»', messy.facts.skills.join(','));
+    assert(messy.tags.join(',') === 'فروش,B2B', 'tags given as objects are named', messy.tags.join(','));
+    assert(messy.facts.expectedSalary === '45', 'a numeric salary is kept as text');
+  }
+  const yrs = finalizeEvaluation({ score: 70, criterionScores: [], facts: { yearsExperience: '۵ سال' } }, u, {}, 'ai');
+  assert(yrs.facts.yearsExperience === 5, '«۵ سال» → 5', String(yrs.facts.yearsExperience));
+  const ko = finalizeEvaluation({ score: 90, criterionScores: [{ criterionId: 'c1', score: 90 }, { criterionId: 'c2', score: 90 }], knockoutMisses: [{ title: 'سابقه فروش حضوری' }] }, u, {}, 'ai');
+  assert(ko.knockoutMisses.length === 1 && ko.knockoutMisses[0] === 'سابقه فروش حضوری', 'knockout misses given as objects still count', JSON.stringify(ko.knockoutMisses));
+}
+
 // ---- repairUnderstanding: user-edited criteria are normalized ----
 {
   const dept = { id: 'sales', name: 'فروش', hint: '' };

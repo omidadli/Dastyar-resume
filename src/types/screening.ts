@@ -124,6 +124,8 @@ export interface EvaluationFlags {
   multipleCandidates?: boolean;
   /** Parts of the document could not be read (blurry scan, cut pages…). */
   partiallyReadable?: boolean;
+  /** Only the AI can read this file (scan, photo, audio…) and it was unavailable — re-run later. */
+  needsAi?: boolean;
 }
 
 /** How a resume was read and judged — shown in the candidate panel and admin reports. */

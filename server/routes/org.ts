@@ -4,6 +4,7 @@ import { actorOf, ctxOf, hashPassword, isValidEmail, passwordProblem, requireRol
 import { makeDepartmentId } from '../../src/shared/departments';
 import type { Department, Role, TeamMember } from '../../src/types/app';
 import { aiStatus, testConnection } from '../ai/provider';
+import { isEnvAdmin } from '../platform';
 import { h, oneOf, str } from './util';
 
 function members(orgId: string, meId: string): TeamMember[] {
@@ -61,6 +62,11 @@ export function orgRoutes(): express.Router {
       if (weak) return res.status(400).json({ error: weak, field: 'password' });
       if (role === 'admin' && user.role !== 'owner') return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند مدیر تعیین کند.', field: 'role' });
       if (db.findUserByEmail(email)) return res.status(409).json({ error: 'این ایمیل قبلاً در هویدا ثبت شده است.', field: 'email' });
+      // ADMIN_EMAILS grants platform-admin rights: such an account must be
+      // created by its owner (sign-up), never by someone who then knows its password.
+      if (isEnvAdmin({ email })) {
+        return res.status(409).json({ error: 'این ایمیل برای مدیر سامانه رزرو شده است؛ صاحب آن باید خودش ثبت‌نام کند.', field: 'email' });
+      }
       if (db.listMembers(org.id).length >= 50) return res.status(400).json({ error: 'سقف ۵۰ عضو برای هر فضای کاری پر شده است.' });
       const member = db.createUser({ orgId: org.id, name, email, title, role, passwordHash: await hashPassword(password) });
       db.logActivity(org.id, actorOf(req), 'member.added', `«${member.name}» را به تیم اضافه کرد`);

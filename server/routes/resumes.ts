@@ -17,6 +17,7 @@ import type {
   ResumeSort,
 } from '../../src/types/screening';
 import { h, int, oneOf, str } from './util';
+import { systemSettings } from '../platform';
 
 /**
  * Content types we serve. Anything else (HTML, SVG, XML, scripts…) is sent as
@@ -182,6 +183,7 @@ export function resumeRoutes(): express.Router {
       let attachments: AiFile[] | undefined;
       let sourceLabel = rec.analysisMeta?.format ?? null;
       let intakeWarnings: string[] = [];
+      let unreadable: string | null = null;
       const quality = assessText(text);
       // A deep review re-reads the original; a re-run reads it again only when
       // the stored text is unusable (scans, images, formats read on the server).
@@ -196,6 +198,7 @@ export function resumeRoutes(): express.Router {
             text = ing.text;
             rec.extractedText = text.slice(0, 20000);
           }
+          if (ing.unreadable && !ing.files.length && !assessText(text).usable) unreadable = ing.unreadable;
         }
       }
       const dept = org.departments.find((d) => d.id === job.departmentId);
@@ -210,6 +213,8 @@ export function resumeRoutes(): express.Router {
         mode,
       });
       db.updateResumeEvaluation(rec, evaluation, mode === 'deep' ? 'deep' : 'rerun');
+      // Keep the specific, actionable reason (e.g. «RAR is not supported; send a ZIP»).
+      if (unreadable && evaluation.flags.scannedNoText) rec.unjudgeableReason = unreadable;
       if (mode === 'deep' && evaluation.engine === 'ai') {
         db.logActivity(org.id, actorOf(req), 'deep.review', `بازبینی دقیق رزومه «${displayName(rec)}» را انجام داد`, { jobId: rec.jobId, resumeId: rec.id });
       }
@@ -248,6 +253,10 @@ export function resumeRoutes(): express.Router {
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
       const base64 = typeof req.body?.fileBase64 === 'string' ? req.body.fileBase64 : '';
       if (base64.length < 20) return res.status(400).json({ error: 'محتوای فایل الزامی است.' });
+      const maxMb = systemSettings().maxFileMb;
+      if (base64.length * 0.75 > maxMb * 1024 * 1024 + 4096) {
+        return res.status(413).json({ error: `حجم فایل بیش از ${maxMb.toLocaleString('fa-IR')} مگابایت است.` });
+      }
       const ok = await db.attachResumeFile(rec, str(req.body?.fileName, 200) || rec.fileName, base64);
       if (!ok) return res.status(500).json({ error: 'ذخیره فایل ممکن نشد.' });
       res.json({ ok: true });
@@ -314,7 +323,19 @@ export function fileRoutes(): express.Router {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    fs.createReadStream(full).pipe(res);
+    const stream = fs.createReadStream(full);
+    // The file can vanish between the check above and the read (deleted
+    // resume, cleanup): answer 404 instead of crashing the process.
+    stream.on('error', () => {
+      if (!res.headersSent) {
+        res.removeHeader('Content-Disposition');
+        res.removeHeader('Content-Security-Policy');
+        res.status(404).type('application/json').send(JSON.stringify({ error: 'فایل روی سرور موجود نیست.' }));
+      } else {
+        res.destroy();
+      }
+    });
+    stream.pipe(res);
   });
   return r;
 }

@@ -97,7 +97,8 @@ export function jobRoutes(): express.Router {
     if (roleTitle.length < 2) return res.status(400).json({ error: 'عنوان فرصت شغلی را وارد کنید.' });
     const understanding = repairUnderstanding(req.body?.understanding, department, roleTitle, { userEdited: true });
     if (!understanding) return res.status(400).json({ error: 'معیارهای ارزیابی ناقص است؛ دوباره تلاش کنید.' });
-    const job = db.createJob(org.id, actorOf(req), {
+    // createdBy stays the real account (delete permission); the name shows who acted.
+    const job = db.createJob(org.id, { id: ctxOf(req).user.id, name: actorOf(req).name }, {
       departmentId: department.id,
       departmentName: department.name,
       roleTitle,

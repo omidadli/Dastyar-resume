@@ -125,6 +125,7 @@ async function main() {
   const BASE = `http://127.0.0.1:${PORT}`;
   const env = { ...process.env, NODE_ENV: 'production', PORT: String(PORT), DATA_DIR: DATA, APP_SECRET: 'api-test-secret-0123456789abcdef' } as NodeJS.ProcessEnv;
   for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'AI_PROVIDER', 'ADMIN_EMAILS', 'DISABLE_DEMO']) delete env[k];
+  env.ADMIN_EMAILS = 'boss@example.com'; // reserved, nobody has signed up with it yet
   const child = spawn(process.execPath, [dist], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   child.stdout.on('data', (d) => (log += d));
@@ -133,6 +134,7 @@ async function main() {
   while (!/آماده است/.test(log) && Date.now() - started < 20_000) await new Promise((r) => setTimeout(r, 150));
   const code = log.match(/setup code: (HV-[A-Z0-9-]+)/)?.[1] || '';
   assert(Boolean(code), 'startup prints a one-time setup code when no admin exists', code);
+  assert(/ADMIN_EMAILS: no account yet for boss@example\.com/.test(log), 'an unclaimed ADMIN_EMAILS address does not count as an admin; startup warns about it');
 
   const call = async (method: string, url: string, token?: string | null, body?: unknown) => {
     const res = await fetch(BASE + url, {
@@ -162,6 +164,10 @@ async function main() {
     assert(me.json.isAdmin === true && me.json.setupPending === false, 'admin afterwards; setup no longer pending');
     assert((await call('POST', '/api/admin/claim', A, { code })).status === 400, 'setup code is single-use');
     assert((await call('GET', '/api/auth/me', A)).json.user.platformAdmin === true, '/me reports platformAdmin');
+
+    // A workspace admin cannot create the reserved platform-admin account (and know its password).
+    const reserved = await call('POST', '/api/org/members', A, { name: 'رئیس', email: 'Boss@Example.com', role: 'member', password: 'Boss123456' });
+    assert(reserved.status === 409 && /رزرو/.test(reserved.json.error), 'members: ADMIN_EMAILS address refused (no privilege escalation)', `${reserved.status} ${reserved.json.error}`);
 
     // ---------------------------------------------------------- keys ----
     assert(!(await call('GET', '/api/auth/me', A)).json.ai.available, 'no keys yet → AI unavailable');
@@ -271,6 +277,8 @@ async function main() {
     assert((await call('POST', '/api/auth/demo')).status === 404, 'demo disabled → 404');
     const big = await call('POST', `/api/jobs/${job.id}/evaluate`, A, { fileName: 'big.pdf', fileBase64: Buffer.alloc(6 * 1024 * 1024).toString('base64'), extractedText: '' });
     assert(big.status === 413 && /۵/.test(big.json.error), 'file over the admin size limit → 413', big.json.error);
+    const bigAttach = await call('POST', `/api/resumes/${r1.id}/file`, A, { fileName: 'big.pdf', fileBase64: Buffer.alloc(6 * 1024 * 1024).toString('base64') });
+    assert(bigAttach.status === 413, 'background file upload honours the same limit', String(bigAttach.status));
     await call('PATCH', '/api/admin/system', A, { signupEnabled: true, demoEnabled: true, maxFileMb: 20 });
 
     const b = await call('POST', '/api/auth/signup', null, { orgName: 'شرکت دوم', name: 'کاربر دوم', email: 'second@example.com', password: 'Second12345' });
@@ -309,6 +317,15 @@ async function main() {
     const smee = await call('GET', '/api/auth/me', S);
     assert(smee.json.user.email === 'second@example.com' && smee.json.support?.adminName === 'مدیر اصلی', 'support session acts as the owner and is labelled');
     assert((await call('GET', '/api/admin/overview', S)).status === 403 && (await call('GET', '/api/admin/me', S)).json.isAdmin === false, 'support session cannot reach the admin API');
+    const deptB = (await call('GET', '/api/org', S)).json.org.departments[0];
+    const tplB = await call('POST', '/api/jobs/template', S, { departmentId: deptB.id, roleTitle: 'حسابدار' });
+    const jobB = await call('POST', '/api/jobs', S, { departmentId: deptB.id, roleTitle: 'حسابدار', understanding: tplB.json.understanding, criteriaSource: 'template' });
+    const actB = await call('GET', '/api/activity?limit=5', S);
+    assert(jobB.json.job?.createdByName?.includes('پشتیبانی هویدا') && actB.json.items[0]?.userName?.includes('پشتیبانی هویدا (مدیر اصلی)'), 'actions in a support session are attributed to «پشتیبانی هویدا», not the owner', `${jobB.json.job?.createdByName} / ${actB.json.items[0]?.userName}`);
+    await call('PATCH', `/api/admin/orgs/${orgB.id}`, A, { suspended: true, suspendedReason: 'بررسی پشتیبانی' });
+    assert((await call('GET', '/api/jobs', S)).status === 200, 'support session can still enter the suspended workspace');
+    assert((await call('POST', '/api/auth/login', null, { email: 'second@example.com', password: temp })).json.code === 'ORG_SUSPENDED', '… while its members stay locked out');
+    await call('PATCH', `/api/admin/orgs/${orgB.id}`, A, { suspended: false });
 
     // --------------------------------------------------- behaviour ----
     const beh = await call('GET', '/api/admin/behavior', A);
@@ -332,6 +349,13 @@ async function main() {
     for (const act of ['admin.claim', 'ai.key_add', 'ai.key_test', 'system.update', 'org.suspend', 'user.update', 'user.reset_password', 'org.support', 'behavior.save', 'behavior.restore']) {
       assert(actions.has(act), `audit log has «${act}»`);
     }
+
+    // ------------------------------------------- ADMIN_EMAILS sign-up ----
+    await call('PATCH', '/api/admin/system', A, { signupEnabled: false });
+    const boss = await call('POST', '/api/auth/signup', null, { orgName: 'دفتر مدیریت', name: 'مدیر سامانه', email: 'boss@example.com', password: 'Boss123456' });
+    assert(Boolean(boss.json.token) && (await call('GET', '/api/admin/me', boss.json.token)).json.isAdmin === true, 'the ADMIN_EMAILS owner can sign up while sign-ups are closed and is platform admin', String(boss.status));
+    assert((await call('POST', '/api/auth/signup', null, { orgName: 'دیگر', name: 'دیگری', email: 'other@example.com', password: 'Other12345' })).status === 403, 'everyone else still sees sign-up closed');
+    await call('PATCH', '/api/admin/system', A, { signupEnabled: true });
 
     // ------------------------------------------------------- delete ----
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'اشتباه' })).status === 400, 'delete needs the exact workspace name');

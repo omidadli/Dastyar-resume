@@ -38,6 +38,7 @@ import {
   xpsText,
   type ZipLike,
 } from '../../src/lib/officeText';
+import { ArchiveLimitError, MAX_ZIP_ENTRIES, charge, guardZip, measureEntries, newInflateBudget, zipEntryCount, type InflateBudget } from './zipGuard';
 import { imageToAiFiles } from './images';
 import { looksLikeEmail, parseMime } from './mime';
 
@@ -168,9 +169,14 @@ async function xlsxLib(): Promise<any> {
   return mod.default?.read ? mod.default : mod;
 }
 
-async function loadZip(buf: Buffer): Promise<ZipLike> {
+/** Opens a ZIP container whose every read is size-limited (see zipGuard). */
+async function loadZip(buf: Buffer, budget: InflateBudget): Promise<{ zip: ZipLike; raw: any }> {
+  const entries = zipEntryCount(buf);
+  if (entries !== null && entries > MAX_ZIP_ENTRIES) throw new ArchiveLimitError(`${entries} entries`);
   const JSZip = await lib<any>('jszip');
-  return (await JSZip.loadAsync(buf)) as ZipLike;
+  const raw = await JSZip.loadAsync(buf);
+  if (Object.keys(raw.files).length > MAX_ZIP_ENTRIES) throw new ArchiveLimitError('too many entries');
+  return { zip: guardZip(raw, budget), raw };
 }
 
 function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
@@ -289,10 +295,22 @@ async function pdfText(buf: Buffer): Promise<{ text: string; pages: number; encr
     const pdf = await withTimeout<any>(task.promise, 20_000, 'PDF open');
     const pageCount = Math.min(pdf.numPages, 20);
     const out: string[] = [];
+    // One budget for all pages: a pathological page must not hold the request
+    // forever — whatever was read by then is used.
+    const deadline = Date.now() + 30_000;
     for (let p = 1; p <= pageCount; p++) {
-      const page = await pdf.getPage(p);
+      const left = () => Math.max(250, deadline - Date.now());
+      if (deadline - Date.now() < 500) break;
+      let page: any;
+      let content: any;
+      try {
+        page = await withTimeout<any>(pdf.getPage(p), left(), 'PDF page');
+        content = await withTimeout<any>(page.getTextContent(), left(), 'PDF text');
+      } catch (err: any) {
+        if (/timed out/.test(String(err?.message)) && out.length) break;
+        throw err;
+      }
       const viewport = page.getViewport({ scale: 1 });
-      const content = await page.getTextContent();
       const items: PdfTextItem[] = [];
       for (const it of content.items as any[]) {
         if (typeof it?.str !== 'string' || !it.str.length || !it.transform) continue;
@@ -301,7 +319,7 @@ async function pdfText(buf: Buffer): Promise<{ text: string; pages: number; encr
       let pageText = items.length ? assemblePageText(items, viewport.width) : '';
       try {
         const links: string[] = [];
-        for (const ann of (await page.getAnnotations()) || []) {
+        for (const ann of (await withTimeout<any[]>(page.getAnnotations(), left(), 'PDF links')) || []) {
           const url = String(ann?.url || ann?.unsafeUrl || '');
           if (/^mailto:/i.test(url)) links.push(`ایمیل: ${url.replace(/^mailto:/i, '')}`);
           else if (/^tel:/i.test(url)) links.push(`تلفن: ${url.replace(/^tel:/i, '')}`);
@@ -355,7 +373,7 @@ async function ingestPdf(buf: Buffer): Promise<IngestResult> {
 async function embeddedImages(zip: ZipLike, limit = 4): Promise<AiFile[]> {
   const entries = mediaEntries(zip);
   const loaded: Array<{ name: string; data: Buffer }> = [];
-  for (const e of entries.slice(0, 12)) loaded.push({ name: e.name, data: Buffer.from(await e.async('uint8array')) });
+  for (const e of entries.slice(0, 12)) loaded.push({ name: e.name, data: Buffer.from(await e.async('uint8array')) }); // size-limited reads
   loaded.sort((a, b) => b.data.length - a.data.length);
   const files: AiFile[] = [];
   let budget = ATTACH_BUDGET;
@@ -443,7 +461,7 @@ async function ingestDoc(buf: Buffer): Promise<IngestResult> {
   });
 }
 
-async function ingestOle(buf: Buffer, fileName: string, depth: number): Promise<IngestResult> {
+async function ingestOle(buf: Buffer, fileName: string, depth: number, budget: InflateBudget): Promise<IngestResult> {
   let names: string[] = [];
   let cfb: any = null;
   try {
@@ -459,7 +477,7 @@ async function ingestOle(buf: Buffer, fileName: string, depth: number): Promise<
   }
   if (names.includes('WordDocument') || (!names.length && ext === 'doc')) return ingestDoc(buf);
   if (names.includes('Workbook') || names.includes('Book') || (!names.length && ext === 'xls')) return ingestSpreadsheet(buf, 'xls', 'application/vnd.ms-excel');
-  if (names.some((n) => n.startsWith('__substg1.0_'))) return ingestMsg(cfb, depth);
+  if (names.some((n) => n.startsWith('__substg1.0_'))) return ingestMsg(cfb, depth, budget);
   const text = oleStrings(buf);
   const kind: FormatKind = names.includes('PowerPoint Document') || ext === 'ppt' ? 'ppt' : 'ole';
   return result(kind, 'application/x-ole-storage', {
@@ -469,7 +487,7 @@ async function ingestOle(buf: Buffer, fileName: string, depth: number): Promise<
   });
 }
 
-async function ingestMsg(cfb: any, depth: number): Promise<IngestResult> {
+async function ingestMsg(cfb: any, depth: number, budget: InflateBudget): Promise<IngestResult> {
   const index: any[] = cfb.FileIndex || [];
   const paths: string[] = cfb.FullPaths || [];
   const byPath = new Map<string, any>();
@@ -498,7 +516,7 @@ async function ingestMsg(cfb: any, depth: number): Promise<IngestResult> {
     const name = str(byPath.get(`${m[1]}/__substg1.0_3707001F`)) || str(byPath.get(`${m[1]}/__substg1.0_3704001F`)) || 'attachment';
     attachments.push({ fileName: name.replace(/\u0000/g, ''), data: Buffer.from(data.content) });
   }
-  return mergeEmail('msg', 'application/vnd.ms-outlook', subject, '', body, attachments, depth);
+  return mergeEmail('msg', 'application/vnd.ms-outlook', subject, '', body, attachments, depth, budget);
 }
 
 async function mergeEmail(
@@ -508,7 +526,8 @@ async function mergeEmail(
   from: string,
   body: string,
   attachments: Array<{ fileName: string; data: Buffer }>,
-  depth: number
+  depth: number,
+  budget: InflateBudget
 ): Promise<IngestResult> {
   const sections: string[] = [];
   const head = [subject && `موضوع: ${subject}`, from && `فرستنده: ${from}`].filter(Boolean).join('\n');
@@ -520,7 +539,7 @@ async function mergeEmail(
     if (/\.(p7s|asc|ics|sig)$/i.test(a.fileName)) continue;
     const s = sniff(a.data, a.fileName);
     if (s.kind === 'image' && a.data.length < 12_000) continue; // signatures, logos
-    const inner = await ingestDocument(a.data, a.fileName, depth + 1);
+    const inner = await ingestDocument(a.data, a.fileName, depth + 1, budget);
     if (inner.text.trim()) sections.push(`— پیوست: ${a.fileName} (${inner.label}) —\n${inner.text}`);
     for (const f of inner.files) {
       used += f.base64.length * 0.75;
@@ -545,15 +564,25 @@ function entryPriority(name: string): number {
   return p;
 }
 
-async function ingestEntries(kind: FormatKind, mime: string, entries: Array<{ name: string; data: Buffer }>, depth: number): Promise<IngestResult> {
+const MAX_ARCHIVE_FILES = 6;
+
+async function ingestEntries(
+  kind: FormatKind,
+  mime: string,
+  entries: Array<{ name: string; data: Buffer }>,
+  depth: number,
+  budget: InflateBudget,
+  totalCount?: number
+): Promise<IngestResult> {
   const usable = entries.filter((e) => e.data.length > 0 && !JUNK_ENTRY.test(e.name)).sort((a, b) => entryPriority(a.name) - entryPriority(b.name));
   if (!usable.length) return result(kind, mime, { unreadable: 'فایل فشرده خالی است.' });
+  const total = Math.max(usable.length, totalCount ?? 0);
   const sections: string[] = [];
   const files: AiFile[] = [];
   const warnings: string[] = [];
   let used = 0;
-  for (const e of usable.slice(0, 6)) {
-    const inner = await ingestDocument(e.data, e.name, depth + 1);
+  for (const e of usable.slice(0, MAX_ARCHIVE_FILES)) {
+    const inner = await ingestDocument(e.data, e.name, depth + 1, budget);
     const short = e.name.split('/').pop() || e.name;
     if (inner.text.trim()) sections.push(`— فایل: ${short} (${inner.label}) —\n${inner.text}`);
     for (const f of inner.files) {
@@ -564,8 +593,8 @@ async function ingestEntries(kind: FormatKind, mime: string, entries: Array<{ na
     warnings.push(...inner.warnings);
   }
   warnings.unshift(
-    usable.length > 6
-      ? `از ${usable.length.toLocaleString('fa-IR')} فایل داخل بسته، ۶ فایل مرتبط‌تر خوانده شد.`
+    total > MAX_ARCHIVE_FILES
+      ? `از ${total.toLocaleString('fa-IR')} فایل داخل بسته، ${MAX_ARCHIVE_FILES.toLocaleString('fa-IR')} فایل مرتبط‌تر خوانده شد.`
       : `${usable.length.toLocaleString('fa-IR')} فایل داخل بسته خوانده شد.`
   );
   return result(kind, mime, { text: sections.join('\n\n'), files, warnings });
@@ -586,8 +615,8 @@ function parseTar(buf: Buffer): Array<{ name: string; data: Buffer }> {
   return out;
 }
 
-async function ingestZip(buf: Buffer, fileName: string, depth: number): Promise<IngestResult> {
-  const zip = await loadZip(buf);
+async function ingestZip(buf: Buffer, fileName: string, depth: number, budget: InflateBudget): Promise<IngestResult> {
+  const { zip, raw } = await loadZip(buf, budget);
   const names = Object.keys(zip.files);
   const has = (p: string) => names.includes(p);
   const mimetype = has('mimetype') ? (await zip.file('mimetype')!.async('string')).trim() : '';
@@ -595,6 +624,8 @@ async function ingestZip(buf: Buffer, fileName: string, depth: number): Promise<
     let text = await docxText(zip);
     if (assessText(text).letters < 20) {
       try {
+        // mammoth inflates the archive itself: make sure nothing in it is a bomb first.
+        await measureEntries(raw, budget);
         const mammoth = await lib<any>('mammoth');
         text = (await mammoth.extractRawText({ buffer: buf })).value || text;
       } catch {
@@ -605,12 +636,16 @@ async function ingestZip(buf: Buffer, fileName: string, depth: number): Promise<
   }
   if (has('ppt/presentation.xml')) return officeResult('pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation', zip, await pptxText(zip));
   if (has('xl/workbook.xml')) {
+    await measureEntries(raw, budget, (n) => /^xl\/(?!media\/)/i.test(n)); // SheetJS inflates on its own
     const r = await ingestSpreadsheet(buf, 'xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     if (assessText(r.text).usable) return r;
     return officeResult('xlsx', r.mime, zip, r.text);
   }
   if (/opendocument\.text/.test(mimetype)) return officeResult('odt', mimetype, zip, await odfText(zip));
-  if (/opendocument\.spreadsheet/.test(mimetype)) return ingestSpreadsheet(buf, 'ods', mimetype);
+  if (/opendocument\.spreadsheet/.test(mimetype)) {
+    await measureEntries(raw, budget, (n) => /\.xml$/i.test(n));
+    return ingestSpreadsheet(buf, 'ods', mimetype);
+  }
   if (/opendocument\.presentation/.test(mimetype)) return officeResult('odp', mimetype, zip, await odfText(zip));
   if (mimetype === 'application/epub+zip') return result('epub', mimetype, { text: await epubText(zip) });
   if (names.some((n) => /\.fpage$/i.test(n))) return result('xps', 'application/oxps', { text: await xpsText(zip) });
@@ -630,14 +665,25 @@ async function ingestZip(buf: Buffer, fileName: string, depth: number): Promise<
     }
     return result('iwork', 'application/x-iwork', { unreadable: 'فایل Pages/Keynote پیش‌نمایش ندارد؛ از آن خروجی PDF بگیرید و دوباره بارگذاری کنید.' });
   }
+  // Plain archive: inflate only the few files that will actually be read
+  // (most relevant first), not everything inside. Entries that declare a size
+  // above the per-file limit (a video, a disk image…) are skipped, not fatal.
+  const declared = (n: string) => Number(raw.files[n]?._data?.uncompressedSize ?? 1);
+  const candidates = names
+    .filter((n) => !zip.files[n].dir && !JUNK_ENTRY.test(n) && declared(n) > 0)
+    .sort((a, b) => entryPriority(a) - entryPriority(b));
+  const oversized = candidates.filter((n) => declared(n) > budget.maxEntry);
+  const readable = candidates.filter((n) => declared(n) <= budget.maxEntry);
+  if (!readable.length && oversized.length) throw new ArchiveLimitError('every entry is too large');
   const entries: Array<{ name: string; data: Buffer }> = [];
-  for (const n of names) {
-    const f = zip.files[n];
-    if (f.dir || JUNK_ENTRY.test(n)) continue;
-    entries.push({ name: n, data: Buffer.from(await f.async('uint8array')) });
-    if (entries.length >= 40) break;
+  for (const n of readable.slice(0, MAX_ARCHIVE_FILES)) {
+    entries.push({ name: n, data: Buffer.from(await zip.files[n].async('uint8array')) });
   }
-  return ingestEntries('zip', 'application/zip', entries, depth);
+  const r = await ingestEntries('zip', 'application/zip', entries, depth, budget, candidates.length);
+  if (oversized.length) {
+    r.warnings.push(`${oversized.length.toLocaleString('fa-IR')} فایل داخل بسته بیش از حد بزرگ بود و خوانده نشد (${oversized.slice(0, 2).map((n) => n.split('/').pop()).join('، ')}).`);
+  }
+  return r;
 }
 
 function ingestXml(xml: string): IngestResult {
@@ -656,7 +702,7 @@ function ingestXml(xml: string): IngestResult {
  * Reads any file. Never throws: failures come back as `unreadable` with a
  * Persian reason (and whatever partial text could be salvaged).
  */
-export async function ingestDocument(buf: Buffer, fileName: string, depth = 0): Promise<IngestResult> {
+export async function ingestDocument(buf: Buffer, fileName: string, depth = 0, budget: InflateBudget = newInflateBudget()): Promise<IngestResult> {
   const s = sniff(buf, fileName);
   const ext = extOf(fileName);
   try {
@@ -667,9 +713,9 @@ export async function ingestDocument(buf: Buffer, fileName: string, depth = 0): 
       case 'pdf':
         return await ingestPdf(buf);
       case 'zip':
-        return await ingestZip(buf, fileName, depth);
+        return await ingestZip(buf, fileName, depth, budget);
       case 'ole':
-        return await ingestOle(buf, fileName, depth);
+        return await ingestOle(buf, fileName, depth, budget);
       case 'rtf':
         return result('rtf', s.mime, { text: rtfToText(buf.toString('latin1')) });
       case 'image': {
@@ -698,13 +744,20 @@ export async function ingestDocument(buf: Buffer, fileName: string, depth = 0): 
         });
       }
       case 'gzip': {
-        const inner = zlib.gunzipSync(buf, { maxOutputLength: 80 * 1024 * 1024 });
+        let inner: Buffer;
+        try {
+          inner = zlib.gunzipSync(buf, { maxOutputLength: Math.max(1, Math.min(80 * 1024 * 1024, budget.remaining, budget.maxEntry)) });
+        } catch (err: any) {
+          if (err?.code === 'ERR_BUFFER_TOO_LARGE' || /buffer|too large|maxOutputLength/i.test(String(err?.message))) throw new ArchiveLimitError('gzip');
+          throw err;
+        }
+        charge(budget, inner.length, 'gzip');
         const innerName = fileName.replace(/\.(t?gz|gzip)$/i, (m) => (m.toLowerCase() === '.tgz' ? '.tar' : '')) || 'file';
-        const r = await ingestDocument(inner, innerName, depth + 1);
+        const r = await ingestDocument(inner, innerName, depth + 1, budget);
         return { ...r, warnings: ['فایل فشرده GZip باز شد.', ...r.warnings] };
       }
       case 'tar':
-        return await ingestEntries('tar', s.mime, parseTar(buf), depth);
+        return await ingestEntries('tar', s.mime, parseTar(buf), depth, budget);
       case 'rar':
       case '7z':
         return result(s.kind, s.mime, {
@@ -719,7 +772,7 @@ export async function ingestDocument(buf: Buffer, fileName: string, depth = 0): 
       case 'eml': {
         const m = parseMime(buf);
         const body = m.text.trim() ? m.text : htmlToText(m.html);
-        return await mergeEmail('eml', s.mime, m.subject, m.from, body, m.attachments, depth);
+        return await mergeEmail('eml', s.mime, m.subject, m.from, body, m.attachments, depth, budget);
       }
       case 'xml':
         return ingestXml(decodeTextBytes(new Uint8Array(buf)));
@@ -766,6 +819,11 @@ export async function ingestDocument(buf: Buffer, fileName: string, depth = 0): 
       }
     }
   } catch (err: any) {
+    if (err instanceof ArchiveLimitError) {
+      return result(s.kind, s.mime, {
+        unreadable: 'محتوای این فایل فشرده پس از باز شدن بیش از حد بزرگ است (یا تعداد فایل‌هایش بسیار زیاد است)؛ رزومه‌ها را جداگانه یا به‌صورت PDF بارگذاری کنید.',
+      });
+    }
     // Corrupt or truncated file: salvage readable strings if any.
     const text = s.kind === 'image' || s.kind === 'audio' || s.kind === 'video' ? '' : binaryStrings(new Uint8Array(buf));
     const q = assessText(text);

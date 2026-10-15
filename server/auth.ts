@@ -90,11 +90,16 @@ export interface AuthContext {
 }
 
 /** Why an account may not use the app right now (null = allowed). */
-export function accessBlock(user: db.UserRecord, org: db.OrgRecord): { status: number; code: string; error: string } | null {
+export function accessBlock(
+  user: db.UserRecord,
+  org: db.OrgRecord,
+  opts: { support?: boolean } = {}
+): { status: number; code: string; error: string } | null {
   if (user.disabled) {
     return { status: 403, code: 'ACCOUNT_DISABLED', error: 'حساب کاربری شما غیرفعال شده است؛ برای پیگیری با مدیر سامانه تماس بگیرید.' };
   }
-  if (org.suspended && !isPlatformAdmin(user)) {
+  // A platform admin's support session may enter a suspended workspace (to look into it).
+  if (org.suspended && !opts.support && !isPlatformAdmin(user)) {
     return {
       status: 403,
       code: 'ORG_SUSPENDED',
@@ -143,7 +148,7 @@ export function requireAuth(req: express.Request, res: express.Response, next: e
   if (!session || !user || !org) {
     return res.status(401).json({ error: 'نشست شما به پایان رسیده است؛ دوباره وارد شوید.', code: 'SESSION_EXPIRED' });
   }
-  const blocked = accessBlock(user, org);
+  const blocked = accessBlock(user, org, { support: Boolean(session.support) });
   if (blocked) {
     // 401 signs the tab out; the message explains why.
     db.deleteSession(tokenHash);
@@ -192,9 +197,14 @@ export function ctxOf(req: express.Request): AuthContext {
   return req.ctx;
 }
 
+/**
+ * Who did it — for activity feeds and decision stamps. In a support session
+ * the workspace must see that HOVIDA support acted, not its owner.
+ */
 export function actorOf(req: express.Request): { id: string; name: string } {
-  const { user } = ctxOf(req);
-  return { id: user.id, name: user.name };
+  const { user, support } = ctxOf(req);
+  // A distinct id also makes these events show up as unread for the owner.
+  return support ? { id: `support:${support.adminId}`, name: `پشتیبانی هویدا (${support.adminName})` } : { id: user.id, name: user.name };
 }
 
 // ------------------------------------------------------------ signed URLs ----

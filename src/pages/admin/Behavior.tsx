@@ -430,7 +430,7 @@ function LabTab({ draft, dirty }: { draft: BehaviorConfig; dirty: boolean }) {
   };
 
   const ev = result?.evaluation as CandidateEvaluation | undefined;
-  const unjudgeable = ev && (ev.flags.insufficientInfo || ev.flags.scannedNoText || ev.flags.notResume);
+  const unjudgeable = ev && (ev.flags.insufficientInfo || ev.flags.scannedNoText || ev.flags.notResume || ev.flags.needsAi);
 
   return (
     <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-4 items-start">

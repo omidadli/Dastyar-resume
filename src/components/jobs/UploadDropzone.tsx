@@ -38,15 +38,23 @@ export function UploadDropzone({
   const [dragging, setDragging] = useState(false);
   const [unpacking, setUnpacking] = useState<{ current: number; total: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Unpacking a ZIP takes a while: by then the list may have changed (files
+  // removed, another drop) — always merge into the latest list, not the one
+  // captured when the drop started.
+  const filesRef = useRef(files);
+  filesRef.current = files;
+  const pending = useRef(0);
 
   const add = async (list: FileList | File[]) => {
     const raw = Array.from(list);
     if (!raw.length) return;
+    pending.current++;
     setUnpacking({ current: 0, total: 0 });
     try {
       const unpacked = await processUploadFiles(raw, (current, total) => setUnpacking({ current, total }));
-      const keys = new Set(files.map((f) => `${f.name}_${f.size}_${f.lastModified}`));
-      const next = [...files];
+      const latest = filesRef.current;
+      const keys = new Set(latest.map((f) => `${f.name}_${f.size}_${f.lastModified}`));
+      const next = [...latest];
       let tooBig = 0;
       let dupes = 0;
       let overBatch = 0;
@@ -67,12 +75,13 @@ export function UploadDropzone({
         keys.add(key);
         next.push(f);
       }
+      filesRef.current = next;
       onChange(next);
       if (tooBig) toast(`${toPersianDigits(tooBig)} فایل بیش از ${toPersianDigits(maxFileMb)} مگابایت بود و اضافه نشد.`, 'error');
       if (overBatch) toast(`در هر نوبت حداکثر ${toPersianDigits(maxFilesPerBatch)} فایل؛ ${toPersianDigits(overBatch)} فایل اضافه نشد.`, 'error');
       if (dupes) toast(`${toPersianDigits(dupes)} فایل تکراری کنار گذاشته شد.`, 'info');
     } finally {
-      setUnpacking(null);
+      if (--pending.current === 0) setUnpacking(null);
     }
   };
 

@@ -9,7 +9,7 @@ import * as db from './server/db';
 import { maintenanceGate, requireAuth } from './server/auth';
 import { initPlatform, systemSettings } from './server/platform';
 import { adminRoutes } from './server/routes/admin';
-import { aiStatus } from './server/ai/provider';
+import { aiStatus, flushAiState } from './server/ai/provider';
 import { authRoutes } from './server/routes/auth';
 import { orgRoutes } from './server/routes/org';
 import { jobRoutes } from './server/routes/jobs';
@@ -105,6 +105,11 @@ async function startServer() {
 
   const shutdown = (signal: string) => {
     console.log(`[server] ${signal} received — flushing data and closing.`);
+    try {
+      flushAiState();
+    } catch {
+      /* never block shutdown */
+    }
     db.flushSaveSync();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();

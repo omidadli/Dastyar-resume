@@ -13,7 +13,7 @@ import {
   verifyPassword,
 } from '../auth';
 import { aiStatus } from '../ai/provider';
-import { demoAllowed, demoTtlMs, isPlatformAdmin, publicConfig, systemSettings } from '../platform';
+import { demoAllowed, demoTtlMs, isEnvAdmin, isPlatformAdmin, publicConfig, systemSettings } from '../platform';
 import { createDemoWorkspace } from '../demo-seed';
 import { h, str } from './util';
 
@@ -45,7 +45,8 @@ export function authRoutes(): express.Router {
   r.post(
     '/signup',
     h(async (req, res) => {
-      if (!systemSettings().signupEnabled) {
+      // Closed sign-ups never lock out the operator's own ADMIN_EMAILS address.
+      if (!systemSettings().signupEnabled && !isEnvAdmin({ email: str(req.body?.email, 120) })) {
         return res.status(403).json({ error: 'ثبت‌نام سازمان‌های تازه فعلاً بسته است؛ برای دریافت دسترسی با ما تماس بگیرید.', code: 'SIGNUP_CLOSED' });
       }
       const limit = signupByIp.hit(clientIp(req));

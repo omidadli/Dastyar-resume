@@ -32,9 +32,26 @@ import type {
   UserPublic,
 } from '../types/app';
 
-const TOKEN_KEY = 'hovida.session.v1';
+export const TOKEN_KEY = 'hovida.session.v1';
+const SESSION_KIND_KEY = 'hovida.session.kind';
 
-export function getToken(): string | null {
+/**
+ * The session token travels in a custom header rather than `Authorization`.
+ * Reverse proxies and sandbox gateways (e.g. preview links) commonly strip
+ * `Authorization`/`Cookie` before the request reaches the app, which made
+ * every request after a successful login look like an expired session.
+ */
+export const SESSION_HEADER = 'X-Hovida-Session';
+
+/**
+ * The tab's session lives in memory; localStorage only carries it across
+ * reloads and into new tabs. Memory keeps the app usable where storage is
+ * blocked (third-party iframes, strict privacy modes), and a sign-in in
+ * another tab can never silently swap the account this tab is acting as.
+ */
+let memoryToken: string | null | undefined; // undefined = not read yet
+
+export function storedToken(): string | null {
   try {
     return localStorage.getItem(TOKEN_KEY);
   } catch {
@@ -42,12 +59,34 @@ export function getToken(): string | null {
   }
 }
 
-export function setToken(token: string | null) {
+export function getToken(): string | null {
+  if (memoryToken === undefined) memoryToken = storedToken();
+  return memoryToken;
+}
+
+export function setToken(token: string | null, opts: { persist?: boolean; demo?: boolean } = {}) {
+  const previous = getToken();
+  memoryToken = token;
+  if (opts.persist === false) return;
   try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(SESSION_KIND_KEY, opts.demo ? 'demo' : 'user');
+    } else if (previous && localStorage.getItem(TOKEN_KEY) === previous) {
+      // Only forget our own session — another tab may have stored a newer one.
+      localStorage.removeItem(TOKEN_KEY);
+    }
   } catch {
-    /* private mode */
+    /* storage blocked — the session simply lasts until the tab is closed */
+  }
+}
+
+/** Whether the last stored session belonged to a (now possibly expired) demo workspace. */
+export function lastSessionWasDemo(): boolean {
+  try {
+    return localStorage.getItem(SESSION_KIND_KEY) === 'demo';
+  } catch {
+    return false;
   }
 }
 
@@ -71,6 +110,8 @@ export const UNAUTHORIZED_EVENT = 'hovida:unauthorized';
 export interface RequestOptions {
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Public endpoints (login, signup, demo): never attach the session token. */
+  anonymous?: boolean;
 }
 
 async function request<T>(method: string, url: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
@@ -80,14 +121,14 @@ async function request<T>(method: string, url: string, body?: unknown, opts: Req
   const onAbort = () => controller.abort();
   opts.signal?.addEventListener('abort', onAbort, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const token = getToken();
+  const token = opts.anonymous ? null : getToken();
   let res: Response;
   try {
     res = await fetch(url, {
       method,
       headers: {
         ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(token ? { [SESSION_HEADER]: token } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
       signal: controller.signal,
@@ -104,7 +145,11 @@ async function request<T>(method: string, url: string, body?: unknown, opts: Req
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    if (res.status === 401 && token) window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT));
+    // Only a rejection of the *current* session signs the tab out: a late 401
+    // for a token that a fresh login has since replaced must not wipe it.
+    if (res.status === 401 && token && token === getToken()) {
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT, { detail: { code: (data as any)?.code ?? null } }));
+    }
     throw new ApiError((data as any)?.error || `خطای سرور (${res.status})`, res.status, data);
   }
   return data as T;
@@ -154,10 +199,11 @@ export interface FileUrlInfo {
 
 export const api = {
   auth: {
-    config: () => get<{ demo: boolean }>('/api/auth/config', { timeoutMs: 10_000 }),
-    signup: (b: { orgName: string; name: string; email: string; password: string }) => post<AuthPayload>('/api/auth/signup', b),
-    login: (b: { email: string; password: string }) => post<AuthPayload>('/api/auth/login', b),
-    demo: () => post<AuthPayload>('/api/auth/demo', {}, { timeoutMs: 45_000 }),
+    config: () => get<{ demo: boolean }>('/api/auth/config', { timeoutMs: 10_000, anonymous: true }),
+    signup: (b: { orgName: string; name: string; email: string; password: string }) =>
+      post<AuthPayload>('/api/auth/signup', b, { anonymous: true }),
+    login: (b: { email: string; password: string }) => post<AuthPayload>('/api/auth/login', b, { anonymous: true }),
+    demo: () => post<AuthPayload>('/api/auth/demo', {}, { timeoutMs: 45_000, anonymous: true }),
     logout: () => post<{ ok: boolean }>('/api/auth/logout'),
     me: () => get<MeResponse>('/api/auth/me', { timeoutMs: 15_000 }),
     updateMe: (b: { name?: string; title?: string; currentPassword?: string; newPassword?: string }) =>

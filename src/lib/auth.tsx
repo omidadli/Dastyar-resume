@@ -1,7 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiStatus, AuthPayload, OrgPublic, UserPublic } from '../types/app';
-import { api, getToken, setToken, UNAUTHORIZED_EVENT } from './api';
+import { api, getToken, lastSessionWasDemo, setToken, TOKEN_KEY, UNAUTHORIZED_EVENT } from './api';
 import { navigate } from './router';
+
+const EXPIRED_NOTICE = 'نشست شما به پایان رسیده است؛ لطفاً دوباره وارد شوید.';
+const DEMO_EXPIRED_NOTICE = 'مهلت نسخه نمایشی به پایان رسیده است. می‌توانید یک نسخه نمایشی تازه بسازید یا وارد حساب خود شوید.';
+const SIGNED_OUT_ELSEWHERE = 'از حساب کاربری خود در زبانه‌ای دیگر خارج شدید.';
 
 type Status = 'loading' | 'anon' | 'authed';
 
@@ -31,6 +35,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [unread, setUnread] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
+  const statusRef = useRef(status);
+  statusRef.current = status;
+  const isDemoRef = useRef(false);
+  isDemoRef.current = org?.isDemo ?? isDemoRef.current;
 
   const reset = useCallback(() => {
     setToken(null);
@@ -42,26 +50,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const refresh = useCallback(async () => {
-    if (!getToken()) {
+    const token = getToken();
+    if (!token) {
       reset();
       return;
     }
     try {
       const me = await api.auth.me();
+      if (getToken() !== token) return; // signed out / switched account meanwhile
       setUser(me.user);
       setOrg(me.org);
       setAi(me.ai);
       setUnread(me.unread);
       setStatus('authed');
     } catch (err: any) {
+      if (getToken() !== token) return;
       if (err?.status === 401) reset();
-      else if (status === 'loading') {
-        // Network hiccup on first load: keep the token, show the app shell offline-ish.
+      else if (statusRef.current === 'loading') {
+        // Server unreachable on first load: keep the token so a reload can resume the session.
         setStatus('anon');
         setNotice('ارتباط با سرور برقرار نشد؛ لطفاً اتصال را بررسی و صفحه را تازه کنید.');
       }
     }
-  }, [reset, status]);
+  }, [reset]);
 
   useEffect(() => {
     void refresh();
@@ -70,13 +81,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const onUnauthorized = () => {
+      const wasDemo = isDemoRef.current || lastSessionWasDemo();
       reset();
-      setNotice('نشست شما به پایان رسیده است؛ لطفاً دوباره وارد شوید.');
+      setNotice(wasDemo ? DEMO_EXPIRED_NOTICE : EXPIRED_NOTICE);
       if (window.location.pathname.startsWith('/app')) navigate('/login', { replace: true });
     };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
   }, [reset]);
+
+  // Other tabs: follow a sign-out of this same session, and pick up a sign-in
+  // while this tab is signed out. A tab never silently switches accounts.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== TOKEN_KEY) return;
+      const mine = getToken();
+      const next = e.newValue;
+      if (mine && !next && e.oldValue === mine) {
+        reset();
+        setNotice(SIGNED_OUT_ELSEWHERE);
+        if (window.location.pathname.startsWith('/app')) navigate('/login', { replace: true });
+      } else if (!mine && next) {
+        setToken(next, { persist: false });
+        setStatus('loading');
+        void refresh();
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, [reset, refresh]);
 
   // Keep AI status and unread notifications fresh while the app is open.
   useEffect(() => {
@@ -88,7 +121,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [status, refresh]);
 
   const signIn = useCallback((payload: AuthPayload) => {
-    setToken(payload.token);
+    setToken(payload.token, { demo: payload.org.isDemo });
+    isDemoRef.current = payload.org.isDemo;
     setUser(payload.user);
     setOrg(payload.org);
     setNotice(null);

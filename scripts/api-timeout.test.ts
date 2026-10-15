@@ -1,7 +1,8 @@
 /**
  * Client API layer: every request has a deadline, honours the caller's
- * AbortSignal and carries the bearer token. A single unresponsive request
- * must never freeze an analysis run. Run with: npx tsx scripts/api-timeout.test.ts
+ * AbortSignal and carries the session token in a proxy-safe header. A single
+ * unresponsive request must never freeze an analysis run, and a stale 401
+ * must never sign out a fresh session. Run with: npx tsx scripts/api-timeout.test.ts
  */
 const store = new Map<string, string>();
 (globalThis as any).localStorage = {
@@ -10,6 +11,8 @@ const store = new Map<string, string>();
   removeItem: (k: string) => void store.delete(k),
 };
 store.set('hovida.session.v1', 'test-token-123');
+const dispatched: string[] = [];
+(globalThis as any).window = { dispatchEvent: (e: Event) => void dispatched.push(e.type) };
 
 let failures = 0;
 function assert(cond: boolean, label: string, extra = '') {
@@ -39,14 +42,55 @@ function installOkFetch(body: unknown) {
   };
 }
 
+/** Replies 401 after `delayMs`, like a server rejecting an expired session. */
+function install401Fetch(delayMs = 0) {
+  (globalThis as any).fetch = (_url: string, init?: RequestInit) => {
+    lastInit = init;
+    return new Promise((resolve) =>
+      setTimeout(() => resolve({ ok: false, status: 401, json: () => Promise.resolve({ error: 'x', code: 'SESSION_EXPIRED' }) }), delayMs)
+    );
+  };
+}
+
 async function main() {
-  const { api } = await import('../src/lib/api');
+  const { api, setToken, getToken } = await import('../src/lib/api');
   const payload = { fileName: 'a.pdf', extractedText: 'x', unjudgeableReason: null };
 
   installOkFetch({ items: [], counts: {} });
   await api.jobs.list();
+  const headers = () => (lastInit?.headers || {}) as Record<string, string>;
   assert(lastInit?.signal instanceof AbortSignal, 'every request carries an AbortSignal');
-  assert((lastInit?.headers as Record<string, string>)?.Authorization === 'Bearer test-token-123', 'the bearer token is sent');
+  assert(headers()['X-Hovida-Session'] === 'test-token-123', 'the session token travels in X-Hovida-Session');
+  assert(!('Authorization' in headers()), 'no Authorization header (proxies strip or replace it)');
+
+  installOkFetch({ token: 't', user: {}, org: {} });
+  await api.auth.login({ email: 'a@b.co', password: 'x' });
+  assert(!('X-Hovida-Session' in headers()), 'login never carries a (possibly stale) session token');
+  await api.auth.signup({ orgName: 'o', name: 'n', email: 'a@b.co', password: 'x' });
+  assert(!('X-Hovida-Session' in headers()), 'signup never carries a session token');
+
+  // A 401 for a token that a new login replaced while the request was in flight.
+  install401Fetch(150);
+  dispatched.length = 0;
+  const stale = api.jobs.list().catch((e) => e);
+  setToken('fresh-token-456');
+  const staleErr = await stale;
+  assert(staleErr?.status === 401, 'the stale request still rejects with 401');
+  assert(dispatched.length === 0, 'a stale 401 does not sign out the fresh session');
+  assert(getToken() === 'fresh-token-456' && store.get('hovida.session.v1') === 'fresh-token-456', 'the fresh token is kept');
+
+  install401Fetch(0);
+  await api.jobs.list().catch(() => {});
+  assert(dispatched.length === 1 && dispatched[0] === 'hovida:unauthorized', 'a 401 for the current session signs out');
+
+  // Another tab stored a newer session; clearing ours must not remove it.
+  store.set('hovida.session.v1', 'other-tab-token');
+  setToken(null);
+  assert(store.get('hovida.session.v1') === 'other-tab-token', "signing out never removes another tab's session");
+  setToken('test-token-123');
+  setToken(null);
+  assert(!store.has('hovida.session.v1'), 'signing out removes our own stored session');
+  setToken('test-token-123');
 
   installHangingFetch();
   const t0 = Date.now();

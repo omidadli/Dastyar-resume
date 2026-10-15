@@ -125,14 +125,28 @@ declare global {
   }
 }
 
-function bearerToken(req: express.Request): string | null {
+/** Header the web client uses; see SESSION_HEADER in src/lib/api.ts. */
+export const SESSION_HEADER = 'x-hovida-session';
+
+/**
+ * The session token, from `X-Hovida-Session` (web client) or
+ * `Authorization: Bearer` (scripts / API clients). The custom header wins:
+ * proxies and sandbox gateways often strip or replace `Authorization`.
+ */
+export function sessionToken(req: express.Request): string | null {
+  const custom = req.headers[SESSION_HEADER];
+  const fromCustom = (Array.isArray(custom) ? custom[0] : custom)?.trim();
+  if (fromCustom) return fromCustom.length <= 256 ? fromCustom : null;
   const h = req.headers.authorization;
-  if (typeof h === 'string' && h.startsWith('Bearer ')) return h.slice(7).trim() || null;
+  if (typeof h === 'string' && /^Bearer\s+/i.test(h)) {
+    const t = h.replace(/^Bearer\s+/i, '').trim();
+    return t && t.length <= 256 ? t : null;
+  }
   return null;
 }
 
 export function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const token = bearerToken(req);
+  const token = sessionToken(req);
   if (!token) return res.status(401).json({ error: 'برای ادامه وارد حساب کاربری خود شوید.', code: 'AUTH_REQUIRED' });
   const tokenHash = hashToken(token);
   const session = db.getSession(tokenHash);

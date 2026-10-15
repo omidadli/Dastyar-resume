@@ -13,6 +13,13 @@ const unauth = await call('GET', '/api/jobs'); ok(unauth.status === 401, 'jobs r
 const demo = await call('POST', '/api/auth/demo'); ok(demo.status === 201 && demo.json.token, 'demo workspace', `${demo.ms}ms org=${demo.json.org?.name}`);
 const T = demo.json.token;
 const me = await call('GET', '/api/auth/me', { token: T }); ok(me.status === 200 && me.json.user.role === 'owner', 'me', `unread=${me.json.unread} ai=${me.json.ai.available}`);
+// The web client sends X-Hovida-Session: gateways strip or replace Authorization.
+const viaHeader = await fetch(BASE + '/api/auth/me', { headers: { 'X-Hovida-Session': T } });
+ok(viaHeader.status === 200, 'session via X-Hovida-Session header');
+const replaced = await fetch(BASE + '/api/auth/me', { headers: { 'X-Hovida-Session': T, Authorization: 'Bearer gateway-token' } });
+ok(replaced.status === 200, 'custom header wins over a replaced Authorization header');
+const bogus = await fetch(BASE + '/api/auth/me', { headers: { 'X-Hovida-Session': 'nope' } }).then(async (r) => ({ status: r.status, json: await r.json() }));
+ok(bogus.status === 401 && bogus.json.code === 'SESSION_EXPIRED', 'unknown session token → SESSION_EXPIRED');
 const jobs = await call('GET', '/api/jobs', { token: T }); ok(jobs.json.items?.length === 5, 'demo jobs = 5', JSON.stringify(jobs.json.counts));
 const hrJob = jobs.json.items.find(j => j.roleTitle.includes('جذب'));
 ok(hrJob.stats.total === 8 && hrJob.stats.approved === 2, 'HR job stats', JSON.stringify(hrJob.stats));

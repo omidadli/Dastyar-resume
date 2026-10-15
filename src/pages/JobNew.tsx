@@ -76,6 +76,14 @@ export default function JobNew() {
     }
     lastKey.current = key;
     abortRef.current?.abort();
+    // No AI on this server: go straight to the ready-made template rather
+    // than showing a failure screen on every new job opening.
+    if (ai && !ai.available) {
+      setStep(2);
+      setUnderstanding(null);
+      await loadTemplate();
+      return;
+    }
     const controller = new AbortController();
     abortRef.current = controller;
     setStep(2);
@@ -251,7 +259,7 @@ export default function JobNew() {
                     الگوی آماده دپارتمان
                   </p>
                   <p className="text-[12.5px] text-ink-3 mt-1.5 leading-relaxed">
-                    معیارهای رایج «{dept?.name}» را بارگذاری کنید و در صورت نیاز ویرایش کنید. این فرصت با برچسب «الگوی آماده» مشخص می‌شود.
+                    معیارهای رایج این نوع شغل (بر اساس عنوان و دپارتمان «{dept?.name}») را بارگذاری و در صورت نیاز ویرایش کنید. این فرصت با برچسب «الگوی آماده» مشخص می‌شود.
                   </p>
                   <Button size="sm" className="mt-3" onClick={loadTemplate}>
                     استفاده از الگو
@@ -268,8 +276,11 @@ export default function JobNew() {
 
           {!loadingU && understanding && (
             <>
-              <Callout tone="brand" icon={source === 'ai' ? Sparkles : FileStack} title={source === 'ai' ? 'پیشنهاد هویدا برای این فرصت شغلی' : 'الگوی آماده دپارتمان'}>
+              <Callout tone="brand" icon={source === 'ai' ? Sparkles : FileStack} title={source === 'ai' ? 'پیشنهاد هویدا برای این فرصت شغلی' : 'الگوی آماده'}>
                 {understanding.plainExplanation}
+                {source === 'template' && ai && !ai.available && (
+                  <span className="block mt-1">هوش مصنوعی روی این سرور فعال نیست؛ این معیارها از الگوی آماده ساخته شده‌اند — آن‌ها را با نیاز خود تطبیق دهید.</span>
+                )}
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   <Chip tone="outline">سطح نقش: {understanding.seniority}</Chip>
                   <Chip tone="outline">

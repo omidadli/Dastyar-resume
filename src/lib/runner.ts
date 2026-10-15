@@ -135,183 +135,195 @@ export async function runJobAnalysis(
   };
 
   await api.jobs.analysis(jobId, 'start', { signal }).catch(() => {});
+  // Heartbeat: the server shows "in progress" to teammates only while it hears
+  // from this tab (a closed tab must not leave the job stuck as processing).
+  const keepAlive = setInterval(() => {
+    if (!signal?.aborted) api.jobs.analysis(jobId, 'start').catch(() => {});
+  }, 120_000);
+  try {
+    return await analyse();
+  } finally {
+    clearInterval(keepAlive);
+  }
 
-  // ---- Step A: bounded, fault-isolated text extraction ----
-  emit(`در حال خواندن ${total.toLocaleString('fa-IR')} فایل…`);
-  let extractNext = 0;
-  async function extractWorker() {
-    while (extractNext < items.length) {
-      throwIfAborted();
-      const item = items[extractNext++];
-      item.status = 'extracting';
-      emit(`در حال خواندن «${item.name}»`, item.name, undefined, false);
-      try {
-        if (item.file) {
-          const extraction = await extractResumeContent(item.file, item.name);
-          item.extractedText = extraction.text;
-          extractionByItem.set(item.id, extraction);
-          if (item.file.size === 0) {
-            item.status = 'unjudgeable';
-            item.unjudgeableReason = 'فایل خالی است (حجم صفر بایت).';
+  async function analyse(): Promise<RunResult> {
+    // ---- Step A: bounded, fault-isolated text extraction ----
+    emit(`در حال خواندن ${total.toLocaleString('fa-IR')} فایل…`);
+    let extractNext = 0;
+    async function extractWorker() {
+      while (extractNext < items.length) {
+        throwIfAborted();
+        const item = items[extractNext++];
+        item.status = 'extracting';
+        emit(`در حال خواندن «${item.name}»`, item.name, undefined, false);
+        try {
+          if (item.file) {
+            const extraction = await extractResumeContent(item.file, item.name);
+            item.extractedText = extraction.text;
+            extractionByItem.set(item.id, extraction);
+            if (item.file.size === 0) {
+              item.status = 'unjudgeable';
+              item.unjudgeableReason = 'فایل خالی است (حجم صفر بایت).';
+            } else {
+              item.status = 'queued';
+            }
           } else {
             item.status = 'queued';
           }
-        } else {
-          item.status = 'queued';
-        }
-      } catch (err: any) {
-        if (err?.name === 'AbortError') throw err;
-        item.status = 'queued'; // let the server try — never drop a file here
-      }
-      extractedCount++;
-      markProgress();
-      emit(`${extractedCount.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} فایل خوانده شد`, item.name, undefined, false);
-    }
-  }
-  const extractResults = await Promise.allSettled(Array.from({ length: extractConcurrency(items.length) }, () => extractWorker()));
-  const extractAbort = extractResults.find((r) => r.status === 'rejected' && (r.reason as any)?.name === 'AbortError');
-  if (extractAbort) {
-    await api.jobs.analysis(jobId, 'cancel').catch(() => {});
-    throw (extractAbort as PromiseRejectedResult).reason;
-  }
-
-  throwIfAborted();
-  markProgress();
-
-  // ---- Step B: evaluation with bounded parallelism ----
-  phase = 'evaluating';
-  emit('خواندن فایل‌ها تمام شد؛ تحلیل هویدا آغاز شد…');
-  let next = 0;
-  const microSteps = [
-    'بازخوانی سوابق و ساختار رزومه…',
-    'سنجش مهارت‌ها با معیارهای فرصت شغلی…',
-    'تطبیق با شرط‌های پرسش‌نامه…',
-    'گردآوری شواهد و محاسبه میزان تطابق…',
-  ];
-  const heartbeat = setInterval(() => {
-    if (active.size > 0 && phase === 'evaluating') {
-      tick++;
-      const name = Array.from(active)[0];
-      emit(`هویدا در حال تحلیل «${name}»`, name, microSteps[tick % microSteps.length]);
-    } else if (phase !== 'done' && Date.now() - lastProgressAt > STALL_WARNING_MS) {
-      emit('در انتظار پاسخ سرور…');
-    }
-  }, 1000);
-
-  async function evalWorker() {
-    while (next < items.length) {
-      throwIfAborted();
-      const item = items[next++];
-      // With clean extracted text the base64 file is NOT sent (≈5KB vs MBs);
-      // scans/images without text go multimodal so the AI can read them.
-      const hasCleanText = Boolean(item.extractedText && item.extractedText.trim().length >= 40);
-      const needAttachment = !hasCleanText && item.file && item.file.size <= MAX_INLINE_FILE_BYTES;
-      const attachment = needAttachment && item.file ? await fileToBase64(item.file).catch(() => undefined) : undefined;
-
-      if (item.status === 'unjudgeable') {
-        try {
-          const { record } = await api.jobs.evaluate(
-            jobId,
-            { fileName: item.name, extractedText: '', unjudgeableReason: item.unjudgeableReason || 'فایل قابل تحلیل نیست.', fileBase64: attachment },
-            { signal }
-          );
-          item.recordId = record.id;
-          item.category = record.category;
-          result.unjudgeable++;
         } catch (err: any) {
           if (err?.name === 'AbortError') throw err;
-          item.status = 'error';
-          item.errorMessage = err?.message || 'ثبت فایل ناموفق بود.';
-          result.errors++;
+          item.status = 'queued'; // let the server try — never drop a file here
         }
-        processed++;
+        extractedCount++;
         markProgress();
-        emit(`${processed.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} رزومه بررسی شد`);
-        continue;
+        emit(`${extractedCount.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} فایل خوانده شد`, item.name, undefined, false);
       }
+    }
+    const extractResults = await Promise.allSettled(Array.from({ length: extractConcurrency(items.length) }, () => extractWorker()));
+    const extractAbort = extractResults.find((r) => r.status === 'rejected' && (r.reason as any)?.name === 'AbortError');
+    if (extractAbort) {
+      await api.jobs.analysis(jobId, 'cancel').catch(() => {});
+      throw (extractAbort as PromiseRejectedResult).reason;
+    }
 
-      item.status = 'evaluating';
-      active.add(item.name);
-      markProgress();
-      emit(`هویدا در حال تحلیل «${item.name}»`, item.name, microSteps[0]);
-      try {
-        const { record } = await api.jobs.evaluate(
-          jobId,
-          { fileName: item.name, extractedText: item.extractedText || '', unjudgeableReason: null, fileBase64: attachment },
-          { signal }
-        );
-        item.recordId = record.id;
-        item.category = record.category;
-        item.score = record.score;
-        if (record.category === 'UNJUDGEABLE') {
-          item.status = 'unjudgeable';
-          item.unjudgeableReason = record.unjudgeableReason || 'اطلاعات رزومه برای قضاوت کافی نیست.';
-          result.unjudgeable++;
-        } else if (record.category === 'ERROR') {
-          item.status = 'error';
-          result.errors++;
-        } else {
-          item.status = 'success';
-          if (record.engine === 'local') result.localCount++;
-          else result.aiCount++;
+    throwIfAborted();
+    markProgress();
+
+    // ---- Step B: evaluation with bounded parallelism ----
+    phase = 'evaluating';
+    emit('خواندن فایل‌ها تمام شد؛ تحلیل هویدا آغاز شد…');
+    let next = 0;
+    const microSteps = [
+      'بازخوانی سوابق و ساختار رزومه…',
+      'سنجش مهارت‌ها با معیارهای فرصت شغلی…',
+      'تطبیق با شرط‌های پرسش‌نامه…',
+      'گردآوری شواهد و محاسبه میزان تطابق…',
+    ];
+    const heartbeat = setInterval(() => {
+      if (active.size > 0 && phase === 'evaluating') {
+        tick++;
+        const name = Array.from(active)[0];
+        emit(`هویدا در حال تحلیل «${name}»`, name, microSteps[tick % microSteps.length]);
+      } else if (phase !== 'done' && Date.now() - lastProgressAt > STALL_WARNING_MS) {
+        emit('در انتظار پاسخ سرور…');
+      }
+    }, 1000);
+
+    async function evalWorker() {
+      while (next < items.length) {
+        throwIfAborted();
+        const item = items[next++];
+        // With clean extracted text the base64 file is NOT sent (≈5KB vs MBs);
+        // scans/images without text go multimodal so the AI can read them.
+        const hasCleanText = Boolean(item.extractedText && item.extractedText.trim().length >= 40);
+        const needAttachment = !hasCleanText && item.file && item.file.size <= MAX_INLINE_FILE_BYTES;
+        const attachment = needAttachment && item.file ? await fileToBase64(item.file).catch(() => undefined) : undefined;
+
+        if (item.status === 'unjudgeable') {
+          try {
+            const { record } = await api.jobs.evaluate(
+              jobId,
+              { fileName: item.name, extractedText: '', unjudgeableReason: item.unjudgeableReason || 'فایل قابل تحلیل نیست.', fileBase64: attachment },
+              { signal }
+            );
+            item.recordId = record.id;
+            item.category = record.category;
+            result.unjudgeable++;
+          } catch (err: any) {
+            if (err?.name === 'AbortError') throw err;
+            item.status = 'error';
+            item.errorMessage = err?.message || 'ثبت فایل ناموفق بود.';
+            result.errors++;
+          }
+          processed++;
+          markProgress();
+          emit(`${processed.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} رزومه بررسی شد`);
+          continue;
         }
-        // Text-only fast path: upload the original quietly afterwards so it
-        // stays available for preview/download without blocking the queue.
-        if (hasCleanText && item.file && item.file.size <= MAX_INLINE_FILE_BYTES) {
-          const file = item.file;
-          const recId = record.id;
-          fileToBase64(file)
-            .then((b64) => api.resumes.attachFile(recId, item.name, b64))
-            .catch(() => {});
-        }
-      } catch (err: any) {
-        if (err?.name === 'AbortError' || signal?.aborted) throw err;
+
+        item.status = 'evaluating';
+        active.add(item.name);
+        markProgress();
+        emit(`هویدا در حال تحلیل «${item.name}»`, item.name, microSteps[0]);
         try {
           const { record } = await api.jobs.evaluate(
             jobId,
-            {
-              fileName: item.name,
-              extractedText: item.extractedText || '',
-              unjudgeableReason: null,
-              fileBase64: attachment,
-              errorMessage: err?.message || 'خطا در تحلیل',
-            },
+            { fileName: item.name, extractedText: item.extractedText || '', unjudgeableReason: null, fileBase64: attachment },
             { signal }
           );
           item.recordId = record.id;
           item.category = record.category;
-        } catch {
-          /* server unreachable — keep the local error state */
+          item.score = record.score;
+          if (record.category === 'UNJUDGEABLE') {
+            item.status = 'unjudgeable';
+            item.unjudgeableReason = record.unjudgeableReason || 'اطلاعات رزومه برای قضاوت کافی نیست.';
+            result.unjudgeable++;
+          } else if (record.category === 'ERROR') {
+            item.status = 'error';
+            result.errors++;
+          } else {
+            item.status = 'success';
+            if (record.engine === 'local') result.localCount++;
+            else result.aiCount++;
+          }
+          // Text-only fast path: upload the original quietly afterwards so it
+          // stays available for preview/download without blocking the queue.
+          if (hasCleanText && item.file && item.file.size <= MAX_INLINE_FILE_BYTES) {
+            const file = item.file;
+            const recId = record.id;
+            fileToBase64(file)
+              .then((b64) => api.resumes.attachFile(recId, item.name, b64))
+              .catch(() => {});
+          }
+        } catch (err: any) {
+          if (err?.name === 'AbortError' || signal?.aborted) throw err;
+          try {
+            const { record } = await api.jobs.evaluate(
+              jobId,
+              {
+                fileName: item.name,
+                extractedText: item.extractedText || '',
+                unjudgeableReason: null,
+                fileBase64: attachment,
+                errorMessage: err?.message || 'خطا در تحلیل',
+              },
+              { signal }
+            );
+            item.recordId = record.id;
+            item.category = record.category;
+          } catch {
+            /* server unreachable — keep the local error state */
+          }
+          item.status = 'error';
+          item.errorMessage = err?.message || 'خطا در تحلیل';
+          result.errors++;
+        } finally {
+          active.delete(item.name);
+          processed++;
+          markProgress();
+          emit(`تحلیل ${processed.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} رزومه انجام شد`, item.name);
         }
-        item.status = 'error';
-        item.errorMessage = err?.message || 'خطا در تحلیل';
-        result.errors++;
-      } finally {
-        active.delete(item.name);
-        processed++;
-        markProgress();
-        emit(`تحلیل ${processed.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} رزومه انجام شد`, item.name);
       }
     }
+
+    const evalResults = await Promise.allSettled(Array.from({ length: evalConcurrency(items.length) }, () => evalWorker())).finally(() =>
+      clearInterval(heartbeat)
+    );
+    const evalAbort = evalResults.find((r) => r.status === 'rejected' && (r.reason as any)?.name === 'AbortError');
+    if (evalAbort) {
+      await api.jobs.analysis(jobId, 'cancel').catch(() => {});
+      throw (evalAbort as PromiseRejectedResult).reason;
+    }
+
+    // ---- Step C: relative calibration + finish ----
+    phase = 'calibrating';
+    markProgress();
+    emit('در حال هم‌سنجی نهایی و رتبه‌بندی منصفانه…');
+    await api.jobs.calibrate(jobId, total, { signal }).catch((e) => console.warn('calibration skipped', e));
+
+    phase = 'done';
+    emit('تحلیل رزومه‌ها کامل شد.');
+    extractionByItem.clear();
+    return result;
   }
-
-  const evalResults = await Promise.allSettled(Array.from({ length: evalConcurrency(items.length) }, () => evalWorker())).finally(() =>
-    clearInterval(heartbeat)
-  );
-  const evalAbort = evalResults.find((r) => r.status === 'rejected' && (r.reason as any)?.name === 'AbortError');
-  if (evalAbort) {
-    await api.jobs.analysis(jobId, 'cancel').catch(() => {});
-    throw (evalAbort as PromiseRejectedResult).reason;
-  }
-
-  // ---- Step C: relative calibration + finish ----
-  phase = 'calibrating';
-  markProgress();
-  emit('در حال هم‌سنجی نهایی و رتبه‌بندی منصفانه…');
-  await api.jobs.calibrate(jobId, total, { signal }).catch((e) => console.warn('calibration skipped', e));
-
-  phase = 'done';
-  emit('تحلیل رزومه‌ها کامل شد.');
-  extractionByItem.clear();
-  return result;
 }

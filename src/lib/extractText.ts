@@ -1,5 +1,7 @@
 import pdfWorker from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
 import { normalizePersianText } from './normalizeFa';
+import { assemblePageText, type PdfTextItem } from './pdfLayout';
+import { rtfToText } from './rtf';
 
 /** Lazy loaded to avoid bloating initial bundle on page load */
 let mammothPromise: Promise<any> | null = null;
@@ -105,9 +107,9 @@ function extractFromDocBinary(buffer: ArrayBuffer): string {
 }
 
 /**
- * PDF Text extraction with coordinate-aware layout sorting.
- * Detects two-column resumes and sorts items reading-order (Y descending, X ascending or right-to-left for Persian).
- * Fails gracefully so visual or complex PDFs proceed to Gemini multimodal vision.
+ * PDF text extraction. Layout (lines, columns, Persian glyph order, spaces)
+ * is rebuilt by assemblePageText. Fails gracefully so visual or complex PDFs
+ * proceed to multimodal AI.
  */
 async function extractFromPdfWithCoordinates(buffer: ArrayBuffer): Promise<string> {
   const pdfjsLib = await loadPdfJs();
@@ -145,75 +147,21 @@ async function extractFromPdfWithCoordinates(buffer: ArrayBuffer): Promise<strin
         const viewport = page.getViewport({ scale: 1.0 });
         const content = await page.getTextContent();
 
-        interface TextItemPos {
-          str: string;
-          x: number;
-          y: number; // in PDF coords, y is from bottom, so viewport.height - y is from top
-          height: number;
-        }
-
-        const items: TextItemPos[] = [];
-        for (const item of content.items) {
-          if ('str' in item && item.str.trim()) {
-            const tx = item.transform[4];
-            const ty = viewport.height - item.transform[5]; // top-down coordinate
-            items.push({
-              str: item.str,
-              x: tx,
-              y: ty,
-              height: item.height || 10,
-            });
-          }
-        }
-
-        if (items.length === 0) continue;
-
-        // Check if the page looks like a 2-column layout
-        const midX = viewport.width / 2;
-        const leftCount = items.filter((it) => it.x < midX - 20).length;
-        const rightCount = items.filter((it) => it.x > midX + 20).length;
-        const isTwoColumn = leftCount > 15 && rightCount > 15;
-
-        const joinItems = (colItems: TextItemPos[]) => {
-          colItems.sort((a, b) => {
-            const yDiff = a.y - b.y;
-            if (Math.abs(yDiff) > 6) return yDiff;
-            return b.x - a.x;
+        // Reading order, spaces, columns and RTL glyph order are rebuilt in
+        // pdfLayout.ts (Chrome/Word place Persian glyphs one by one, visually).
+        const items: PdfTextItem[] = [];
+        for (const item of content.items as any[]) {
+          if (typeof item?.str !== 'string' || !item.str.length || !item.transform) continue;
+          items.push({
+            str: item.str,
+            x: item.transform[4],
+            y: viewport.height - item.transform[5],
+            w: item.width || 0,
+            h: item.height || 0,
           });
-          let out = '';
-          for (let i = 0; i < colItems.length; i++) {
-            const cur = colItems[i];
-            const prev = colItems[i - 1];
-            if (!prev) {
-              out += cur.str;
-              continue;
-            }
-            const yDiff = Math.abs(cur.y - prev.y);
-            if (yDiff > 8) {
-              out += '\n' + cur.str;
-            } else {
-              const xDiff = Math.abs(cur.x - prev.x);
-              if (cur.str.startsWith(' ') || prev.str.endsWith(' ') || xDiff > 12) {
-                out += (cur.str.startsWith(' ') ? '' : ' ') + cur.str;
-              } else {
-                out += cur.str;
-              }
-            }
-          }
-          return out;
-        };
-
-        let sortedText = '';
-
-        if (isTwoColumn) {
-          const rightItems = items.filter((it) => it.x >= midX - 20);
-          const leftItems = items.filter((it) => it.x < midX - 20);
-          const rightText = joinItems(rightItems);
-          const leftText = joinItems(leftItems);
-          sortedText = `${rightText}\n\n${leftText}`;
-        } else {
-          sortedText = joinItems(items);
         }
+        if (items.length === 0) continue;
+        let sortedText = assemblePageText(items, viewport.width);
 
         // Extract PDF annotations (links, email mailto, phone tel, whatsapp wa.me, etc.)
         try {
@@ -282,7 +230,8 @@ async function extractFromDocx(buffer: ArrayBuffer): Promise<string> {
       'باز کردن فایل Word'
     );
     if (result?.value && typeof result.value === 'string' && result.value.trim().length > 10) {
-      return result.value.trim();
+      // mammoth separates every paragraph with a blank line; keep one break.
+      return result.value.replace(/\n[ \t]*\n+/g, '\n').trim();
     }
   } catch (mErr) {
     console.warn('Mammoth extraction failed, trying zip xml fallback:', mErr);
@@ -318,6 +267,30 @@ async function extractDocxViaZip(buffer: ArrayBuffer): Promise<string> {
     return lines.join('\n');
   } catch (zipErr) {
     console.warn('Docx direct XML extraction error:', zipErr);
+    return '';
+  }
+}
+
+/** OpenDocument text (.odt) is a ZIP: read paragraphs from content.xml. */
+async function extractFromOdt(buffer: ArrayBuffer): Promise<string> {
+  try {
+    const JSZip = await loadJSZip();
+    const zip: any = await new JSZip().loadAsync(buffer.slice(0));
+    const xml: string | undefined = await zip.files['content.xml']?.async('string');
+    if (!xml) return '';
+    return xml
+      .replace(/<text:(?:s|tab)[^>]*\/>/g, ' ')
+      .replace(/<text:line-break[^>]*\/>/g, '\n')
+      .replace(/<\/text:(?:p|h)>/g, '\n')
+      .replace(/<[^>]+>/g, '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&')
+      .trim();
+  } catch (err) {
+    console.warn('ODT extraction failed:', err);
     return '';
   }
 }
@@ -430,8 +403,20 @@ export async function extractResumeContent(file: File | Blob, fileName: string):
       };
     }
 
-    // 5. Plain / Rich Text (TXT, RTF, MD, CSV, LOG, ODT)
-    if (['txt', 'rtf', 'md', 'text', 'csv', 'log', 'odt'].includes(ext)) {
+    // 5. OpenDocument (a ZIP — never decode it as text) and RTF (markup)
+    if (ext === 'odt' || ext === 'rtf') {
+      let rawText = '';
+      try {
+        rawText = ext === 'odt' ? await extractFromOdt(buffer) : rtfToText(new TextDecoder('latin1').decode(buffer));
+      } catch (err) {
+        console.warn(`${ext} extraction error:`, err);
+      }
+      const normalized = normalizePersianText(rawText);
+      return { text: normalized, success: true, isVisualDocument: normalized.trim().length < 30 };
+    }
+
+    // 6. Plain text (TXT, MD, CSV, LOG)
+    if (['txt', 'md', 'text', 'csv', 'log'].includes(ext)) {
       const rawText = extractFromPlainText(buffer);
       const normalized = normalizePersianText(rawText);
       return {
@@ -440,7 +425,7 @@ export async function extractResumeContent(file: File | Blob, fileName: string):
       };
     }
 
-    // 6. Any other non-empty file format:
+    // 7. Any other non-empty file format:
     // Pass along to Gemini multimodal / server evaluation
     return {
       text: '',

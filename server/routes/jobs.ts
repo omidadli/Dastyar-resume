@@ -190,7 +190,7 @@ export function jobRoutes(): express.Router {
               if (ext === 'docx') {
                 const mammoth = await import('mammoth');
                 const out = await mammoth.extractRawText({ buffer: buf });
-                if (out?.value?.trim().length > 10) text = out.value.trim();
+                if (out?.value?.trim().length > 10) text = out.value.replace(/\n[ \t]*\n+/g, '\n').trim();
               } else if (['txt', 'md', 'csv', 'log', 'rtf'].includes(ext)) {
                 text = buf.toString('utf8').trim();
               }

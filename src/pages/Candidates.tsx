@@ -1,15 +1,15 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, Users } from 'lucide-react';
+import { CheckCircle2, Plus, UploadCloud, Users } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
 import { CandidatePanel } from '../components/candidates/CandidatePanel';
 import { CandidateTable } from '../components/candidates/CandidateTable';
-import { Card, Drawer, EmptyState, ErrorState, Pagination, SearchInput, Segmented, Select, Tabs } from '../components/ui';
+import { Button, Card, Drawer, EmptyState, ErrorState, Pagination, SearchInput, Segmented, Select, Tabs } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useOnChange } from '../lib/events';
 import { jalaliDaysAgo } from '../lib/format';
 import { MATCH_FILTERS } from '../lib/match';
-import { setQuery, useLocation } from '../lib/router';
+import { navigate, setQuery, useLocation } from '../lib/router';
 import { useAsync, useDebounced } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { Criterion, DecisionFilter, MatchFilter, ResumeListItem, ResumeSort } from '../types/screening';
@@ -156,7 +156,19 @@ export default function Candidates() {
               onOpen={setSelected}
               showJob
               emptyState={
-                tab === 'pending' && !q && !jobId && !dept ? (
+                counts?.all === 0 && !q && !jobId && !dept && range === 'all' ? (
+                  <EmptyState
+                    icon={UploadCloud}
+                    title="هنوز رزومه‌ای ثبت نشده است"
+                    description="یک فرصت شغلی بسازید و رزومه‌ها را بارگذاری کنید؛ هویدا آن‌ها را با معیارهای همان فرصت می‌سنجد."
+                    action={
+                      <Button icon={Plus} onClick={() => navigate('/app/jobs/new')}>
+                        ایجاد فرصت شغلی
+                      </Button>
+                    }
+                    compact
+                  />
+                ) : tab === 'pending' && !q && !jobId && !dept ? (
                   <EmptyState icon={CheckCircle2} title="کاری در صف تصمیم نیست" description="برای همه کاندیداهای با تطابق بالا یا نیازمند بررسی تصمیم ثبت شده است." compact />
                 ) : (
                   <EmptyState icon={Users} title="کاندیدایی پیدا نشد" description="فیلترها را تغییر دهید یا عبارت دیگری جست‌وجو کنید." compact />

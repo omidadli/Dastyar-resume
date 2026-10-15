@@ -59,6 +59,7 @@ export function orgRoutes(): express.Router {
       if (!isValidEmail(email)) return res.status(400).json({ error: 'ایمیل معتبر نیست.', field: 'email' });
       const weak = passwordProblem(password);
       if (weak) return res.status(400).json({ error: weak, field: 'password' });
+      if (role === 'admin' && user.role !== 'owner') return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند مدیر تعیین کند.', field: 'role' });
       if (db.findUserByEmail(email)) return res.status(409).json({ error: 'این ایمیل قبلاً در هویدا ثبت شده است.', field: 'email' });
       if (db.listMembers(org.id).length >= 50) return res.status(400).json({ error: 'سقف ۵۰ عضو برای هر فضای کاری پر شده است.' });
       const member = db.createUser({ orgId: org.id, name, email, title, role, passwordHash: await hashPassword(password) });
@@ -74,6 +75,9 @@ export function orgRoutes(): express.Router {
     if (target.role === 'owner') return res.status(400).json({ error: 'نقش مالک فضای کاری قابل تغییر نیست.' });
     if (target.id === user.id) return res.status(400).json({ error: 'نقش خودتان را نمی‌توانید تغییر دهید.' });
     const role = oneOf<Role>(req.body?.role, ['admin', 'member'], target.role === 'admin' ? 'admin' : 'member');
+    if ((target.role === 'admin' || role === 'admin') && user.role !== 'owner') {
+      return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند مدیران را تعیین یا تغییر دهد.' });
+    }
     db.updateUser(target.id, { role });
     res.json({ members: members(org.id, user.id) });
   });
@@ -84,6 +88,7 @@ export function orgRoutes(): express.Router {
     if (!target || target.orgId !== org.id) return res.status(404).json({ error: 'عضو یافت نشد.' });
     if (target.role === 'owner') return res.status(400).json({ error: 'مالک فضای کاری قابل حذف نیست.' });
     if (target.id === user.id) return res.status(400).json({ error: 'برای خروج از فضای کاری از مدیر بخواهید شما را حذف کند.' });
+    if (target.role === 'admin' && user.role !== 'owner') return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند مدیران را حذف کند.' });
     db.deleteUser(target.id);
     db.logActivity(org.id, actorOf(req), 'member.removed', `«${target.name}» را از تیم حذف کرد`);
     res.json({ members: members(org.id, user.id) });

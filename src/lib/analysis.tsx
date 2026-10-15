@@ -5,6 +5,8 @@ import { emitChange } from './events';
 import { toast } from '../components/ui/Toast';
 import { navigate } from './router';
 import { playCompletionChime } from './sound';
+import { onBeforeSignOut, useAuth } from './auth';
+import { api } from './api';
 
 /**
  * App-level background analysis. Runs survive page navigation (the user can
@@ -112,6 +114,32 @@ export function AnalysisProvider({ children }: { children: React.ReactNode }) {
   const cancel = useCallback((jobId: string) => {
     controllers.current[jobId]?.abort();
   }, []);
+
+  // Signing out stops every run first — while the token still works, so the
+  // server marks those jobs as cancelled instead of "in progress".
+  useEffect(
+    () =>
+      onBeforeSignOut(async () => {
+        const ids = Object.keys(controllers.current);
+        ids.forEach((id) => controllers.current[id]?.abort());
+        await Promise.allSettled(ids.map((id) => api.jobs.analysis(id, 'cancel')));
+      }),
+    []
+  );
+
+  // Any other way the account goes away (expired session, sign-out in another
+  // tab, switching accounts): stop the runs and forget their progress.
+  const { user } = useAuth();
+  const userId = user?.id ?? null;
+  const lastUser = useRef(userId);
+  useEffect(() => {
+    if (lastUser.current && lastUser.current !== userId) {
+      Object.values(controllers.current).forEach((c) => c.abort());
+      controllers.current = {};
+      setRuns({});
+    }
+    lastUser.current = userId;
+  }, [userId]);
 
   const dismiss = useCallback((jobId: string) => {
     setRuns((prev) => {

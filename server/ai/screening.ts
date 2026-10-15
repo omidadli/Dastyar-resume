@@ -35,7 +35,7 @@ import type {
   ScreeningQuestion,
 } from '../../src/types/screening';
 import type { Department } from '../../src/types/app';
-import { normalizePersianText, toEnglishDigits } from '../../src/lib/normalizeFa';
+import { normalizeForSearch, normalizePersianText, toEnglishDigits, toPersianDigits } from '../../src/lib/normalizeFa';
 
 export { friendlyAiError };
 
@@ -281,15 +281,21 @@ export function repairUnderstanding(
 }
 
 /** Maps any (possibly custom) department to the closest built-in template. */
-function templateKey(department: Department): string {
+function templateKeyOf(text: string): string | null {
+  if (/منابع\s*انسانی|جذب|استخدام|کارگزینی|آموزش\s*کارکنان|\bHR\b|recruit/i.test(text)) return 'hr';
+  if (/حسابدار|مالی|حسابرس|خزانه|بودجه|account|financ/i.test(text)) return 'finance';
+  if (/برنامه.?نویس|توسعه.?دهنده|نرم.?افزار|فناوری|شبکه|پشتیبانی\s*فنی|devops|developer|\bIT\b/i.test(text)) return 'it';
+  if (/فروش|بازاریاب|ویزیت|بازرگانی|sales/i.test(text)) return 'sales';
+  if (/تولید|کارخانه|کارگاه|اپراتور|تکنسین|خط\s*تولید|نگهداری\s*و\s*تعمیرات/i.test(text)) return 'manufacturing';
+  return null;
+}
+
+/** The role title is more specific than its department («کارشناس جذب» filed under «فروش» is still HR). */
+function templateKey(department: Department, roleTitle = ''): string {
+  const byRole = templateKeyOf(roleTitle);
+  if (byRole) return byRole;
   if (['sales', 'manufacturing', 'finance', 'it', 'hr'].includes(department.id)) return department.id;
-  const n = `${department.name} ${department.hint}`;
-  if (/فروش|بازرگانی|ویزیت/.test(n)) return 'sales';
-  if (/تولید|کارخانه|کارگاه/.test(n)) return 'manufacturing';
-  if (/مالی|حسابدار/.test(n)) return 'finance';
-  if (/فناوری|نرم.?افزار|برنامه.?نویس|\bIT\b|شبکه/i.test(n)) return 'it';
-  if (/منابع انسانی|جذب|کارگزینی/.test(n)) return 'hr';
-  return 'default';
+  return templateKeyOf(`${department.name} ${department.hint}`) || 'default';
 }
 
 /**
@@ -302,7 +308,7 @@ export function buildTemplateUnderstanding(department: Department, roleTitle: st
   const departmentId = department.id;
   const title = roleTitle.trim();
 
-  switch (templateKey(department)) {
+  switch (templateKey(department, title)) {
     case 'sales':
       return {
         department: dept.name,
@@ -1099,6 +1105,62 @@ export function finalizeEvaluation(
 
 // ---------------- Local keyword-based engine (honestly labeled) ----------------
 
+const ROLE_WORD = /(کارشناس|مهندس|مدیر|سرپرست|فروشنده|اپراتور|حسابدار|تکنسین|توسعه.?دهنده|برنامه.?نویس|طراح|مسئول|کارمند|منشی|بازاریاب|ویزیتور|developer|engineer|manager|specialist|accountant|designer)/i;
+
+/**
+ * The resume line that best shows a keyword hit — longest (most specific)
+ * keyword first, skipping bare headings — instead of a span between periods
+ * (which cut quotes inside e-mails like «neda.»).
+ */
+function evidenceLine(text: string, hits: string[]): string | null {
+  const lines = text.split(/\n+/).map((l) => l.trim()).filter(Boolean);
+  const norm = lines.map((l) => normalizeForSearch(l));
+  const tight = norm.map((l) => l.replace(/\s+/g, ''));
+  let fallback: string | null = null;
+  for (const hit of hits.slice().sort((a, b) => b.length - a.length)) {
+    const h = normalizeForSearch(hit);
+    for (let i = 0; i < lines.length; i++) {
+      if (!norm[i].includes(h) && !tight[i].includes(h.replace(/\s+/g, ''))) continue;
+      const line = lines[i];
+      if (line.length < h.length + 12) {
+        fallback ??= line; // a heading such as «مهارت‌ها» — keep looking
+        continue;
+      }
+      if (line.length <= 160) return line;
+      const at = Math.max(0, norm[i].indexOf(h));
+      const start = Math.max(0, at - 60);
+      return `${start > 0 ? '…' : ''}${line.slice(start, start + 150).trim()}…`;
+    }
+  }
+  return fallback;
+}
+
+/** Highest degree mentioned, without running into the next line. */
+function educationOf(text: string): string | null {
+  const degrees = [/دکتری|دکترا/, /کارشناسی\s*ارشد|فوق\s*لیسانس/, /کارشناسی|لیسانس/, /کاردانی|فوق\s*دیپلم/, /دیپلم/];
+  for (const d of degrees) {
+    const m = text.match(new RegExp(`(?:${d.source})[^\n،,؛;:()|—–\-]{0,45}`));
+    if (m) return m[0].replace(/\s+/g, ' ').trim();
+  }
+  return null;
+}
+
+/**
+ * Job title from the resume header: the segment of the first line that holds
+ * a role word — not the whole line with city, e-mail and phone attached.
+ */
+function roleLineOf(head: string[]): string | null {
+  for (const line of head.slice(0, 8)) {
+    if (!ROLE_WORD.test(line)) continue;
+    const segment = line
+      .split(/\s+[—–|]\s+|\s+-\s+|[|•،,]/)
+      .map((p) => p.replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '').replace(/[+\d\u06F0-\u06F9\u0660-\u0669][\d\u06F0-\u06F9\u0660-\u0669\s-]{7,}/g, '').trim())
+      .find((p) => ROLE_WORD.test(p));
+    if (segment && segment.length >= 3) return segment.slice(0, 80);
+  }
+  return null;
+}
+
 export function evaluateResumeLocal(
   resumeText: string,
   understanding: JobUnderstanding,
@@ -1134,25 +1196,25 @@ export function evaluateResumeLocal(
   const yearsMatch = digitsText.match(/(\d{1,2})\s*(?:سال\s*(?:سابقه|تجربه)|years?\s*(?:of)?\s*experience)/i);
   const years = yearsMatch ? Math.min(40, parseInt(yearsMatch[1], 10)) : null;
 
-  // Per-criterion scoring via keyword overlap with title tokens
-  const stopWords = new Set(['و', 'در', 'با', 'به', 'های', 'سازی', 'کار', 'تجربه', 'دانش', 'تسلط', 'آشنایی', 'بر', 'از', 'این', 'آن', 'یا', 'مرتبط']);
+  // Per-criterion scoring via keyword overlap with title tokens. Both sides use
+  // search normalisation (ي/ی, ك/ک, digits, ZWNJ ≈ space) and a space-free
+  // comparison, so «مصاحبه‌های» / «مصاحبه های» / «مصاحبههای» all match.
+  const stopWords = new Set(['و', 'در', 'با', 'به', 'های', 'سازی', 'کار', 'تجربه', 'دانش', 'تسلط', 'آشنایی', 'بر', 'از', 'این', 'آن', 'یا', 'مرتبط', 'مانند', 'برای', 'اصول']);
+  const hay = normalizeForSearch(text);
+  const hayTight = hay.replace(/\s+/g, '');
+  const has = (token: string) => {
+    const t = normalizeForSearch(token);
+    return Boolean(t) && (hay.includes(t) || hayTight.includes(t.replace(/\s+/g, '')));
+  };
   const criterionScores: CriterionScore[] = understanding.criteria.map((c) => {
     const tokens = c.title
-      .split(/[\s،,/()]+/)
+      .split(/[\s\u200C،,/()؛:\-–—]+/)
       .map((t) => t.trim())
       .filter((t) => t.length > 2 && !stopWords.has(t));
-    const hits = tokens.filter((t) => lower.includes(t.toLowerCase()));
+    const hits = tokens.filter(has);
     const ratio = tokens.length ? hits.length / tokens.length : 0;
     const score = Math.round(25 + ratio * 70);
-    const quote = hits.length
-      ? (() => {
-          const idx = lower.indexOf(hits[0].toLowerCase());
-          const start = Math.max(0, text.lastIndexOf('.', idx) + 1);
-          const end = text.indexOf('.', idx);
-          const snippet = text.slice(start, end === -1 ? Math.min(text.length, idx + 80) : end + 1).trim();
-          return snippet.slice(0, 120) || `اشاره به ${hits.slice(0, 2).join('، ')} در رزومه`;
-        })()
-      : 'در رزومه شاهد مشخصی برای این شاخص یافت نشد';
+    const quote = hits.length ? evidenceLine(text, hits) || `اشاره به ${hits.slice(0, 2).join('، ')} در رزومه` : 'در رزومه شاهد مشخصی برای این شاخص یافت نشد';
     return {
       criterionId: c.id,
       title: c.title,
@@ -1204,8 +1266,8 @@ export function evaluateResumeLocal(
     },
     facts: {
       yearsExperience: years,
-      education: text.match(/(کارشناسی\s*ارشد|کارشناسی|کاردانی|دکتری|دیپلم)[\s\u0600-\u06FF]{0,25}/)?.[0]?.trim() || null,
-      lastRole: head.find((l) => /(کارشناس|مهندس|مدیر|سرپرست|فروشنده|اپراتور|حسابدار|تکنسین|توسعه‌دهنده|برنامه‌نویس)/.test(l)) || null,
+      education: educationOf(text),
+      lastRole: roleLineOf(head),
       skills: [],
       expectedSalary: null,
     },
@@ -1214,7 +1276,7 @@ export function evaluateResumeLocal(
     confidence: 'low',
     engine: 'local',
     recommendation,
-    summary: `این ارزیابی با موتور محلی (تطبیق کلیدواژه‌ای، نه هوش مصنوعی) انجام شده است؛ امتیاز ${finalScore} فقط بر اساس حضور کلیدواژه‌های شاخص‌ها در متن رزومه است و دقت کمتری دارد.`,
+    summary: `این ارزیابی با موتور محلی (تطبیق کلیدواژه‌ای، نه هوش مصنوعی) انجام شده است؛ امتیاز ${toPersianDigits(finalScore)} فقط بر اساس حضور کلیدواژه‌های شاخص‌ها در متن رزومه است و دقت کمتری دارد.`,
     whyCategory:
       recommendation === 'INTERVIEW'
         ? 'تطابق کلیدواژه‌ای خوبی با شاخص‌های شغل دیده شد (تحلیل محلی).'

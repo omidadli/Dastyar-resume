@@ -5,11 +5,20 @@ import { navigate, useLocation } from '../../lib/router';
 import { Button, Monogram } from '../ui';
 import { toPersianDigits } from '../../lib/format';
 
+/** Only where candidates are browsed — never on top of reports, settings or the dashboard. */
+const TRAY_PAGES = /^\/app\/(?:jobs\/(?!new(?:\/|$))[^/]+|candidates|talent)/;
+
+export function useCompareTrayVisible(): boolean {
+  const { items } = useCompare();
+  const { pathname } = useLocation();
+  return items.length > 0 && TRAY_PAGES.test(pathname);
+}
+
 /** Floating tray listing candidates picked for side-by-side comparison. */
 export function CompareTray() {
   const { items, jobTitle } = useCompare();
-  const { pathname } = useLocation();
-  if (!items.length || pathname.startsWith('/app/compare')) return null;
+  const visible = useCompareTrayVisible();
+  if (!visible) return null;
   return (
     <div className="hidden lg:flex fixed bottom-5 left-1/2 -translate-x-1/2 lg:translate-x-[calc(-50%-128px)] z-40 items-center gap-3 pl-2 pr-4 py-2 rounded-[16px] bg-[#1f2622] text-white shadow-pop animate-pop-in">
       <div className="flex flex-col leading-tight ml-1">

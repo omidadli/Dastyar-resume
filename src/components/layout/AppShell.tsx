@@ -28,7 +28,7 @@ import { useCompare } from '../../lib/compare';
 import { Button, IconButton, Menu, Monogram } from '../ui';
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationsPanel } from './NotificationsPanel';
-import { CompareTray } from './CompareTray';
+import { CompareTray, useCompareTrayVisible } from './CompareTray';
 import { toPersianDigits } from '../../lib/format';
 
 const ROLE_LABEL = { owner: 'مالک فضای کاری', admin: 'مدیر', member: 'عضو تیم' } as const;
@@ -333,6 +333,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [bellOpen, setBellOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const { pathname } = useLocation();
+  const trayVisible = useCompareTrayVisible();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -357,7 +358,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="lg:pr-[256px] min-h-screen flex flex-col">
         <DemoBanner />
         <Topbar onSearch={() => setSearchOpen(true)} onBell={() => setBellOpen(true)} onMenu={() => setMoreOpen(true)} />
-        <main className="flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-1 pb-28 lg:pb-12">{children}</main>
+        <main className={`flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-1 pb-28 ${trayVisible ? 'lg:pb-28' : 'lg:pb-12'}`}>{children}</main>
       </div>
       <MobileNav onMore={() => setMoreOpen(true)} />
       <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />

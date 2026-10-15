@@ -33,6 +33,7 @@ import {
 import type { Criterion, DecisionStatus, EvidencePoint, ResumeListItem } from '../../types/screening';
 import { api, openResumeFile } from '../../lib/api';
 import { emitChange } from '../../lib/events';
+import { copyText } from '../../lib/clipboard';
 import { isInCompare, toggleCompare, useCompare } from '../../lib/compare';
 import { navigate } from '../../lib/router';
 import { candidateName, faDate, faNumber, faRelative, toPersianDigits } from '../../lib/format';
@@ -660,8 +661,9 @@ function ContactRow({ icon: Icon, value, href }: { icon: LucideIcon; value: stri
             icon={Copy}
             label="کپی"
             size="sm"
-            onClick={() => {
-              navigator.clipboard?.writeText(value).then(() => toast('کپی شد.')).catch(() => {});
+            onClick={async () => {
+              const ok = await copyText(value);
+              toast(ok ? 'کپی شد.' : 'کپی ممکن نشد؛ متن را دستی انتخاب کنید.', ok ? 'success' : 'error');
             }}
           />
         </>

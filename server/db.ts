@@ -120,6 +120,10 @@ export async function initStore() {
   if (initialized) return;
   initialized = true;
   await fs.promises.mkdir(RESUMES_DIR, { recursive: true });
+  // Temp files left by a crash mid-save (the real snapshot is renamed atomically).
+  for (const f of await fs.promises.readdir(DATA_DIR).catch(() => [] as string[])) {
+    if (f.startsWith(path.basename(STORE_FILE) + '.') && f.endsWith('.tmp')) await fs.promises.unlink(path.join(DATA_DIR, f)).catch(() => {});
+  }
   let raw: string | null = null;
   try {
     raw = await fs.promises.readFile(STORE_FILE, 'utf-8');
@@ -141,6 +145,7 @@ export async function initStore() {
         recomputeJob(j.id, false);
       }
       console.log(`[store] loaded ${orgs.size} orgs, ${users.size} users, ${jobs.size} jobs, ${resumes.size} resumes.`);
+      claimLegacyDataOnStartup();
       return;
     } catch (err) {
       console.error('[store] snapshot unreadable — starting empty (file kept as .corrupt):', err);
@@ -148,6 +153,7 @@ export async function initStore() {
     }
   }
   await migrateLegacySnapshot();
+  claimLegacyDataOnStartup();
 }
 
 async function migrateLegacySnapshot() {
@@ -217,19 +223,51 @@ function snapshot(): Snapshot {
   };
 }
 
+let saving = false;
+let dirty = false;
+let firstDirtyAt = 0;
+let tmpCounter = 0;
+/** Debounce, but never postpone a save by more than this while changes keep coming. */
+const SAVE_DEBOUNCE_MS = 400;
+const SAVE_MAX_WAIT_MS = 3000;
+
+function tmpPath() {
+  tmpCounter = (tmpCounter + 1) % 1_000_000;
+  return `${STORE_FILE}.${process.pid}.${tmpCounter}.tmp`;
+}
+
+/**
+ * Debounced snapshot save. Writes are serialized (one at a time) and every
+ * write uses its own temp file, so a slow disk can never interleave two
+ * snapshots into one corrupt file before the atomic rename.
+ */
 export function scheduleSave() {
+  if (!dirty) firstDirtyAt = Date.now();
+  dirty = true;
+  if (saving) return; // the running save re-schedules itself when it finishes
   if (saveTimer) clearTimeout(saveTimer);
-  saveTimer = setTimeout(async () => {
-    saveTimer = null;
-    try {
-      await fs.promises.mkdir(DATA_DIR, { recursive: true });
-      const tmp = STORE_FILE + '.tmp';
-      await fs.promises.writeFile(tmp, JSON.stringify(snapshot()), 'utf-8');
-      await fs.promises.rename(tmp, STORE_FILE);
-    } catch (err) {
-      console.error('[store] snapshot save failed:', err);
-    }
-  }, 400);
+  const wait = Math.max(0, Math.min(SAVE_DEBOUNCE_MS, firstDirtyAt + SAVE_MAX_WAIT_MS - Date.now()));
+  saveTimer = setTimeout(() => void runSave(), wait);
+}
+
+async function runSave() {
+  saveTimer = null;
+  if (saving || !dirty) return;
+  saving = true;
+  dirty = false;
+  const tmp = tmpPath();
+  try {
+    await fs.promises.mkdir(DATA_DIR, { recursive: true });
+    await fs.promises.writeFile(tmp, JSON.stringify(snapshot()), 'utf-8');
+    await fs.promises.rename(tmp, STORE_FILE);
+  } catch (err) {
+    console.error('[store] snapshot save failed:', err);
+    fs.promises.unlink(tmp).catch(() => {});
+    dirty = true; // try again with the next change or the retry below
+  } finally {
+    saving = false;
+    if (dirty) scheduleSave();
+  }
 }
 
 /** Synchronous flush for graceful shutdown (SIGTERM on deploys). */
@@ -239,9 +277,10 @@ export function flushSaveSync() {
   saveTimer = null;
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
-    const tmp = STORE_FILE + '.tmp';
+    const tmp = tmpPath();
     fs.writeFileSync(tmp, JSON.stringify(snapshot()), 'utf-8');
     fs.renameSync(tmp, STORE_FILE);
+    dirty = false;
   } catch (err) {
     console.error('[store] final flush failed:', err);
   }
@@ -397,21 +436,55 @@ export function createOrg(input: { name: string; isDemo?: boolean; demoExpiresAt
     demoExpiresAt: input.demoExpiresAt ?? null,
     createdAtISO: new Date().toISOString(),
   };
-  // The first real workspace adopts data created before multi-tenancy existed.
-  if (!org.isDemo) {
-    const legacyOwner = (process.env.LEGACY_OWNER_EMAIL || '').trim().toLowerCase();
-    const realOrgsBefore = Array.from(orgs.values()).filter((o) => !o.isDemo).length;
-    const eligible = legacyOwner ? legacyOwner === (input.ownerEmail || '').toLowerCase() : realOrgsBefore === 0;
-    if (eligible) {
-      let adopted = 0;
-      for (const j of jobs.values()) if (j.orgId === null) { j.orgId = org.id; adopted++; }
-      for (const r of resumes.values()) if (r.orgId === null) r.orgId = org.id;
-      if (adopted) console.log(`[store] org ${org.id} adopted ${adopted} legacy jobs.`);
-    }
-  }
   orgs.set(org.id, org);
+  // Data created before multi-tenancy goes ONLY to the workspace whose owner
+  // e-mail is LEGACY_OWNER_EMAIL — never to "whoever signs up first" on a
+  // public deployment (that would hand candidates' personal data to a stranger).
+  if (!org.isDemo && legacyOwnerEmail() && legacyOwnerEmail() === (input.ownerEmail || '').trim().toLowerCase()) {
+    adoptLegacyData(org.id);
+  }
   scheduleSave();
   return org;
+}
+
+function legacyOwnerEmail(): string {
+  return (process.env.LEGACY_OWNER_EMAIL || '').trim().toLowerCase();
+}
+
+function adoptLegacyData(orgId: string): number {
+  let adopted = 0;
+  for (const j of jobs.values()) {
+    if (j.orgId === null) {
+      j.orgId = orgId;
+      adopted++;
+    }
+  }
+  for (const r of resumes.values()) if (r.orgId === null) r.orgId = orgId;
+  if (adopted) {
+    console.log(`[store] org ${orgId} adopted ${adopted} legacy jobs.`);
+    scheduleSave();
+  }
+  return adopted;
+}
+
+/**
+ * Startup: unclaimed legacy data is attached to the existing account whose
+ * e-mail is LEGACY_OWNER_EMAIL (so setting the variable after signing up
+ * works too); otherwise it stays hidden and we say how to claim it.
+ */
+function claimLegacyDataOnStartup() {
+  const orphans = Array.from(jobs.values()).filter((j) => j.orgId === null).length;
+  if (!orphans) return;
+  const email = legacyOwnerEmail();
+  const owner = email ? Array.from(users.values()).find((u) => u.email === email) : null;
+  if (owner) {
+    adoptLegacyData(owner.orgId);
+    return;
+  }
+  console.log(
+    `[store] ${orphans} job(s) from the previous single-workspace version are waiting for their owner. ` +
+      'Set LEGACY_OWNER_EMAIL to the e-mail you sign up (or already signed up) with to attach them to your workspace.'
+  );
 }
 
 export function updateOrg(id: string, patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments'>>): OrgRecord | null {
@@ -602,9 +675,20 @@ export function unreadCount(user: UserRecord): number {
 
 // ------------------------------------------------------------------- jobs ----
 
+/** The runner pings every 2 minutes; silence for longer means the tab was closed mid-run. */
+const STALE_ANALYSIS_MS = 6 * 60_000;
+
+function expireStaleAnalysis(j: Job): Job {
+  if (j.analysisStatus === 'processing' && Date.now() - new Date(j.updatedAtISO).getTime() > STALE_ANALYSIS_MS) {
+    j.analysisStatus = 'done';
+    scheduleSave();
+  }
+  return j;
+}
+
 export function getJob(orgId: string, id: string): Job | null {
   const j = jobs.get(id);
-  return j && j.orgId === orgId ? j : null;
+  return j && j.orgId === orgId ? expireStaleAnalysis(j) : null;
 }
 
 export function toJobSummary(j: Job): JobSummary {
@@ -615,6 +699,7 @@ export function toJobSummary(j: Job): JobSummary {
 export function listJobs(orgId: string): Job[] {
   return Array.from(jobs.values())
     .filter((j) => j.orgId === orgId)
+    .map(expireStaleAnalysis)
     .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
 }
 
@@ -860,7 +945,11 @@ export async function saveEvaluation(input: {
 export function updateResumeEvaluation(rec: ResumeRecord, ev: CandidateEvaluation, mode: 'rerun' | 'deep'): ResumeRecord {
   const stamp = nowStamp();
   Object.assign(rec, {
-    unjudgeableReason: null,
+    unjudgeableReason: ev.flags.scannedNoText
+      ? 'فایل رزومه محتوای خواندنی ندارد (فایل خالی، اسکن ناخوانا یا تصویر بدون متن).'
+      : ev.flags.insufficientInfo
+      ? 'اطلاعات رزومه برای سنجش با معیارهای این فرصت شغلی کافی نیست.'
+      : null,
     errorMessage: null,
     candidateName: ev.candidateName,
     contact: ev.contact,
@@ -1126,7 +1215,7 @@ export function talentDepartments(org: OrgRecord): TalentDepartment[] {
     if (!r.inBank || !r.bankDepartmentId) continue;
     const prev = counts.get(r.bankDepartmentId);
     if (prev) prev.count++;
-    else counts.set(r.bankDepartmentId, { name: r.departmentName, count: 1 });
+    else counts.set(r.bankDepartmentId, { name: r.bankDepartmentId === r.departmentId ? r.departmentName : 'دپارتمان حذف‌شده', count: 1 });
   }
   const out: TalentDepartment[] = org.departments.map((d) => ({ id: d.id, name: d.name, count: counts.get(d.id)?.count || 0 }));
   for (const [id, v] of counts) if (!out.some((d) => d.id === id)) out.push({ id, name: v.name, count: v.count });

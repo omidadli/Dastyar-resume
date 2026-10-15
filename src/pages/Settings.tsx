@@ -20,6 +20,7 @@ import {
 import { PageHeader } from '../components/layout/AppShell';
 import { Button, Callout, Card, CardHeader, ConfirmDialog, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
+import { copyText } from '../lib/clipboard';
 import { useAuth, useCan } from '../lib/auth';
 import { emitChange } from '../lib/events';
 import { faDate, faRelative, toPersianDigits } from '../lib/format';
@@ -181,6 +182,9 @@ function randomPassword() {
 function TeamTab() {
   const { user } = useAuth();
   const canEdit = useCan('admin');
+  const isOwner = user?.role === 'owner';
+  /** Admins manage members; only the owner appoints, demotes or removes admins. */
+  const canManage = (m: TeamMember) => canEdit && m.role !== 'owner' && !m.isYou && (isOwner || m.role === 'member');
   const q = useAsync(() => api.org.get(), []);
   const members = q.data?.members || [];
   const [addOpen, setAddOpen] = useState(false);
@@ -233,7 +237,7 @@ function TeamTab() {
         <CardHeader
           icon={Users}
           title="اعضای تیم"
-          subtitle="مدیران می‌توانند تنظیمات و اعضا را مدیریت کنند؛ اعضا به فرصت‌ها و کاندیداها دسترسی کامل دارند."
+          subtitle="مدیران تنظیمات و اعضا را مدیریت می‌کنند و تعیین مدیران با مالک است؛ اعضا به فرصت‌ها و کاندیداها دسترسی کامل دارند."
           action={
             canEdit && (
               <Button icon={UserPlus} size="sm" onClick={() => setAddOpen(true)}>
@@ -245,7 +249,10 @@ function TeamTab() {
       </div>
       {created && (
         <div className="px-5 pb-4">
-          <Callout tone="brand" title="عضو تازه ساخته شد" action={<IconButton icon={Copy} label="کپی اطلاعات ورود" size="sm" onClick={() => navigator.clipboard?.writeText(`ایمیل: ${created.email}\nرمز عبور موقت: ${created.password}`).then(() => toast('کپی شد.'))} />}>
+          <Callout tone="brand" title="عضو تازه ساخته شد" action={<IconButton icon={Copy} label="کپی اطلاعات ورود" size="sm" onClick={async () => {
+                const ok = await copyText(`ایمیل: ${created.email}\nرمز عبور موقت: ${created.password}`);
+                toast(ok ? 'اطلاعات ورود کپی شد.' : 'کپی ممکن نشد؛ متن را دستی انتخاب کنید.', ok ? 'success' : 'error');
+              }} />}>
             اطلاعات ورود را امن به همکارتان بدهید و از او بخواهید پس از ورود، رمز را از «حساب کاربری» تغییر دهد:
             <span className="block mt-1 hv-latin text-right" dir="ltr">
               {created.email} · {created.password}
@@ -272,18 +279,22 @@ function TeamTab() {
                 </p>
               </div>
               <span className="text-[12px] text-ink-4 hidden md:block w-32">{m.lastLoginISO ? `آخرین ورود ${faRelative(m.lastLoginISO)}` : 'هنوز وارد نشده'}</span>
-              {canEdit && m.role !== 'owner' && !m.isYou ? (
+              {canManage(m) ? (
                 <div className="flex items-center gap-1.5">
-                  <Select
-                    compact
-                    aria-label="نقش"
-                    value={m.role}
-                    onChange={(e) => changeRole(m, e.target.value as Role)}
-                    options={[
-                      { value: 'admin', label: 'مدیر' },
-                      { value: 'member', label: 'عضو' },
-                    ]}
-                  />
+                  {isOwner ? (
+                    <Select
+                      compact
+                      aria-label="نقش"
+                      value={m.role}
+                      onChange={(e) => changeRole(m, e.target.value as Role)}
+                      options={[
+                        { value: 'admin', label: 'مدیر' },
+                        { value: 'member', label: 'عضو' },
+                      ]}
+                    />
+                  ) : (
+                    <span className="text-[12.5px] font-bold text-ink-2 bg-line-2 rounded-full px-3 py-1">{ROLE_LABEL[m.role]}</span>
+                  )}
                   <IconButton icon={Trash2} label="حذف از تیم" size="sm" tone="danger" onClick={() => setRemoving(m)} />
                 </div>
               ) : (
@@ -319,9 +330,10 @@ function TeamTab() {
               label="نقش"
               value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value as Role })}
+              hint={isOwner ? undefined : 'تعیین مدیر فقط با مالک فضای کاری است.'}
               options={[
                 { value: 'member', label: 'عضو — کار با فرصت‌ها و کاندیداها' },
-                { value: 'admin', label: 'مدیر — به‌علاوه تنظیمات و اعضا' },
+                ...(isOwner ? [{ value: 'admin', label: 'مدیر — به‌علاوه تنظیمات و اعضا' }] : []),
               ]}
             />
           </div>

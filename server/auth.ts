@@ -237,8 +237,20 @@ export class RateLimiter {
   }
 }
 
+/**
+ * Client IP for rate limiting. The FIRST X-Forwarded-For entry is whatever
+ * the client typed (trivially rotated to dodge the login limiter); the
+ * trustworthy entries are the ones appended by our own proxies, counted from
+ * the right. TRUST_PROXY_HOPS = number of proxies in front of the app
+ * (Render/preview: 1; add one per CDN such as Cloudflare; 0 = no proxy).
+ */
 export function clientIp(req: express.Request): string {
-  const fwd = req.headers['x-forwarded-for'];
-  const first = (Array.isArray(fwd) ? fwd[0] : fwd || '').split(',')[0].trim();
-  return first || req.socket.remoteAddress || 'unknown';
+  const hops = Math.max(0, Math.min(5, Number.parseInt(process.env.TRUST_PROXY_HOPS ?? '1', 10) || 0));
+  const raw = req.headers['x-forwarded-for'];
+  const chain = (Array.isArray(raw) ? raw.join(',') : raw || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (hops > 0 && chain.length) return chain[Math.max(0, chain.length - hops)];
+  return req.socket.remoteAddress || 'unknown';
 }

@@ -1,7 +1,20 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiStatus, AuthPayload, OrgPublic, UserPublic } from '../types/app';
 import { api, getToken, lastSessionWasDemo, setToken, TOKEN_KEY, UNAUTHORIZED_EVENT } from './api';
+import { clearCompare } from './compare';
 import { navigate } from './router';
+
+/**
+ * Work that must finish while the session is still valid (e.g. telling the
+ * server that a running analysis was cancelled). Awaited by signOut, max 3s.
+ */
+const beforeSignOutHooks = new Set<() => Promise<unknown> | unknown>();
+export function onBeforeSignOut(fn: () => Promise<unknown> | unknown): () => void {
+  beforeSignOutHooks.add(fn);
+  return () => {
+    beforeSignOutHooks.delete(fn);
+  };
+}
 
 const EXPIRED_NOTICE = 'نشست شما به پایان رسیده است؛ لطفاً دوباره وارد شوید.';
 const DEMO_EXPIRED_NOTICE = 'مهلت نسخه نمایشی به پایان رسیده است. می‌توانید یک نسخه نمایشی تازه بسازید یا وارد حساب خود شوید.';
@@ -42,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const reset = useCallback(() => {
     setToken(null);
+    clearCompare(); // the tray holds candidate names — never show them to the next account
     setUser(null);
     setOrg(null);
     setAi(null);
@@ -122,6 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback((payload: AuthPayload) => {
     setToken(payload.token, { demo: payload.org.isDemo });
+    clearCompare();
     isDemoRef.current = payload.org.isDemo;
     setUser(payload.user);
     setOrg(payload.org);
@@ -138,6 +153,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = useCallback(
     async (opts: { silent?: boolean } = {}) => {
+      if (beforeSignOutHooks.size) {
+        await Promise.race([
+          Promise.allSettled(Array.from(beforeSignOutHooks, (fn) => Promise.resolve().then(fn))),
+          new Promise((r) => setTimeout(r, 3000)),
+        ]);
+      }
       try {
         if (getToken()) await api.auth.logout();
       } catch {

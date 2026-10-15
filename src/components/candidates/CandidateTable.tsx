@@ -49,11 +49,11 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
               )}
               <th className="pb-2.5 pr-2 font-semibold border-b border-line">کاندید</th>
               <th className="pb-2.5 px-2 font-semibold border-b border-line whitespace-nowrap">وضعیت تطابق</th>
-              <th className="pb-2.5 px-2 font-semibold border-b border-line w-[150px]">درصد تطابق</th>
+              <th className={`pb-2.5 px-2 font-semibold border-b border-line ${compact ? 'w-[104px]' : 'w-[150px]'}`}>درصد تطابق</th>
               {!compact && <th className="pb-2.5 px-2 font-semibold border-b border-line hidden xl:table-cell">مهارت‌های کلیدی</th>}
               {showJob && !compact && <th className="pb-2.5 px-2 font-semibold border-b border-line hidden lg:table-cell">فرصت شغلی</th>}
               <th className="pb-2.5 px-2 font-semibold border-b border-line whitespace-nowrap">تصمیم</th>
-              <th className="pb-2.5 pl-4 w-8 border-b border-line" aria-hidden />
+              {!compact && <th className="pb-2.5 pl-4 w-8 border-b border-line" aria-hidden />}
             </tr>
           </thead>
           <tbody>
@@ -75,7 +75,7 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                     {!compact && <td className="px-2 border-b border-line-2 hidden xl:table-cell"><Skeleton className="h-5 w-40" /></td>}
                     {showJob && !compact && <td className="px-2 border-b border-line-2 hidden lg:table-cell"><Skeleton className="h-4 w-28" /></td>}
                     <td className="px-2 border-b border-line-2"><Skeleton className="h-6 w-20 rounded-full" /></td>
-                    <td className="border-b border-line-2" />
+                    {!compact && <td className="border-b border-line-2" />}
                   </tr>
                 ))
               : items.map((r) => {
@@ -97,8 +97,8 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                         </td>
                       )}
                       <td className="py-3 pr-2 border-b border-line-2">
-                        <div className="flex items-center gap-3 min-w-[200px]">
-                          <Monogram name={name} size={38} />
+                        <div className={`flex items-center gap-3 ${compact ? 'min-w-[160px]' : 'min-w-[200px]'}`}>
+                          <Monogram name={name} size={compact ? 34 : 38} />
                           <div className="min-w-0">
                             <p className="text-[13.5px] font-bold text-ink truncate max-w-[240px] flex items-center gap-1.5" dir="auto">
                               <span className="truncate">{name}</span>
@@ -115,7 +115,7 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                         <MatchPill category={r.category} size="sm" />
                       </td>
                       <td className="px-2 py-3 border-b border-line-2">
-                        <MatchMeter score={r.score} category={r.category} className="w-[140px]" />
+                        <MatchMeter score={r.score} category={r.category} className={compact ? 'w-[92px]' : 'w-[140px]'} />
                       </td>
                       {!compact && (
                         <td className="px-2 py-3 border-b border-line-2 hidden xl:table-cell">
@@ -136,12 +136,14 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                           <p className="text-[11.5px] text-ink-4">{faRelative(r.createdAtISO)}</p>
                         </td>
                       )}
-                      <td className="px-2 py-3 border-b border-line-2">
+                      <td className={`px-2 py-3 border-b border-line-2 ${compact ? 'pl-4' : ''}`}>
                         <DecisionPill status={r.decisionStatus} size="sm" />
                       </td>
-                      <td className="pl-4 py-3 border-b border-line-2 text-ink-4">
-                        <ChevronLeft className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-                      </td>
+                      {!compact && (
+                        <td className="pl-4 py-3 border-b border-line-2 text-ink-4">
+                          <ChevronLeft className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

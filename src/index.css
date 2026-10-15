@@ -102,6 +102,14 @@
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     background: var(--color-canvas);
+    /* Keep focused fields clear of the sticky header / fixed bottom nav. */
+    scroll-padding-top: 80px;
+    scroll-padding-bottom: 96px;
+  }
+  @media (min-width: 1024px) {
+    html {
+      scroll-padding-bottom: 24px;
+    }
   }
   body {
     margin: 0;

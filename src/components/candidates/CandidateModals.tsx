@@ -7,6 +7,7 @@ import { mailLink, smsLink, whatsappLink } from '../../lib/phone';
 import { REJECT_REASONS } from '../../lib/match';
 import { candidateName } from '../../lib/format';
 import { emitChange } from '../../lib/events';
+import { copyText } from '../../lib/clipboard';
 import { Button, Callout, Chip, Modal, Segmented, Select, Skeleton, TextArea, TextInput, toast } from '../ui';
 
 const KINDS: { id: MessageKind; label: string }[] = [
@@ -72,12 +73,11 @@ export function MessageModal({
   const mail = mailLink(email, subject, body);
 
   const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(`${subject}\n\n${body}`);
+    if (await copyText(`${subject}\n\n${body}`)) {
       setCopied(true);
       toast('متن پیام کپی شد.');
       setTimeout(() => setCopied(false), 1800);
-    } catch {
+    } else {
       toast('کپی خودکار ممکن نشد؛ متن را دستی انتخاب کنید.', 'error');
     }
   };
@@ -179,7 +179,10 @@ export function TalentModal({
 
   useEffect(() => {
     if (!record) return;
-    setDept(record.bankDepartmentId || record.departmentId);
+    // The job's department may have been renamed away/deleted since: never
+    // preselect an id the <select> can't show (saving it would fail).
+    const known = (id: string | null | undefined) => Boolean(id && org?.departments.some((d) => d.id === id));
+    setDept([record.bankDepartmentId, record.departmentId].find(known) || org?.departments[0]?.id || '');
     setNote(record.bankNote || '');
     setTags(Array.from(new Set([...(record.bankTags || []), ...record.tags])).slice(0, 8));
   }, [record?.id]);
@@ -197,7 +200,7 @@ export function TalentModal({
       onSaved?.(updated);
       emitChange('talent');
       emitChange('activity');
-      toast(`«${candidateName(record)}» به بانک استعداد اضافه شد.`);
+      toast(record.inBank ? 'اطلاعات بانک استعداد به‌روز شد.' : `«${candidateName(record)}» به بانک استعداد اضافه شد.`);
       onClose();
     } catch (e: any) {
       toast(e?.message || 'افزودن به بانک استعداد ممکن نشد.', 'error');
@@ -210,7 +213,7 @@ export function TalentModal({
       open
       onClose={onClose}
       icon={<Archive className="w-5 h-5 text-brand-strong" />}
-      title="افزودن به بانک استعداد"
+      title={record.inBank ? 'ویرایش در بانک استعداد' : 'افزودن به بانک استعداد'}
       description="کاندیداهای ارزشمند را برای فرصت‌های آینده نگه دارید؛ هر وقت لازم شد با جست‌وجو و برچسب پیدایشان کنید."
       footer={
         <>

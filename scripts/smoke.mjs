@@ -76,6 +76,29 @@ const draft = await call('POST', '/api/messages/draft', { token: T, body: { resu
 const org = await call('GET', '/api/org', { token: T }); ok(org.json.members.length === 3, 'org members');
 const addM = await call('POST', '/api/org/members', { token: T2, body: { name: 'سارا', email: `m${Date.now()}@acme.ir`, password: 'pass12345', role: 'member' } }); ok(addM.status === 201, 'add member');
 const deps = await call('PUT', '/api/org/departments', { token: T2, body: { departments: [{ id: 'sales', name: 'فروش', hint: 'فروش' }, { name: 'حقوقی', hint: 'امور قراردادها' }] } }); ok(deps.json.org.departments.length === 2, 'departments update', deps.json.org.departments.map(d => d.id).join(','));
+// Only the owner appoints, demotes or removes admins (T2 = owner of a fresh workspace).
+{
+  const stamp = Date.now();
+  const mk = (role, n) => call('POST', '/api/org/members', { token: T2, body: { name: `عضو ${n}`, email: `r${n}${stamp}@acme.ir`, password: 'pass12345', role } });
+  const adminA = await mk('admin', 'a');
+  const adminB = await mk('admin', 'b');
+  const member = await mk('member', 'c');
+  ok(adminA.status === 201 && adminB.status === 201, 'owner can appoint admins');
+  const la = await call('POST', '/api/auth/login', { body: { email: `ra${stamp}@acme.ir`, password: 'pass12345' } });
+  const TA = la.json.token;
+  const demote = await call('PATCH', `/api/org/members/${adminB.json.member.id}`, { token: TA, body: { role: 'member' } });
+  ok(demote.status === 403, 'an admin cannot demote another admin', demote.json.error);
+  const removeAdmin = await call('DELETE', `/api/org/members/${adminB.json.member.id}`, { token: TA });
+  ok(removeAdmin.status === 403, 'an admin cannot remove another admin');
+  const promote = await call('PATCH', `/api/org/members/${member.json.member.id}`, { token: TA, body: { role: 'admin' } });
+  ok(promote.status === 403, 'an admin cannot promote a member to admin');
+  const addAdmin = await call('POST', '/api/org/members', { token: TA, body: { name: 'مدیر تازه', email: `rx${stamp}@acme.ir`, password: 'pass12345', role: 'admin' } });
+  ok(addAdmin.status === 403, 'an admin cannot create admins');
+  const removeMember = await call('DELETE', `/api/org/members/${member.json.member.id}`, { token: TA });
+  ok(removeMember.status === 200, 'an admin can still remove members');
+  const ownerDemote = await call('PATCH', `/api/org/members/${adminB.json.member.id}`, { token: T2, body: { role: 'member' } });
+  ok(ownerDemote.status === 200, 'the owner can demote an admin');
+}
 const lo = await call('POST', '/api/auth/logout', { token: T2 }); const after = await call('GET', '/api/auth/me', { token: T2 }); ok(after.status === 401, 'logout invalidates token');
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 process.exit(fails ? 1 : 0);

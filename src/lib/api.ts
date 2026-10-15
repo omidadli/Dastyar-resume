@@ -317,8 +317,19 @@ export async function openResumeFile(id: string, mode: 'download' | 'tab'): Prom
   const info = await api.resumes.fileUrl(id, mode === 'tab');
   if (!info.hasFile || !info.url) return false;
   if (mode === 'tab') {
-    window.open(info.url, '_blank', 'noopener');
-  } else {
+    // Without 'noopener' we can tell whether the popup was blocked (embedded
+    // previews often block them); our own file URL is safe to detach after.
+    const w = window.open(info.url, '_blank');
+    if (w) {
+      try {
+        w.opener = null;
+      } catch {
+        /* ignore */
+      }
+      return true;
+    }
+  }
+  {
     const a = document.createElement('a');
     a.href = info.url;
     a.download = info.fileName;

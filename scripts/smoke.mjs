@@ -99,6 +99,18 @@ const deps = await call('PUT', '/api/org/departments', { token: T2, body: { depa
   const ownerDemote = await call('PATCH', `/api/org/members/${adminB.json.member.id}`, { token: T2, body: { role: 'member' } });
   ok(ownerDemote.status === 200, 'the owner can demote an admin');
 }
+// Login limits count failures only: a whole office behind one NAT address can sign in.
+{
+  const stamp = Date.now();
+  const email = `nat${stamp}@acme.ir`;
+  await call('POST', '/api/org/members', { token: T2, body: { name: 'همکار دفتر', email, password: 'pass12345', role: 'member' } });
+  let okCount = 0;
+  for (let i = 0; i < 45; i++) if ((await call('POST', '/api/auth/login', { body: { email, password: 'pass12345' } })).status === 200) okCount++;
+  ok(okCount === 45, '45 successful logins from one address are never rate-limited', `${okCount}/45`);
+  let lastWrong = 0;
+  for (let i = 0; i < 9; i++) lastWrong = (await call('POST', '/api/auth/login', { body: { email, password: 'wrong-pass-1' } })).status;
+  ok(lastWrong === 429, 'repeated wrong passwords are rate-limited', String(lastWrong));
+}
 const lo = await call('POST', '/api/auth/logout', { token: T2 }); const after = await call('GET', '/api/auth/me', { token: T2 }); ok(after.status === 401, 'logout invalidates token');
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASSED");
 process.exit(fails ? 1 : 0);

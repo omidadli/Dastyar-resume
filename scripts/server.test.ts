@@ -106,6 +106,16 @@ async function main() {
   assert(clientIp(req('6.6.6.6')) === '10.0.0.9', 'TRUST_PROXY_HOPS=0 ignores X-Forwarded-For entirely');
   process.env.TRUST_PROXY_HOPS = '2';
   assert(clientIp(req('6.6.6.6, 198.51.100.1, 172.16.0.2')) === '198.51.100.1', 'TRUST_PROXY_HOPS=2 (CDN + load balancer)');
+  delete process.env.TRUST_PROXY_HOPS;
+  // Render: XFF = [spoofed…, visitor, Cloudflare edge, 10.x] — the last hop is shared by everyone.
+  const renderReq = { headers: { 'x-forwarded-for': '6.6.6.6, 81.107.0.110, 172.71.1.2, 10.1.2.3', 'cf-connecting-ip': '81.107.0.110' }, socket: { remoteAddress: '10.1.2.3' } } as any;
+  process.env.RENDER = 'true';
+  assert(clientIp(renderReq) === '81.107.0.110', 'on Render the visitor comes from cf-connecting-ip, not a shared proxy hop');
+  delete process.env.RENDER;
+  assert(clientIp(renderReq) === '10.1.2.3', 'elsewhere cf-connecting-ip is not trusted unless configured');
+  process.env.CLIENT_IP_HEADER = 'cf-connecting-ip';
+  assert(clientIp(renderReq) === '81.107.0.110', 'CLIENT_IP_HEADER opts in explicitly');
+  delete process.env.CLIENT_IP_HEADER;
 
   fs.rmSync(dir, { recursive: true, force: true });
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);

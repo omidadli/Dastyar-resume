@@ -46,7 +46,7 @@ let bootHidden = false;
 window.__hovidaBoot = { hide: () => (bootHidden = true), fail: (m) => assert(false, 'no fatal boot error', m) };
 
 const root = window.document.getElementById('root');
-const { mount, navigate } = await import(path.resolve('dist-mount/mount-entry.js'));
+const { mount, navigate, setToken } = await import(path.resolve('dist-mount/mount-entry.js'));
 const text = () => window.document.body.textContent || '';
 async function waitFor(fn, ms = 6000) {
   const t0 = Date.now();
@@ -66,7 +66,7 @@ assert(text().includes('ورود به نسخه نمایشی'), 'the demo entry p
 // 2. Demo workspace → dashboard
 const demo = await nodeFetch(SERVER + '/api/auth/demo', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then((r) => r.json());
 assert(Boolean(demo.token), 'a demo workspace can be created');
-window.localStorage.setItem('hovida.session.v1', demo.token);
+setToken(demo.token, { demo: true });
 // Remount so the AuthProvider picks up the session.
 app1.unmount(); // a detached-but-mounted signed-out App would fight the router
 const root2 = window.document.createElement('div');
@@ -82,12 +82,12 @@ navigate('/app/jobs');
 assert(await waitFor(() => text().includes('کارشناس جذب و استخدام') && text().includes('حسابدار ارشد')), 'jobs list shows the demo openings');
 
 // 4. Job detail + candidate panel
-const jobs = await nodeFetch(SERVER + '/api/jobs', { headers: { Authorization: `Bearer ${demo.token}` } }).then((r) => r.json());
+const jobs = await nodeFetch(SERVER + '/api/jobs', { headers: { 'X-Hovida-Session': demo.token } }).then((r) => r.json());
 const hr = jobs.items.find((j) => j.roleTitle.includes('جذب'));
 navigate(`/app/jobs/${hr.id}`);
 assert(await waitFor(() => text().includes('سارا محمدی') && text().includes('درصد تطابق')), 'job detail renders the candidate table');
 assert(text().includes('تطابق بالا') && text().includes('نیازمند بررسی'), 'match levels are labelled, never «hire/reject»');
-const list = await nodeFetch(SERVER + `/api/resumes?jobId=${hr.id}`, { headers: { Authorization: `Bearer ${demo.token}` } }).then((r) => r.json());
+const list = await nodeFetch(SERVER + `/api/resumes?jobId=${hr.id}`, { headers: { 'X-Hovida-Session': demo.token } }).then((r) => r.json());
 navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
 assert(await waitFor(() => text().includes('دلایل تطابق') && text().includes('تصمیم شما')), 'the candidate panel shows evidence and the decision bar');
 

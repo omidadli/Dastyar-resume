@@ -45,3 +45,5 @@ services:
         sync: false
       - key: LEGACY_OWNER_EMAIL
         sync: false
+      - key: CLIENT_IP_HEADER
+        value: cf-connecting-ip

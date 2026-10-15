@@ -10,16 +10,51 @@ import { LoginPage, SignupPage } from './pages/Auth';
 import NotFound from './pages/NotFound';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Jobs = lazy(() => import('./pages/Jobs'));
-const JobNew = lazy(() => import('./pages/JobNew'));
-const JobDetail = lazy(() => import('./pages/JobDetail'));
-const Candidates = lazy(() => import('./pages/Candidates'));
-const CandidatePage = lazy(() => import('./pages/CandidatePage'));
-const Compare = lazy(() => import('./pages/Compare'));
-const Talent = lazy(() => import('./pages/Talent'));
-const Reports = lazy(() => import('./pages/Reports'));
-const Settings = lazy(() => import('./pages/Settings'));
+const CHUNK_RELOAD_KEY = 'hovida.chunk-reload';
+
+/**
+ * Lazy page that survives a deploy: a tab opened on the previous version asks
+ * for chunk files the new build no longer has. Reload once to get the new
+ * build instead of showing an error (the flag prevents reload loops when the
+ * network itself is down).
+ */
+function lazyPage<T extends React.ComponentType<any>>(load: () => Promise<{ default: T }>) {
+  return lazy(async () => {
+    try {
+      const mod = await load();
+      try {
+        sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+      } catch {
+        /* storage blocked */
+      }
+      return mod;
+    } catch (err) {
+      let alreadyReloaded = true;
+      try {
+        alreadyReloaded = sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1';
+        if (!alreadyReloaded) sessionStorage.setItem(CHUNK_RELOAD_KEY, '1');
+      } catch {
+        /* storage blocked: don't risk a loop */
+      }
+      if (!alreadyReloaded && navigator.onLine !== false) {
+        window.location.reload();
+        return new Promise<{ default: T }>(() => {}); // the page is reloading
+      }
+      throw err;
+    }
+  });
+}
+
+const Dashboard = lazyPage(() => import('./pages/Dashboard'));
+const Jobs = lazyPage(() => import('./pages/Jobs'));
+const JobNew = lazyPage(() => import('./pages/JobNew'));
+const JobDetail = lazyPage(() => import('./pages/JobDetail'));
+const Candidates = lazyPage(() => import('./pages/Candidates'));
+const CandidatePage = lazyPage(() => import('./pages/CandidatePage'));
+const Compare = lazyPage(() => import('./pages/Compare'));
+const Talent = lazyPage(() => import('./pages/Talent'));
+const Reports = lazyPage(() => import('./pages/Reports'));
+const Settings = lazyPage(() => import('./pages/Settings'));
 
 function Redirect({ to }: { to: string }) {
   useEffect(() => {

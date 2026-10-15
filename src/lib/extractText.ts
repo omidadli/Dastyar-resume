@@ -7,7 +7,12 @@ import { rtfToText } from './rtf';
 let mammothPromise: Promise<any> | null = null;
 function loadMammoth(): Promise<any> {
   if (!mammothPromise) {
-    mammothPromise = import('mammoth').then((mod) => (mod as any).default ?? mod);
+    mammothPromise = import('mammoth')
+      .then((mod) => (mod as any).default ?? mod)
+      .catch((err) => {
+        mammothPromise = null; // a failed chunk load must not break every later Word file
+        throw err;
+      });
   }
   return mammothPromise;
 }
@@ -15,7 +20,12 @@ function loadMammoth(): Promise<any> {
 let jszipPromise: Promise<any> | null = null;
 function loadJSZip(): Promise<any> {
   if (!jszipPromise) {
-    jszipPromise = import('jszip').then((mod) => (mod as any).default ?? mod);
+    jszipPromise = import('jszip')
+      .then((mod) => (mod as any).default ?? mod)
+      .catch((err) => {
+        jszipPromise = null;
+        throw err;
+      });
   }
   return jszipPromise;
 }

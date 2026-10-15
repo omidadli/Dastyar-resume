@@ -16,8 +16,12 @@ import { aiStatus } from '../ai/provider';
 import { createDemoWorkspace } from '../demo-seed';
 import { h, str } from './util';
 
-const loginByAccount = new RateLimiter(8, 15 * 60_000);
-const loginByIp = new RateLimiter(40, 15 * 60_000);
+// Only FAILED logins count: an office behind one NAT address must be able to
+// sign in all day. Per address+account, per address, and per account across
+// all addresses (so rotating IPs can't brute-force one mailbox).
+const loginFailByIpAccount = new RateLimiter(8, 15 * 60_000);
+const loginFailByIp = new RateLimiter(40, 15 * 60_000);
+const loginFailByAccount = new RateLimiter(30, 15 * 60_000);
 const signupByIp = new RateLimiter(10, 60 * 60_000);
 const demoByIp = new RateLimiter(15, 60 * 60_000);
 
@@ -67,17 +71,20 @@ export function authRoutes(): express.Router {
       const email = str(req.body?.email, 120).toLowerCase();
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
       const ip = clientIp(req);
-      const byIp = loginByIp.hit(ip);
-      if (!byIp.ok) return tooMany(res, byIp.retryAfterSec);
-      const byAccount = loginByAccount.hit(`${ip}|${email}`);
-      if (!byAccount.ok) return tooMany(res, byAccount.retryAfterSec);
+      for (const limit of [loginFailByIp.check(ip), loginFailByIpAccount.check(`${ip}|${email}`), loginFailByAccount.check(email)]) {
+        if (!limit.ok) return tooMany(res, limit.retryAfterSec);
+      }
       const user = email ? db.findUserByEmail(email) : null;
       const ok = user ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, 'scrypt$16384$8$1$AAAA$AAAA');
       const org = user ? db.getOrg(user.orgId) : null;
       if (!user || !ok || !org) {
+        loginFailByIp.hit(ip);
+        loginFailByIpAccount.hit(`${ip}|${email}`);
+        loginFailByAccount.hit(email);
         return res.status(401).json({ error: 'ایمیل یا رمز عبور درست نیست.' });
       }
-      loginByAccount.reset(`${ip}|${email}`);
+      loginFailByIpAccount.reset(`${ip}|${email}`);
+      loginFailByAccount.reset(email);
       db.updateUser(user.id, { lastLoginISO: new Date().toISOString() });
       res.json({ token: issueSession(user.id), user: db.publicUser(user), org });
     })

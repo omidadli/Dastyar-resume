@@ -27,23 +27,24 @@ export async function exportJobToExcel(job: Job) {
     { مورد: 'منبع معیارها', مقدار: job.criteriaSource === 'template' ? 'الگوی آماده دپارتمان' : 'پیشنهاد هوش مصنوعی' },
     { مورد: 'معیارهای ارزیابی', مقدار: job.understanding.criteria.map((c) => `${c.title} (${toPersianDigits(c.weight)}٪${c.mustHave ? '، الزامی' : ''})`).join('؛ ') },
     { مورد: 'آستانه تطابق بالا / بررسی', مقدار: `${toPersianDigits(job.understanding.thresholds.interview)}٪ / ${toPersianDigits(job.understanding.thresholds.review)}٪` },
-    { مورد: 'کل رزومه‌ها', مقدار: toPersianDigits(s.total) },
-    { مورد: 'تطابق بالا', مقدار: toPersianDigits(s.interview) },
-    { مورد: 'نیازمند بررسی', مقدار: toPersianDigits(s.review) },
-    { مورد: 'تطابق پایین', مقدار: toPersianDigits(s.reject) },
-    { مورد: 'اطلاعات ناکافی / خطا', مقدار: toPersianDigits(s.unjudgeable + s.error) },
+    { مورد: 'کل رزومه‌ها', مقدار: s.total },
+    { مورد: 'تطابق بالا', مقدار: s.interview },
+    { مورد: 'نیازمند بررسی', مقدار: s.review },
+    { مورد: 'تطابق پایین', مقدار: s.reject },
+    { مورد: 'اطلاعات ناکافی / خطا', مقدار: s.unjudgeable + s.error },
     { مورد: 'تصمیم‌ها (تأیید / رد / نیاز به بررسی)', مقدار: `${toPersianDigits(s.approved)} / ${toPersianDigits(s.rejected)} / ${toPersianDigits(s.reviewDecision)}` },
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'خلاصه');
 
+  // Numbers stay numeric so the sheet can be sorted and filtered by score/experience.
   const rows = records.map((r, i) => ({
-    ردیف: toPersianDigits(i + 1),
+    ردیف: i + 1,
     نام: candidateName(r),
     'میزان تطابق': matchMeta(r.category).label,
-    'درصد تطابق': r.category === 'UNJUDGEABLE' || r.category === 'ERROR' ? '—' : toPersianDigits(r.score),
+    'درصد تطابق': r.category === 'UNJUDGEABLE' || r.category === 'ERROR' ? '' : r.score,
     'موتور تحلیل': r.engine === 'local' ? 'موتور محلی (غیرهوشمند)' : r.engine === 'ai' ? 'هوش مصنوعی' : '—',
     'آخرین سمت': r.facts?.lastRole || '—',
-    'سال سابقه': r.facts?.yearsExperience != null ? toPersianDigits(r.facts.yearsExperience) : '—',
+    'سال سابقه': r.facts?.yearsExperience != null ? r.facts.yearsExperience : '',
     تحصیلات: r.facts?.education || '—',
     مهارت‌ها: (r.facts?.skills || []).join('، '),
     شهر: r.contact?.city || '—',
@@ -63,6 +64,7 @@ export async function exportJobToExcel(job: Job) {
   const sheet = XLSX.utils.json_to_sheet(rows);
   (sheet as any)['!cols'] = Object.keys(rows[0] || { a: 1 }).map((k) => ({ wch: k.length < 8 ? 14 : 26 }));
   XLSX.utils.book_append_sheet(wb, sheet, 'کاندیداها');
+  wb.Workbook = { ...(wb.Workbook || {}), Views: [{ RTL: true }] }; // opens right-to-left in Excel
   const safe = job.roleTitle.replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || 'job';
   XLSX.writeFile(wb, `هویدا-${safe}.xlsx`);
   return records.length;

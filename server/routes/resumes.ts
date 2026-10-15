@@ -2,7 +2,10 @@ import express from 'express';
 import fs from 'fs';
 import * as db from '../db';
 import { actorOf, ctxOf, signedFileUrl, verifyFileSignature } from '../auth';
-import { detectResumeMime, draftMessage, evaluateResume, KIND_TITLES } from '../ai/screening';
+import { draftMessage, evaluateResume, KIND_TITLES } from '../ai/screening';
+import type { AiFile } from '../ai/provider';
+import { ingestDocument } from '../ingest';
+import { assessText } from '../../src/lib/officeText';
 import { resetCircuitBreaker } from '../ai/provider';
 import type {
   AnalysisMode,
@@ -15,8 +18,26 @@ import type {
 } from '../../src/types/screening';
 import { h, int, oneOf, str } from './util';
 
+/**
+ * Content types we serve. Anything else (HTML, SVG, XML, scripts…) is sent as
+ * an opaque download so an uploaded file can never run in our origin.
+ */
 const FILE_MIME: Record<string, string> = {
   pdf: 'application/pdf',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  ppt: 'application/vnd.ms-powerpoint',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  xls: 'application/vnd.ms-excel',
+  csv: 'text/csv; charset=utf-8',
+  epub: 'application/epub+zip',
+  zip: 'application/zip',
+  mp3: 'audio/mpeg',
+  wav: 'audio/wav',
+  m4a: 'audio/mp4',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  avif: 'image/avif',
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   doc: 'application/msword',
   odt: 'application/vnd.oasis.opendocument.text',
@@ -34,7 +55,8 @@ const FILE_MIME: Record<string, string> = {
   heic: 'image/heic',
   heif: 'image/heif',
 };
-const PREVIEWABLE = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'txt', 'md'];
+/** Shown inline in the candidate panel; everything else is download-only. */
+const PREVIEWABLE = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'avif', 'txt', 'md'];
 
 const DECISION_VERB: Record<DecisionStatus, (name: string, role: string) => string> = {
   approved: (n, r) => `«${n}» را برای «${r}» تأیید کرد`,
@@ -155,15 +177,36 @@ export function resumeRoutes(): express.Router {
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
       const job = db.getJob(org.id, rec.jobId);
       if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
-      resetCircuitBreaker(); // explicit user action — never blocked by an earlier cooldown
-      const base64 = await db.readResumeFileBase64(rec);
+      resetCircuitBreaker(); // explicit user action — never blocked by short error cooldowns
+      let text = rec.extractedText || '';
+      let attachments: AiFile[] | undefined;
+      let sourceLabel = rec.analysisMeta?.format ?? null;
+      let intakeWarnings: string[] = [];
+      const quality = assessText(text);
+      // A deep review re-reads the original; a re-run reads it again only when
+      // the stored text is unusable (scans, images, formats read on the server).
+      if (mode === 'deep' || !quality.usable) {
+        const buf = await db.readResumeFileBuffer(rec);
+        if (buf) {
+          const ing = await ingestDocument(buf, rec.fileName);
+          attachments = ing.files;
+          sourceLabel = ing.label;
+          intakeWarnings = ing.warnings;
+          if (!quality.usable && assessText(ing.text).letters > quality.letters) {
+            text = ing.text;
+            rec.extractedText = text.slice(0, 20000);
+          }
+        }
+      }
+      const dept = org.departments.find((d) => d.id === job.departmentId);
       const evaluation = await evaluateResume({
         orgName: org.name,
-        job,
-        resumeText: rec.extractedText,
+        job: { ...job, departmentHint: dept?.hint },
+        resumeText: text,
         fileName: rec.fileName,
-        fileBase64: base64,
-        fileMime: detectResumeMime(rec.fileName, base64),
+        attachments,
+        sourceLabel,
+        intakeWarnings,
         mode,
       });
       db.updateResumeEvaluation(rec, evaluation, mode === 'deep' ? 'deep' : 'rerun');
@@ -262,8 +305,12 @@ export function fileRoutes(): express.Router {
     const full = db.resolveFilePath(rec.filePath);
     if (!full || !fs.existsSync(full)) return res.status(404).json({ error: 'فایل روی سرور موجود نیست.' });
     const ext = fileExt(rec);
+    const asInline = inline && PREVIEWABLE.includes(ext);
     res.setHeader('Content-Type', FILE_MIME[ext] || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(rec.fileName)}`);
+    res.setHeader('Content-Disposition', `${asInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(rec.fileName)}`);
+    // Images and text can't script anyway; the sandbox is defence in depth.
+    // (Not for PDFs: Chrome refuses to render a sandboxed PDF.)
+    if (ext !== 'pdf') res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=300');
     res.setHeader('Referrer-Policy', 'no-referrer');

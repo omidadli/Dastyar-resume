@@ -15,7 +15,10 @@
  *    pick an explicitly-labelled department template), while evaluations fall
  *    back to a clearly-labelled LOCAL keyword engine.
  */
-import { CIRCUIT_OPEN, friendlyAiError, generate, type AiFile } from './provider';
+import { aiBudgets, aiTemperature, CIRCUIT_OPEN, friendlyAiError, generate, type AiFile } from './provider';
+import { buildUnderstandSystemPrompt, buildSystemPrompt, currentBehavior, detectIndustry } from './behavior';
+import { assessText } from '../../src/lib/officeText';
+import type { AiPurpose, BehaviorConfig, IndustryProfile } from '../../src/types/admin';
 import type {
   AnalysisEngine,
   AnalysisMode,
@@ -25,6 +28,7 @@ import type {
   DeepFindings,
   DraftMessage,
   EmploymentType,
+  EvaluationMeta,
   EvidencePoint,
   Job,
   JobUnderstanding,
@@ -637,7 +641,8 @@ export async function understandJob(input: UnderstandInput): Promise<JobUndersta
   const { orgName, department } = input;
   const roleTitle = input.roleTitle.trim();
   const extraNotes = (input.extraNotes || '').trim();
-  const cacheKey = [orgName, department.id, department.name, roleTitle.toLowerCase(), extraNotes.toLowerCase(), input.location || '', input.employmentType || ''].join('::');
+  const behavior = currentBehavior();
+  const cacheKey = [behavior.version, orgName, department.id, department.name, roleTitle.toLowerCase(), extraNotes.toLowerCase(), input.location || '', input.employmentType || ''].join('::');
   const cached = understandCache.get(cacheKey);
   if (cached && Date.now() < cached.expiresAt) return cached.result;
 
@@ -667,7 +672,16 @@ ${QUESTION_EXAMPLE_JSON}`;
   let lastErr: any = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const raw = await generate(prompt, { temperature: 0.2, timeoutMs: 25_000, deadlineMs: 45_000 });
+      const detected = behavior.autoIndustry
+        ? detectIndustry({ roleTitle, departmentName: department.name, departmentHint: department.hint, extraNotes }, behavior)
+        : null;
+      const raw = await generate(prompt, {
+        system: buildUnderstandSystemPrompt(behavior, detected?.profile ?? null),
+        temperature: 0.2,
+        timeoutMs: 25_000,
+        deadlineMs: 45_000,
+        purpose: 'understand',
+      });
       const parsed = cleanAndParseJson<any>(raw, null);
       const understanding = parsed ? repairUnderstanding(parsed, department, roleTitle) : null;
       if (understanding) {
@@ -756,125 +770,32 @@ function emptyEvaluation(reason: string): CandidateEvaluation {
 
 export interface EvaluateInput {
   orgName: string;
-  job: Pick<Job, 'departmentName' | 'roleTitle' | 'extraNotes' | 'understanding' | 'answers'>;
+  job: Pick<Job, 'departmentName' | 'roleTitle' | 'extraNotes' | 'understanding' | 'answers'> & { departmentHint?: string };
   resumeText: string;
   fileName: string;
+  /** AI-readable attachments from the intake (original PDF, scans, embedded pictures, audio/video). */
+  attachments?: AiFile[];
+  /** @deprecated single original file — prefer `attachments`. */
   fileBase64?: string | null;
   fileMime?: string;
+  /** Persian label of the source format, e.g. «PDF اسکن‌شده». */
+  sourceLabel?: string | null;
+  /** Notes from reading the file (e.g. «۲ پیوست ایمیل هم خوانده شد»). */
+  intakeWarnings?: string[];
   /** 'deep' = «بازبینی دقیق»: slower, evidence-by-evidence re-read requested by the user. */
   mode?: AnalysisMode;
+  /** Admin test lab: evaluate with a draft behaviour instead of the saved one. */
+  behavior?: BehaviorConfig;
+  /** Admin test lab: receives the exact prompts that were sent. */
+  onPrompt?: (p: { system: string; user: string; industry: IndustryProfile | null }) => void;
+  purpose?: AiPurpose;
 }
 
-export async function evaluateResume(input: EvaluateInput): Promise<CandidateEvaluation> {
-  const { job, fileName } = input;
-  const understanding = job.understanding;
-  const answers = job.answers || {};
-  const deep = input.mode === 'deep';
-  const normalized = normalizePersianText(input.resumeText || '');
-  const hasText = Boolean(normalized && normalized.trim().length >= 30);
-  const base64 = input.fileBase64 && input.fileBase64.length > 20 ? input.fileBase64 : null;
-  const mime = input.fileMime || detectResumeMime(fileName, base64);
-  const isMultimodal = Boolean(base64 && mime && (mime === 'application/pdf' || mime.startsWith('image/')));
+const AI_READABLE = /^(application\/pdf|image\/|audio\/|video\/)/;
 
-  if (!hasText && !isMultimodal) {
-    const ev = emptyEvaluation('متن استخراج‌شده از رزومه برای تحلیل کافی نیست (فایل خالی یا غیرقابل بازخوانی است).');
-    ev.flags.scannedNoText = true;
-    return ev;
-  }
-
-  // Fast pass: clean extracted text is enough (tiny payload, same quality).
-  // Deep review deliberately re-reads the original file too: tables, charts and
-  // two-column layouts often hide details that plain text extraction drops.
-  const needsMultimodal = deep ? isMultimodal : !hasText && isMultimodal;
-  const textBudget = deep ? 18000 : 9500;
-
-  const criteriaStr = understanding.criteria
-    .map((c) => `${c.id}. ${c.title} — وزن ${c.weight}٪ ${c.mustHave ? '(الزامی)' : ''}`)
-    .join('\n');
-  const answersBrief = buildAnswersBrief(understanding, answers);
-
-  let fileContentSection: string;
-  if (needsMultimodal && hasText && deep) {
-    fileContentSection = `فایل اصلی رزومه (PDF یا تصویر) ضمیمه شده و متن استخراج‌شده آن هم در ادامه آمده است.
-ابتدا فایل را صفحه‌به‌صفحه، شامل جدول‌ها، ستون‌ها، پاورقی‌ها، لینک‌ها و نوشته‌های ریز بررسی کن و سپس با متن استخراج‌شده مقایسه کن؛ هر چیزی که فقط در فایل دیده می‌شود را هم لحاظ کن.
-
-متن استخراج‌شده از رزومه:
-"""
-${normalized.slice(0, textBudget)}
-"""`;
-  } else if (needsMultimodal) {
-    fileContentSection = `رزومه به‌صورت فایل ضمیمه (PDF یا تصویر اسکن‌شده) همراه این درخواست ارسال شده است. همه لایه‌ها، جدول‌ها، متن‌های فارسی و انگلیسی، سوابق و مشخصات را مستقیماً از روی فایل با دقت استخراج و تحلیل کن.`;
-  } else {
-    fileContentSection = `متن کامل رزومه:
-"""
-${normalized.slice(0, textBudget)}
-"""`;
-  }
-
-  const deepInstruction = deep
-    ? `
-【حالت بازبینی دقیق】
-کارشناس منابع انسانی «بازبینی دقیق» را درخواست کرده است؛ یعنی یک بار این رزومه سریع بررسی شده و حالا قضاوتی جزئی‌نگرتر می‌خواهد:
-الف) هر بند، هر شغل، هر تاریخ و هر عدد رزومه را جداگانه بخوان و با شاخص‌ها تطبیق بده.
-ب) تناقض‌ها و ابهام‌ها را فعالانه جست‌وجو کن: هم‌پوشانی یا شکاف زمانی بین سوابق، عنوان شغلی بزرگ‌تر از شرح وظایف، ادعای مهارت بدون شاهد، تاریخ‌های نامنظم، یا دستاوردهای بدون عدد و سنجه.
-پ) برای هر شاخص rationale را کامل‌تر و evidence را دقیق‌تر (نقل‌قول مستقیم و کوتاه از رزومه) بنویس؛ اگر شاهدی نیست صریحاً بنویس «در رزومه به این مورد اشاره نشده».
-ت) نقاط قوت و ضعف را تا حداکثر ۶ مورد و فقط با شاهد واقعی بنویس.
-ث) بلوک «deepFindings» را حتماً پر کن:
-   - focusPoints: حداکثر ۵ نکته دقیق که در این بازخوانی پیدا کردی و در نگاه اول دیده نمی‌شد.
-   - interviewQuestions: حداکثر ۵ پرسش مصاحبه‌ای اختصاصی برای راستی‌آزمایی همین رزومه.
-   - risks: حداکثر ۴ ریسک، تناقض یا علامت هشدار؛ اگر موردی نبود آرایه خالی بده.
-ج) اگر شواهد روشن‌تر شد امتیاز را بدون تعارف اصلاح کن؛ اگر تغییری نکرد همان امتیاز را نگه دار و در summary بنویس که بازبینی نتیجه را تأیید کرد.
-`
-    : '';
-
-  const prompt = `تو یک کارشناس ارشد و بسیار دقیق غربالگری رزومه در سازمان «${input.orgName}» هستی و با دستیار هوشمند «هویدا» کار می‌کنی.
-یک رزومه را با شرایط شغل می‌سنجی. نقش تو توصیف میزان تطابق با شواهد است؛ تصمیم نهایی با انسان است.
-
-دپارتمان: ${job.departmentName}
-${job.roleTitle.trim() ? `عنوان شغلی: ${job.roleTitle.trim()}` : ''}
-سطح ارشدیت نقش: ${understanding.seniority}
-${job.extraNotes.trim() ? `شرح شغل و توضیحات تکمیلی:\n${job.extraNotes.trim().slice(0, 2500)}\n` : ''}
-شاخص‌های وزن‌دار امتیازدهی:
-${criteriaStr}
-
-شرط‌هایی که کارشناس منابع انسانی تیک زده:
-${answersBrief}
-
-آستانه‌ها:
-- از ${understanding.thresholds.interview} به بالا = INTERVIEW (تطابق بالا)
-- بین ${understanding.thresholds.review} و ${understanding.thresholds.interview} = REVIEW (نیازمند بررسی)
-- زیر ${understanding.thresholds.review} = REJECT (تطابق پایین)
-
-نام فایل رزومه: ${fileName}
-${fileContentSection}
-${deepInstruction}
-قوانین نقض‌ناپذیر:
-۱. فقط بر اساس چیزی که واقعاً در رزومه آمده قضاوت کن. هرگز نام، عدد، سابقه، مدرک یا مهارتی را حدس نزن یا از نام فایل برداشت نکن. اگر اطلاعاتی نبود، null بده.
-۲. candidateName فقط اگر نام صریح در رزومه آمده پر شود؛ در غیر این صورت null.
-۳. برای هر شاخص در criterionScores: امتیاز ۰ تا ۱۰۰، rationale یک جمله فارسی، و evidence یک «نقل‌قول مستقیم کوتاه واقعی» از متن رزومه. اگر شاخصی هیچ شاهدی نداشت، امتیاز پایین بده و evidence را «در رزومه به این مورد اشاره نشده» بنویس.
-۴. strengths حداکثر ۴ و weaknesses حداکثر ۴ مورد؛ همه با evidence واقعی. severity: مواردی که شرط حذفی تیک‌خورده یا شاخص الزامی را نقض می‌کنند «knockout»، نقص‌های مهم «major»، موارد جزئی «minor».
-۵. knockoutMisses: فهرست شرط‌های حذفی تیک‌خورده‌ای که در رزومه شاهدی برایشان نیست یا خلافشان دیده شده.
-۶. score از ۰ تا ۱۰۰ بر اساس میانگین وزنی criterionScores و قضاوت تو. قوانین سقف:
-   - رزومه کاملاً نامرتبط با دپارتمان/شغل: score زیر ۳۰، flags.irrelevant=true، recommendation=REJECT.
-   - اگر هر شاخص الزامی یا هر شرط حذفی تیک‌خورده احراز نشود: سقف score برابر ۴۵.
-   - اگر رزومه آن‌قدر کم‌اطلاع است که قضاوت ممکن نیست: flags.insufficientInfo=true و score پایین.
-۷. صرف نام‌بردن از یک مهارت بدون سابقه، پروژه یا تجربه امتیاز کامل ندارد؛ جابه‌جایی‌های شغلی بسیار پرتکرار را به‌عنوان ریسک ثبات شغلی در weaknesses بیاور.
-۸. نام، جنسیت، سن، وضعیت تأهل، عکس، قومیت و ملیت هیچ تأثیری بر امتیاز ندارند؛ فقط شایستگی‌ها سنجیده شوند.
-۹. استخراج دقیق اطلاعات (facts و contact):
-   - yearsExperience: مجموع سابقه کاری واقعی به سال (عدد صحیح). اگر کارجو عدد سابقه را صریحاً نوشته همان را ملاک بگذار؛ در غیر این صورت از بازه‌های شغلی محاسبه کن، دوره‌های هم‌پوشان را دوبار نشمار و سال‌های تحصیل، کارآموزی کوتاه یا سربازی غیرمرتبط را سابقه کاری حساب نکن. اگر قابل محاسبه نیست null بده.
-   - lastRole: جدیدترین سمت شغلی بر اساس آخرین تاریخ مندرج در رزومه.
-   - education: مقطع و رشته تحصیلی ذکرشده.
-   - contact: phone (موبایل یا تلفن، از جمله لینک‌های tel: و واتساپ)، email (از جمله لینک‌های mailto:) و city (شهر سکونت).
-   - skills: حداکثر ۸ مهارت کلیدی تخصصی.
-   - expectedSalary: حقوق درخواستی فقط در صورت ذکر صریح.
-۱۰. tags: ۳ تا ۶ برچسب کوتاه فارسی برای جست‌وجو در بانک استعداد (حوزه تخصص، مهارت‌ها، سطح).
-۱۱. bankSuggested: اگر برای این شغل مناسب نیست ولی برای فرصت‌های آینده ارزشمند است true.
-۱۲. summary: ۲ تا ۳ جمله روان فارسی که بگوید چرا این میزان تطابق. whyCategory: یک جمله کوتاه، روشن و حرفه‌ای.
-۱۳. confidence: high وقتی شواهد کافی و روشن است؛ medium وقتی چند نکته مبهم است؛ low وقتی رزومه ناقص است.
-۱۴. رزومه فارسی یا انگلیسی هر دو پشتیبانی می‌شود؛ همه فیلدهای متنی خروجی فارسی باشند (نام مهارت‌های انگلیسی می‌تواند بماند).
-
-فقط JSON معتبر با این ساختار بده، بدون هیچ توضیح اضافه:
-{
+function evaluationSchema(deep: boolean): string {
+  return `{
+  "document": { "isResume": true, "type": "resume", "language": "fa" },
   "candidateName": null,
   "contact": { "phone": null, "email": null, "city": null },
   "facts": { "yearsExperience": null, "education": null, "lastRole": null, "skills": [], "expectedSalary": null },
@@ -891,35 +812,157 @@ ${deepInstruction}
   "knockoutMisses": [],
   "tags": [],
   "bankSuggested": false,
-  "flags": { "irrelevant": false, "insufficientInfo": false, "scannedNoText": false }${
+  "flags": { "irrelevant": false, "insufficientInfo": false, "scannedNoText": false, "notResume": false, "multipleCandidates": false, "partiallyReadable": false }${
     deep
       ? `,
   "deepFindings": { "focusPoints": ["..."], "interviewQuestions": ["..."], "risks": ["..."] }`
       : ''
   }
 }`;
+}
+
+export async function evaluateResume(input: EvaluateInput): Promise<CandidateEvaluation> {
+  const { job, fileName } = input;
+  const understanding = job.understanding;
+  const answers = job.answers || {};
+  const deep = input.mode === 'deep';
+  const behavior = input.behavior || currentBehavior();
+  const normalized = normalizePersianText(input.resumeText || '');
+  const quality = assessText(normalized);
+  // Mojibake from a broken PDF font map is worse than no text: never feed it as evidence.
+  const hasText = normalized.trim().length >= 30 && !quality.garbled;
+  let attachments: AiFile[] = input.attachments?.length ? input.attachments : [];
+  if (!attachments.length) {
+    const base64 = input.fileBase64 && input.fileBase64.length > 20 ? input.fileBase64 : null;
+    const mime = input.fileMime || detectResumeMime(fileName, base64);
+    if (base64 && mime && AI_READABLE.test(mime)) attachments = [{ mimeType: mime, base64, fileName }];
+  }
+
+  const detected = behavior.autoIndustry
+    ? detectIndustry(
+        {
+          roleTitle: job.roleTitle,
+          departmentName: job.departmentName,
+          departmentHint: job.departmentHint,
+          extraNotes: job.extraNotes,
+          criteria: understanding.criteria.map((c) => c.title),
+        },
+        behavior
+      )
+    : null;
+  const industry = detected?.profile ?? null;
+  const meta: EvaluationMeta = {
+    format: input.sourceLabel ?? null,
+    industry: industry?.name ?? null,
+    behaviorVersion: behavior.version,
+    documentType: null,
+    language: null,
+    warnings: (input.intakeWarnings || []).slice(0, 6),
+  };
+  const withMeta = (ev: CandidateEvaluation): CandidateEvaluation => {
+    ev.meta = { ...meta, documentType: ev.meta?.documentType ?? null, language: ev.meta?.language ?? null };
+    return ev;
+  };
+
+  if (!hasText && !attachments.length) {
+    const ev = emptyEvaluation('متن استخراج‌شده از رزومه برای تحلیل کافی نیست (فایل خالی یا غیرقابل بازخوانی است).');
+    ev.flags.scannedNoText = true;
+    return withMeta(ev);
+  }
+
+  // Fast pass: clean extracted text is enough (tiny payload, same quality).
+  // Deep review deliberately re-reads the original file too: tables, charts and
+  // two-column layouts often hide details that plain text extraction drops.
+  const needsMultimodal = attachments.length > 0 && (deep || !hasText);
+  const textBudget = deep ? 18000 : 9500;
+  const t = understanding.thresholds;
+  const criteriaStr = understanding.criteria
+    .map((c) => `${c.id}. ${c.title} — وزن ${c.weight}٪ ${c.mustHave ? '(الزامی)' : ''}`)
+    .join('\n');
+  const answersBrief = buildAnswersBrief(understanding, answers);
+  const source = input.sourceLabel || 'سند';
+
+  let fileContentSection: string;
+  if (needsMultimodal && hasText) {
+    fileContentSection = `فایل اصلی (${source}) ضمیمه شده و متن استخراج‌شده آن هم در ادامه آمده است. فایل را مرجع اصلی بدان؛ جدول‌ها، ستون‌ها، پاورقی‌ها، لینک‌ها و نوشته‌های ریز را هم بررسی کن و با متن مقایسه کن؛ هر چیزی که فقط در فایل دیده می‌شود را هم لحاظ کن.
+
+متن استخراج‌شده:
+"""
+${normalized.slice(0, textBudget)}
+"""`;
+  } else if (needsMultimodal) {
+    fileContentSection = `رزومه به‌صورت فایل ضمیمه (${source}) ارسال شده و متن قابل‌اتکایی از آن استخراج نشد${
+      quality.garbled ? ' (متن لایه سند درهم و ناخوانا بود)' : ''
+    }. همه بخش‌ها، جدول‌ها و متن‌های فارسی و انگلیسی را مستقیماً از روی فایل بخوان.`;
+  } else {
+    fileContentSection = `متن کامل رزومه${input.sourceLabel ? ` (خوانده‌شده از ${input.sourceLabel})` : ''}:
+"""
+${normalized.slice(0, textBudget)}
+"""`;
+  }
+  const intakeNotes = meta.warnings.length ? `\nیادداشت‌های خواندن فایل: ${meta.warnings.join('؛ ')}` : '';
+  const maxPoints = deep ? 6 : 4;
+
+  const userPrompt = `## فرصت شغلی
+سازمان: ${input.orgName}
+دپارتمان: ${job.departmentName}
+${job.roleTitle.trim() ? `عنوان شغلی: ${job.roleTitle.trim()}\n` : ''}سطح ارشدیت نقش: ${understanding.seniority}
+${industry ? `حوزه تشخیص‌داده‌شده: ${industry.name}\n` : ''}${job.extraNotes.trim() ? `شرح شغل و توضیحات تکمیلی:\n${job.extraNotes.trim().slice(0, 2500)}\n` : ''}
+## شاخص‌های وزن‌دار امتیازدهی
+${criteriaStr}
+
+## شرط‌هایی که کارشناس منابع انسانی تیک زده
+${answersBrief}
+
+## آستانه‌ها
+- از ${t.interview} به بالا = INTERVIEW (تطابق بالا)
+- بین ${t.review} و ${t.interview} = REVIEW (نیازمند بررسی)
+- زیر ${t.review} = REJECT (تطابق پایین)
+
+## سند دریافتی
+نام فایل: ${fileName} (نام فایل منبع اطلاعات نیست)${intakeNotes}
+${fileContentSection}
+
+## استخراج و نگارش
+- criterionScores: برای هر شاخص امتیاز ۰ تا ۱۰۰، rationale یک جمله و evidence یک نقل‌قول کوتاه واقعی از رزومه.
+- yearsExperience: مجموع سابقه کاری واقعی به سال (عدد صحیح)؛ عدد صریح خود کارجو ملاک است، وگرنه از بازه‌ها محاسبه کن و هم‌پوشانی‌ها را دوبار نشمار؛ اگر قابل محاسبه نیست null.
+- lastRole: جدیدترین سمت شغلی بر اساس آخرین تاریخ. education: مقطع و رشته.
+- contact: phone (از جمله لینک tel: و واتساپ)، email (از جمله mailto:)، city (شهر سکونت).
+- skills: حداکثر ۸ مهارت کلیدی تخصصی. expectedSalary فقط اگر صریحاً ذکر شده.
+- tags: ۳ تا ۶ برچسب کوتاه فارسی برای بانک استعداد. bankSuggested: اگر برای این شغل مناسب نیست ولی برای فرصت‌های آینده ارزشمند است true.
+- document: isResume، type یکی از resume | cover_letter | certificate | id_document | job_description | portfolio | form | other، و language زبان اصلی سند (fa، en، ar…).
+- strengths و weaknesses هر کدام حداکثر ${maxPoints.toLocaleString('fa-IR')} مورد؛ severity برای نقض شرط حذفی یا شاخص الزامی «knockout»، نقص مهم «major»، جزئی «minor».
+- knockoutMisses: شرط‌های حذفیِ تیک‌خورده‌ای که شاهد ندارند یا خلافشان دیده شده.
+
+## خروجی
+فقط JSON معتبر با این ساختار، بدون هیچ توضیح اضافه:
+${evaluationSchema(deep)}`;
+
+  const system = buildSystemPrompt(behavior, { industry, deep });
+  input.onPrompt?.({ system, user: userPrompt, industry });
 
   try {
-    const file: AiFile | undefined =
-      needsMultimodal && base64 && mime ? { mimeType: mime, base64, fileName } : undefined;
-    const raw = await generate(prompt, {
-      temperature: 0.1,
+    const budgets = aiBudgets(deep ? 'deep' : 'fast');
+    const raw = await generate(userPrompt, {
+      system,
+      temperature: aiTemperature(),
       // Deep review is an explicit user action with a spinner on screen, so it
       // gets a much larger budget than the batch pass (and thinks harder).
-      timeoutMs: deep ? 45_000 : 12_000,
-      deadlineMs: deep ? 80_000 : 20_000,
+      timeoutMs: budgets.timeoutMs,
+      deadlineMs: budgets.deadlineMs,
       depth: deep ? 'deep' : 'fast',
-      file,
+      files: needsMultimodal ? attachments : undefined,
       fileOptional: hasText,
+      purpose: input.purpose || (deep ? 'deep' : 'evaluate'),
     });
     const parsed = cleanAndParseJson<any>(raw, null);
     if (!parsed) throw new Error('malformed evaluation');
-    return finalizeEvaluation(parsed, understanding, answers, 'ai', normalized, { deep, maxPoints: deep ? 6 : 4 });
+    return withMeta(finalizeEvaluation(parsed, understanding, answers, 'ai', normalized, { deep, maxPoints }));
   } catch (err: any) {
     if (err?.message !== CIRCUIT_OPEN && err?.name !== 'AiUnavailableError') {
-      console.log(`[evaluateResume] «${fileName}» → local engine (${err?.message || 'err'})`);
+      console.log(`[evaluateResume] «${fileName}» → local engine (${String(err?.message || 'err').slice(0, 160)})`);
     }
-    return evaluateResumeLocal(normalized || fileName, understanding, answers, fileName);
+    return withMeta(evaluateResumeLocal((hasText ? normalized : '') || fileName, understanding, answers, fileName));
   }
 }
 
@@ -972,10 +1015,19 @@ export function finalizeEvaluation(
   // Trust the model's holistic score only if it's within ±12 of the weighted baseline
   let score = Math.abs(aiScore - weighted) <= 12 ? aiScore : weighted;
 
+  const documentType = typeof raw.document?.type === 'string' ? String(raw.document.type).slice(0, 40) : null;
+  const language = typeof raw.document?.language === 'string' ? String(raw.document.language).slice(0, 12) : null;
+  // A portfolio is not a classic resume but still shows competence — judge it.
+  const notResume =
+    Boolean(raw.flags?.notResume) ||
+    (raw.document?.isResume === false && documentType !== 'portfolio' && documentType !== 'resume');
   const flags = {
     irrelevant: Boolean(raw.flags?.irrelevant),
     insufficientInfo: Boolean(raw.flags?.insufficientInfo),
     scannedNoText: Boolean(raw.flags?.scannedNoText),
+    notResume,
+    multipleCandidates: Boolean(raw.flags?.multipleCandidates),
+    partiallyReadable: Boolean(raw.flags?.partiallyReadable),
   };
 
   const severityOf = (v: any) => (['knockout', 'major', 'minor'].includes(v) ? v : 'minor') as 'knockout' | 'major' | 'minor';
@@ -1060,9 +1112,10 @@ export function finalizeEvaluation(
   });
   if (flags.irrelevant) score = Math.min(score, 29);
   if ((hasKnockoutMiss || missingMustHave) && !flags.irrelevant) score = Math.min(score, 45);
+  if (flags.notResume) score = 0;
 
   let recommendation: Recommendation;
-  if (flags.irrelevant) recommendation = 'REJECT';
+  if (flags.irrelevant || flags.notResume) recommendation = 'REJECT';
   else if (score >= understanding.thresholds.interview) recommendation = 'INTERVIEW';
   else if (score >= understanding.thresholds.review) recommendation = 'REVIEW';
   else recommendation = 'REJECT';
@@ -1097,9 +1150,10 @@ export function finalizeEvaluation(
     weaknesses,
     knockoutMisses,
     tags: arr<any>(raw.tags).map((t) => String(t)).filter(Boolean).slice(0, 6),
-    bankSuggested: Boolean(raw.bankSuggested),
+    bankSuggested: Boolean(raw.bankSuggested) && !flags.notResume,
     flags,
     deepFindings,
+    meta: { format: null, industry: null, behaviorVersion: null, documentType, language, warnings: [] },
   };
 }
 
@@ -1310,7 +1364,7 @@ ${JSON.stringify(candidates.slice(0, 40), null, 2)}
 فقط JSON: { "adjustments": { "id1": 82, "id2": 71 } }`;
 
   try {
-    const raw = await generate(prompt, { temperature: 0.1, timeoutMs: 20_000, deadlineMs: 40_000 });
+    const raw = await generate(prompt, { temperature: 0.1, timeoutMs: 20_000, deadlineMs: 40_000, purpose: 'calibrate' });
     const parsed = cleanAndParseJson<{ adjustments: Record<string, number> }>(raw, { adjustments: {} });
     const out: Record<string, number> = {};
     for (const [id, val] of Object.entries(parsed.adjustments || {})) {
@@ -1400,7 +1454,7 @@ ${signature}
 - خروجی فقط JSON: { "subject": "موضوع کوتاه", "body": "متن کامل با \\n برای خط جدید" }`;
 
   try {
-    const raw = await generate(prompt, { temperature: 0.4, timeoutMs: 15_000, deadlineMs: 25_000 });
+    const raw = await generate(prompt, { temperature: 0.4, timeoutMs: 15_000, deadlineMs: 25_000, purpose: 'message' });
     const parsed = cleanAndParseJson<{ subject?: string; body?: string }>(raw, {});
     if (parsed.body && parsed.body.trim().length > 30) {
       let body = parsed.body.trim();

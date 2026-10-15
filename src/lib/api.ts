@@ -239,8 +239,9 @@ export const api = {
       post<{ job: Job }>(`/api/jobs/${id}/analysis`, { state }, opts),
     evaluate: (id: string, b: EvaluatePayload, opts?: RequestOptions) =>
       post<{ record: ResumeListItem; stats: JobStats }>(`/api/jobs/${id}/evaluate`, b, {
-        // Base64 uploads of large scans need more time on slow connections.
-        timeoutMs: b.fileBase64 ? 150_000 : 60_000,
+        // Base64 uploads of large scans need more time on slow connections; the
+        // server itself bounds the AI (admin-tunable budget + key failover).
+        timeoutMs: b.fileBase64 ? 210_000 : 150_000,
         ...opts,
       }),
     calibrate: (id: string, count: number, opts?: RequestOptions) =>
@@ -274,8 +275,8 @@ export const api = {
     bulk: (ids: string[], action: 'decision' | 'delete', status?: DecisionStatus, note?: string) =>
       post<{ updated: number }>('/api/resumes/bulk', { ids, action, status, note }),
     remove: (id: string) => del<{ ok: boolean; stats?: JobStats }>(`/api/resumes/${id}`),
-    rerun: (id: string) => post<{ record: ResumeRecord; engine: string }>(`/api/resumes/${id}/rerun`, {}, { timeoutMs: 60_000 }),
-    deepRerun: (id: string) => post<{ record: ResumeRecord; engine: string }>(`/api/resumes/${id}/deep-rerun`, {}, { timeoutMs: 120_000 }),
+    rerun: (id: string) => post<{ record: ResumeRecord; engine: string }>(`/api/resumes/${id}/rerun`, {}, { timeoutMs: 150_000 }),
+    deepRerun: (id: string) => post<{ record: ResumeRecord; engine: string }>(`/api/resumes/${id}/deep-rerun`, {}, { timeoutMs: 270_000 }),
     addTalent: (id: string, b: { departmentId: string; note: string; tags: string[] }) =>
       post<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`, b),
     removeTalent: (id: string) => del<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`),

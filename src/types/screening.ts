@@ -118,6 +118,25 @@ export interface EvaluationFlags {
   irrelevant: boolean;
   insufficientInfo: boolean;
   scannedNoText: boolean;
+  /** The file is not a resume (cover letter only, certificate, ID card, job ad…). */
+  notResume?: boolean;
+  /** The file holds more than one person's resume; the first/main one was evaluated. */
+  multipleCandidates?: boolean;
+  /** Parts of the document could not be read (blurry scan, cut pages…). */
+  partiallyReadable?: boolean;
+}
+
+/** How a resume was read and judged — shown in the candidate panel and admin reports. */
+export interface EvaluationMeta {
+  /** Human label of the source format, e.g. «PDF اسکن‌شده», «پاورپوینت». */
+  format: string | null;
+  /** Industry guide applied by the behaviour system. */
+  industry: string | null;
+  behaviorVersion: number | null;
+  /** resume | cover_letter | certificate | … (AI-detected). */
+  documentType: string | null;
+  language: string | null;
+  warnings: string[];
 }
 
 /** Extra output of a user-requested deep review. Only filled by the AI engine. */
@@ -145,6 +164,7 @@ export interface CandidateEvaluation {
   bankSuggested: boolean;
   flags: EvaluationFlags;
   deepFindings?: DeepFindings | null;
+  meta?: EvaluationMeta;
 }
 
 // ---------- Jobs («فرصت شغلی») ----------
@@ -239,6 +259,7 @@ export interface ResumeRecord {
   bankSuggested: boolean;
   flags: EvaluationFlags | null;
   deepFindings: DeepFindings | null;
+  analysisMeta?: EvaluationMeta | null;
 
   category: ResumeCategory;
   rankInCategory: number | null;

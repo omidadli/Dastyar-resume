@@ -8,11 +8,11 @@
  *  - Brute force: in-memory sliding-window rate limits on login/signup/demo.
  */
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import type express from 'express';
 import type { Role } from '../src/types/app';
 import * as db from './db';
+import { appSecret } from './secret';
+import { demoTtlMs, isPlatformAdmin, sessionTtlMs, systemSettings } from './platform';
 
 export const SESSION_TTL_MS = 30 * 24 * 3600_000;
 export const DEMO_TTL_MS = 24 * 3600_000;
@@ -64,35 +64,6 @@ export function isValidEmail(email: string): boolean {
   return typeof email === 'string' && email.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 }
 
-// --------------------------------------------------------------- secrets ----
-
-let cachedSecret: Buffer | null = null;
-
-/** APP_SECRET from the environment, or a random secret persisted next to the data. */
-function appSecret(): Buffer {
-  if (cachedSecret) return cachedSecret;
-  const env = process.env.APP_SECRET?.trim();
-  if (env && env.length >= 16) {
-    cachedSecret = Buffer.from(env, 'utf-8');
-    return cachedSecret;
-  }
-  const file = path.join(db.DATA_DIR, '.app-secret');
-  try {
-    cachedSecret = Buffer.from(fs.readFileSync(file, 'utf-8').trim(), 'hex');
-    if (cachedSecret.length >= 32) return cachedSecret;
-  } catch {
-    /* create below */
-  }
-  cachedSecret = crypto.randomBytes(32);
-  try {
-    fs.mkdirSync(db.DATA_DIR, { recursive: true });
-    fs.writeFileSync(file, cachedSecret.toString('hex'), { mode: 0o600 });
-  } catch (err) {
-    console.warn('[auth] could not persist app secret; signed links reset on restart.', err);
-  }
-  return cachedSecret;
-}
-
 // --------------------------------------------------------------- sessions ----
 
 export function newSessionToken(): { token: string; hash: string } {
@@ -104,9 +75,9 @@ export function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
-export function issueSession(userId: string, ttlMs = SESSION_TTL_MS): string {
+export function issueSession(userId: string, ttlMs = sessionTtlMs(), support?: { adminId: string; adminName: string }): string {
   const { token, hash } = newSessionToken();
-  db.createSession(userId, hash, ttlMs);
+  db.createSession(userId, hash, ttlMs, support);
   return token;
 }
 
@@ -114,6 +85,23 @@ export interface AuthContext {
   user: db.UserRecord;
   org: db.OrgRecord;
   tokenHash: string;
+  /** Set for sessions a platform admin opened for support. */
+  support: { adminId: string; adminName: string; expiresAt: number } | null;
+}
+
+/** Why an account may not use the app right now (null = allowed). */
+export function accessBlock(user: db.UserRecord, org: db.OrgRecord): { status: number; code: string; error: string } | null {
+  if (user.disabled) {
+    return { status: 403, code: 'ACCOUNT_DISABLED', error: 'حساب کاربری شما غیرفعال شده است؛ برای پیگیری با مدیر سامانه تماس بگیرید.' };
+  }
+  if (org.suspended && !isPlatformAdmin(user)) {
+    return {
+      status: 403,
+      code: 'ORG_SUSPENDED',
+      error: `دسترسی فضای کاری «${org.name}» موقتاً متوقف شده است${org.suspendedReason ? ` (${org.suspendedReason})` : ''}؛ با مدیر سامانه تماس بگیرید.`,
+    };
+  }
+  return null;
 }
 
 declare global {
@@ -155,8 +143,31 @@ export function requireAuth(req: express.Request, res: express.Response, next: e
   if (!session || !user || !org) {
     return res.status(401).json({ error: 'نشست شما به پایان رسیده است؛ دوباره وارد شوید.', code: 'SESSION_EXPIRED' });
   }
-  db.touchSession(session, org.isDemo ? DEMO_TTL_MS : SESSION_TTL_MS);
-  req.ctx = { user, org, tokenHash };
+  const blocked = accessBlock(user, org);
+  if (blocked) {
+    // 401 signs the tab out; the message explains why.
+    db.deleteSession(tokenHash);
+    return res.status(401).json({ error: blocked.error, code: blocked.code });
+  }
+  db.touchSession(session, org.isDemo ? demoTtlMs() : sessionTtlMs());
+  req.ctx = {
+    user,
+    org,
+    tokenHash,
+    support: session.support ? { ...session.support, expiresAt: session.expiresAt } : null,
+  };
+  next();
+}
+
+/**
+ * Maintenance mode (/admin › تنظیمات سامانه): workspace APIs answer 503 with
+ * the operator's message; platform admins keep working.
+ */
+export function maintenanceGate(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const m = systemSettings().maintenance;
+  if (m.enabled && !(req.ctx && isPlatformAdmin(req.ctx.user))) {
+    return res.status(503).json({ error: m.message, code: 'MAINTENANCE' });
+  }
   next();
 }
 

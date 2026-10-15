@@ -1,15 +1,12 @@
 import express from 'express';
 import * as db from '../db';
 import { actorOf, ctxOf, hasRole } from '../auth';
-import {
-  buildTemplateUnderstanding,
-  calibrate,
-  detectResumeMime,
-  evaluateResume,
-  repairUnderstanding,
-  understandJob,
-} from '../ai/screening';
-import type { CandidateEvaluation, EmploymentType, JobStatus, Recommendation, ScreeningAnswers } from '../../src/types/screening';
+import { buildTemplateUnderstanding, calibrate, evaluateResume, repairUnderstanding, understandJob } from '../ai/screening';
+import type { AiFile } from '../ai/provider';
+import { ingestDocument, labelForFileName } from '../ingest';
+import { systemSettings } from '../platform';
+import { assessText } from '../../src/lib/officeText';
+import type { CandidateEvaluation, EmploymentType, EvaluationMeta, JobStatus, Recommendation, ScreeningAnswers } from '../../src/types/screening';
 import type { Department } from '../../src/types/app';
 import { matchesSearch } from '../../src/lib/normalizeFa';
 import { h, oneOf, str } from './util';
@@ -175,39 +172,50 @@ export function jobRoutes(): express.Router {
       const fileName = str(req.body?.fileName, 200);
       if (!fileName) return res.status(400).json({ error: 'نام فایل الزامی است.' });
       const fileBase64 = typeof req.body?.fileBase64 === 'string' && req.body.fileBase64.length > 50 ? (req.body.fileBase64 as string) : undefined;
+      const maxMb = systemSettings().maxFileMb;
+      if (fileBase64 && fileBase64.length * 0.75 > maxMb * 1024 * 1024 + 4096) {
+        return res.status(413).json({ error: `حجم فایل «${fileName}» بیش از ${maxMb.toLocaleString('fa-IR')} مگابایت است.` });
+      }
       const errorMessage = req.body?.errorMessage ? str(req.body.errorMessage, 300) : undefined;
       let text = typeof req.body?.extractedText === 'string' ? (req.body.extractedText as string).slice(0, 60000) : '';
-      const ext = fileName.split('.').pop()?.toLowerCase() || '';
 
       let evaluation: CandidateEvaluation | undefined;
       let reason: string | null = null;
+      let meta: EvaluationMeta | null = null;
       try {
         if ((fileBase64 || text.trim()) && !errorMessage) {
-          // Word/plain text uploaded without client-side extraction: extract here.
-          if (text.trim().length < 30 && fileBase64) {
-            try {
-              const buf = Buffer.from(fileBase64, 'base64');
-              if (ext === 'docx') {
-                const mammoth = await import('mammoth');
-                const out = await mammoth.extractRawText({ buffer: buf });
-                if (out?.value?.trim().length > 10) text = out.value.replace(/\n[ \t]*\n+/g, '\n').trim();
-              } else if (['txt', 'md', 'csv', 'log', 'rtf'].includes(ext)) {
-                text = buf.toString('utf8').trim();
-              }
-            } catch (extractErr: any) {
-              console.warn('server-side extraction failed:', extractErr?.message);
-            }
+          let sourceLabel = labelForFileName(fileName);
+          let attachments: AiFile[] | undefined;
+          let intakeWarnings: string[] = [];
+          let unreadable: string | null = null;
+          const clientText = assessText(text);
+          // The browser sends the file only when it could not extract clean
+          // text itself (scans, images, PowerPoint, e-mails, unknown formats…):
+          // the server's universal intake reads it.
+          if (fileBase64 && !clientText.usable) {
+            const ing = await ingestDocument(Buffer.from(fileBase64, 'base64'), fileName);
+            sourceLabel = ing.label;
+            attachments = ing.files;
+            intakeWarnings = ing.warnings;
+            if (clientText.garbled || assessText(ing.text).letters > clientText.letters) text = ing.text;
+            if (ing.unreadable && !ing.files.length && !assessText(text).usable) unreadable = ing.unreadable;
           }
-          evaluation = await evaluateResume({
-            orgName: org.name,
-            job,
-            resumeText: text,
-            fileName,
-            fileBase64,
-            fileMime: detectResumeMime(fileName, fileBase64),
-          });
-          if (evaluation.flags.scannedNoText) {
-            reason = 'فایل رزومه محتوای خواندنی ندارد (فایل خالی، اسکن ناخوانا یا تصویر بدون متن).';
+          if (unreadable) {
+            reason = unreadable;
+            meta = { format: sourceLabel, industry: null, behaviorVersion: null, documentType: null, language: null, warnings: intakeWarnings };
+          } else {
+            const dept = org.departments.find((d) => d.id === job.departmentId);
+            evaluation = await evaluateResume({
+              orgName: org.name,
+              job: { ...job, departmentHint: dept?.hint },
+              resumeText: text,
+              fileName,
+              attachments,
+              fileBase64: attachments ? undefined : fileBase64,
+              sourceLabel,
+              intakeWarnings,
+            });
+            reason = db.unjudgeableReasonOf(evaluation);
           }
         } else if (req.body?.unjudgeableReason) {
           reason = str(req.body.unjudgeableReason, 300);
@@ -224,6 +232,7 @@ export function jobRoutes(): express.Router {
         unjudgeableReason: reason,
         fileBase64,
         evaluation,
+        meta,
         errorMessage: evaluation || reason ? undefined : errorMessage || 'تحلیل این فایل ممکن نشد؛ دوباره تلاش کنید.',
       });
       res.json({ record: db.toListItem(record), stats: db.getJob(org.id, job.id)?.stats });

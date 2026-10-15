@@ -16,9 +16,11 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import type { AuditItem } from '../src/types/admin';
 import type {
   AnalysisHistoryEntry,
   CandidateEvaluation,
+  EvaluationMeta,
   DecisionStatus,
   EmploymentType,
   Job,
@@ -83,6 +85,8 @@ export interface SessionRecord {
   createdAtISO: string;
   expiresAt: number;
   lastSeenAt: number;
+  /** Set when a platform admin opened this session for support («ورود پشتیبانی»). */
+  support?: { adminId: string; adminName: string } | null;
 }
 
 interface Snapshot {
@@ -93,6 +97,10 @@ interface Snapshot {
   jobs: Job[];
   resumes: ResumeRecord[];
   activity: ActivityItem[];
+  /** Platform settings (/admin): AI keys (encrypted), behaviour, system switches. */
+  platform?: unknown;
+  audit?: AuditItem[];
+  aiStats?: unknown;
 }
 
 const orgs = new Map<string, OrgRecord>();
@@ -101,6 +109,9 @@ const sessions = new Map<string, SessionRecord>();
 const jobs = new Map<string, Job>();
 const resumes = new Map<string, ResumeRecord>();
 let activity: ActivityItem[] = [];
+let platformBlob: unknown = null;
+let auditLog: AuditItem[] = [];
+let aiStatsBlob: unknown = null;
 
 let saveTimer: NodeJS.Timeout | null = null;
 let initialized = false;
@@ -139,6 +150,9 @@ export async function initStore() {
       snap.jobs?.forEach((j) => jobs.set(j.id, normalizeJob(j)));
       snap.resumes?.forEach((r) => resumes.set(r.id, normalizeResume(r)));
       activity = Array.isArray(snap.activity) ? snap.activity : [];
+      platformBlob = snap.platform ?? null;
+      auditLog = Array.isArray(snap.audit) ? snap.audit : [];
+      aiStatsBlob = snap.aiStats ?? null;
       for (const j of jobs.values()) {
         // A server restart interrupts any analysis that was in flight.
         if (j.analysisStatus === 'processing') j.analysisStatus = 'done';
@@ -220,6 +234,9 @@ function snapshot(): Snapshot {
     jobs: Array.from(jobs.values()),
     resumes: Array.from(resumes.values()),
     activity,
+    platform: platformBlob ?? undefined,
+    audit: auditLog,
+    aiStats: aiStatsBlob ?? undefined,
   };
 }
 
@@ -311,6 +328,8 @@ function normalizeOrg(o: OrgRecord): OrgRecord {
     messageSignature: o.messageSignature ?? `واحد منابع انسانی ${o.name}`,
     isDemo: Boolean(o.isDemo),
     demoExpiresAt: o.demoExpiresAt ?? null,
+    suspended: Boolean(o.suspended),
+    suspendedReason: o.suspendedReason ?? null,
   };
 }
 
@@ -364,9 +383,15 @@ function normalizeResume(r: ResumeRecord): ResumeRecord {
 
 // ------------------------------------------------------------------ files ----
 
+/** Formats the intake reads (ingest/) — anything else (executables, scripts) is stored as .bin. */
 const SAFE_EXTENSIONS = [
-  'pdf', 'docx', 'doc', 'odt', 'rtf', 'txt', 'md',
-  'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif',
+  'pdf', 'docx', 'doc', 'odt', 'rtf', 'txt', 'md', 'markdown', 'pages', 'wps', 'dot', 'dotx',
+  'pptx', 'ppt', 'odp', 'key', 'xlsx', 'xls', 'ods', 'csv', 'tsv', 'numbers',
+  'epub', 'xps', 'oxps', 'djvu', 'html', 'htm', 'xhtml', 'mht', 'mhtml', 'xml', 'json', 'vcf',
+  'eml', 'msg', 'zip', 'tar', 'gz', 'tgz', 'rar', '7z',
+  'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'heic', 'heif', 'avif', 'svg', 'ico', 'jp2', 'psd',
+  'mp3', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'flac', 'aiff', 'aif', 'amr', 'wma',
+  'mp4', 'm4v', 'mov', 'webm', 'mkv', 'avi', 'wmv', '3gp', 'mpeg', 'mpg',
 ];
 
 /** Keeps the real extension (images used to be saved as .bin, which broke previews). */
@@ -405,6 +430,17 @@ async function writeResumeFile(
     return { relPath: path.relative(RESUMES_DIR, full), size: buf.length };
   } catch (err) {
     console.error('[store] file save failed:', err);
+    return null;
+  }
+}
+
+export async function readResumeFileBuffer(rec: ResumeRecord): Promise<Buffer | null> {
+  if (!rec.filePath) return null;
+  const full = resolveFilePath(rec.filePath);
+  if (!full) return null;
+  try {
+    return await fs.promises.readFile(full);
+  } catch {
     return null;
   }
 }
@@ -540,7 +576,10 @@ export function createUser(input: { orgId: string; name: string; email: string; 
   return u;
 }
 
-export function updateUser(id: string, patch: Partial<Pick<UserRecord, 'name' | 'title' | 'role' | 'passwordHash' | 'lastLoginISO' | 'lastSeenActivityISO'>>) {
+export function updateUser(
+  id: string,
+  patch: Partial<Pick<UserRecord, 'name' | 'title' | 'role' | 'passwordHash' | 'lastLoginISO' | 'lastSeenActivityISO' | 'platformAdmin' | 'disabled' | 'email'>>
+) {
   const u = users.get(id);
   if (!u) return null;
   Object.assign(u, patch);
@@ -566,13 +605,19 @@ export function listMembers(orgId: string): UserRecord[] {
 
 // --------------------------------------------------------------- sessions ----
 
-export function createSession(userId: string, tokenHash: string, ttlMs: number): SessionRecord {
+export function createSession(
+  userId: string,
+  tokenHash: string,
+  ttlMs: number,
+  support?: { adminId: string; adminName: string } | null
+): SessionRecord {
   const s: SessionRecord = {
     tokenHash,
     userId,
     createdAtISO: new Date().toISOString(),
     expiresAt: Date.now() + ttlMs,
     lastSeenAt: Date.now(),
+    ...(support ? { support } : {}),
   };
   sessions.set(tokenHash, s);
   scheduleSave();
@@ -593,6 +638,7 @@ export function getSession(tokenHash: string): SessionRecord | null {
 /** Sliding expiry, written at most once a minute per session. */
 export function touchSession(s: SessionRecord, ttlMs: number) {
   if (Date.now() - s.lastSeenAt < 60_000) return;
+  if (s.support) return; // support sessions keep their short, fixed lifetime
   s.lastSeenAt = Date.now();
   s.expiresAt = Date.now() + ttlMs;
   scheduleSave();
@@ -839,7 +885,7 @@ export function recomputeJob(jobId: string, persist = true): Job | null {
 
 function categoryFromEvaluation(ev: CandidateEvaluation, extractionReason: string | null): ResumeCategory {
   if (extractionReason) return 'UNJUDGEABLE';
-  if (ev.flags.scannedNoText || ev.flags.insufficientInfo) return 'UNJUDGEABLE';
+  if (ev.flags.scannedNoText || ev.flags.insufficientInfo || ev.flags.notResume) return 'UNJUDGEABLE';
   return ev.recommendation;
 }
 
@@ -868,6 +914,8 @@ export async function saveEvaluation(input: {
   evaluation?: CandidateEvaluation;
   errorMessage?: string;
   at?: Date;
+  /** How the file was read, when there is no evaluation to carry it. */
+  meta?: EvaluationMeta | null;
 }): Promise<ResumeRecord> {
   const { job } = input;
   const stamp = nowStamp(input.at);
@@ -912,6 +960,7 @@ export async function saveEvaluation(input: {
     bankSuggested: ev?.bankSuggested || false,
     flags: ev?.flags || null,
     deepFindings: ev?.deepFindings || null,
+    analysisMeta: ev?.meta || input.meta || null,
     category,
     rankInCategory: null,
     analysisHistory: ev
@@ -942,14 +991,30 @@ export async function saveEvaluation(input: {
   return record;
 }
 
+const DOCUMENT_TYPE_LABELS: Record<string, string> = {
+  cover_letter: 'فقط نامه همراه (کاورلتر) است',
+  certificate: 'گواهی‌نامه یا مدرک تحصیلی است',
+  id_document: 'مدرک هویتی است',
+  job_description: 'آگهی یا شرح شغل است',
+  form: 'فرم خام یا خالی است',
+  other: 'سند دیگری غیر از رزومه است',
+};
+
+/** Persian reason shown for UNJUDGEABLE evaluations (null when judgeable). */
+export function unjudgeableReasonOf(ev: CandidateEvaluation): string | null {
+  if (ev.flags.notResume) {
+    const type = ev.meta?.documentType || 'other';
+    return `این فایل رزومه نیست؛ به نظر می‌رسد ${DOCUMENT_TYPE_LABELS[type] || DOCUMENT_TYPE_LABELS.other}.`;
+  }
+  if (ev.flags.scannedNoText) return 'فایل رزومه محتوای خواندنی ندارد (فایل خالی، اسکن ناخوانا یا تصویر بدون متن).';
+  if (ev.flags.insufficientInfo) return 'اطلاعات رزومه برای سنجش با معیارهای این فرصت شغلی کافی نیست.';
+  return null;
+}
+
 export function updateResumeEvaluation(rec: ResumeRecord, ev: CandidateEvaluation, mode: 'rerun' | 'deep'): ResumeRecord {
   const stamp = nowStamp();
   Object.assign(rec, {
-    unjudgeableReason: ev.flags.scannedNoText
-      ? 'فایل رزومه محتوای خواندنی ندارد (فایل خالی، اسکن ناخوانا یا تصویر بدون متن).'
-      : ev.flags.insufficientInfo
-      ? 'اطلاعات رزومه برای سنجش با معیارهای این فرصت شغلی کافی نیست.'
-      : null,
+    unjudgeableReason: unjudgeableReasonOf(ev),
     errorMessage: null,
     candidateName: ev.candidateName,
     contact: ev.contact,
@@ -968,6 +1033,7 @@ export function updateResumeEvaluation(rec: ResumeRecord, ev: CandidateEvaluatio
     bankSuggested: ev.bankSuggested,
     flags: ev.flags,
     deepFindings: ev.deepFindings || null,
+    analysisMeta: ev.meta || rec.analysisMeta || null,
     category: categoryFromEvaluation(ev, null),
     updatedAtISO: stamp.iso,
   });
@@ -1439,4 +1505,206 @@ export function search(orgId: string, query: string): SearchResults {
 /** Test/QA helper — counts per collection. */
 export function storeCounts() {
   return { orgs: orgs.size, users: users.size, jobs: jobs.size, resumes: resumes.size, activity: activity.length };
+}
+
+// ---------------------------------------------------- platform (/admin) ----
+
+export function getPlatformBlob(): unknown {
+  return platformBlob;
+}
+
+export function setPlatformBlob(value: unknown) {
+  platformBlob = value;
+  scheduleSave();
+}
+
+export function getAiStatsBlob(): unknown {
+  return aiStatsBlob;
+}
+
+export function setAiStatsBlob(value: unknown) {
+  aiStatsBlob = value;
+  scheduleSave();
+}
+
+const AUDIT_CAP = 3000;
+
+export function appendAudit(item: Omit<AuditItem, 'id' | 'atISO'>): AuditItem {
+  const full: AuditItem = { id: uid('aud'), atISO: new Date().toISOString(), ...item };
+  auditLog.unshift(full);
+  if (auditLog.length > AUDIT_CAP) auditLog.length = AUDIT_CAP;
+  scheduleSave();
+  return full;
+}
+
+export function listAudit(limit = 300, query = ''): AuditItem[] {
+  const q = query.trim();
+  const items = q ? auditLog.filter((a) => matchesSearch([a.actorName, a.action, a.target, a.detail], q)) : auditLog;
+  return items.slice(0, Math.max(1, Math.min(1000, limit)));
+}
+
+export function allOrgs(): OrgRecord[] {
+  return Array.from(orgs.values());
+}
+
+export function allUsers(): UserRecord[] {
+  return Array.from(users.values());
+}
+
+export function sessionsOfUser(userId: string): SessionRecord[] {
+  const now = Date.now();
+  return Array.from(sessions.values()).filter((s) => s.userId === userId && s.expiresAt > now);
+}
+
+export function setOrgSuspended(id: string, suspended: boolean, reason: string | null): OrgRecord | null {
+  const org = orgs.get(id);
+  if (!org) return null;
+  org.suspended = suspended;
+  org.suspendedReason = suspended ? (reason || '').slice(0, 300) || null : null;
+  scheduleSave();
+  return org;
+}
+
+export function extendDemo(id: string, hours: number): OrgRecord | null {
+  const org = orgs.get(id);
+  if (!org || !org.isDemo) return null;
+  const base = Math.max(Date.now(), org.demoExpiresAt ? new Date(org.demoExpiresAt).getTime() : 0);
+  org.demoExpiresAt = new Date(base + hours * 3600_000).toISOString();
+  scheduleSave();
+  return org;
+}
+
+/** A demo workspace kept by the operator becomes a regular one (no expiry). */
+export function convertDemoToRegular(id: string): OrgRecord | null {
+  const org = orgs.get(id);
+  if (!org) return null;
+  org.isDemo = false;
+  org.demoExpiresAt = null;
+  scheduleSave();
+  return org;
+}
+
+export function orgUsage(orgId: string): { members: number; jobs: number; resumes: number; lastActivityISO: string | null } {
+  let members = 0;
+  for (const u of users.values()) if (u.orgId === orgId) members++;
+  let jobCount = 0;
+  for (const j of jobs.values()) if (j.orgId === orgId) jobCount++;
+  let resumeCount = 0;
+  let last: string | null = null;
+  for (const r of resumes.values()) {
+    if (r.orgId !== orgId) continue;
+    resumeCount++;
+    const at = r.updatedAtISO || r.createdAtISO;
+    if (at && (!last || at > last)) last = at;
+  }
+  for (const a of activity) {
+    if (a.orgId === orgId) {
+      if (!last || a.atISO > last) last = a.atISO;
+      break; // newest first
+    }
+  }
+  return { members, jobs: jobCount, resumes: resumeCount, lastActivityISO: last };
+}
+
+export function platformTotals() {
+  const weekAgo = new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const resumeList = Array.from(resumes.values());
+  const formatCounts = new Map<string, number>();
+  for (const r of resumeList) {
+    const f = r.analysisMeta?.format || (r.fileName.includes('.') ? r.fileName.split('.').pop()!.toUpperCase() : '—');
+    formatCounts.set(f, (formatCounts.get(f) || 0) + 1);
+  }
+  return {
+    orgs: {
+      total: orgs.size,
+      demo: Array.from(orgs.values()).filter((o) => o.isDemo).length,
+      suspended: Array.from(orgs.values()).filter((o) => o.suspended).length,
+      newThisWeek: Array.from(orgs.values()).filter((o) => o.createdAtISO >= weekAgo).length,
+    },
+    users: {
+      total: users.size,
+      disabled: Array.from(users.values()).filter((u) => u.disabled).length,
+      activeThisWeek: Array.from(users.values()).filter((u) => (u.lastLoginISO || '') >= weekAgo).length,
+    },
+    jobs: { total: jobs.size, open: Array.from(jobs.values()).filter((j) => j.status === 'open').length },
+    resumes: {
+      total: resumeList.length,
+      thisWeek: resumeList.filter((r) => r.createdAtISO >= weekAgo).length,
+      aiEngine: resumeList.filter((r) => r.engine === 'ai').length,
+      localEngine: resumeList.filter((r) => r.engine === 'local').length,
+      unjudgeable: resumeList.filter((r) => r.category === 'UNJUDGEABLE').length,
+    },
+    formats: Array.from(formatCounts.entries())
+      .map(([format, count]) => ({ format, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 12),
+  };
+}
+
+/** Resumes analysed and workspaces created per day (Tehran calendar), oldest first. */
+export function platformDaily(days = 14): Array<{ day: string; resumes: number; signups: number }> {
+  const out: Array<{ day: string; resumes: number; signups: number; key: string }> = [];
+  const keyOf = (iso: string) => {
+    const d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : formatJalaliDate(tehranJalaliOf(d), false);
+  };
+  for (let i = days - 1; i >= 0; i--) {
+    const key = formatJalaliDate(tehranJalaliOf(new Date(Date.now() - i * 24 * 3600_000)), false);
+    out.push({ day: key, resumes: 0, signups: 0, key });
+  }
+  const index = new Map(out.map((d, i) => [d.key, i]));
+  const since = new Date(Date.now() - (days + 1) * 24 * 3600_000).toISOString();
+  for (const r of resumes.values()) {
+    if (r.createdAtISO < since) continue;
+    const i = index.get(keyOf(r.createdAtISO));
+    if (i !== undefined) out[i].resumes++;
+  }
+  for (const o of orgs.values()) {
+    if (o.isDemo || o.createdAtISO < since) continue;
+    const i = index.get(keyOf(o.createdAtISO));
+    if (i !== undefined) out[i].signups++;
+  }
+  return out.map(({ key: _k, ...rest }) => rest);
+}
+
+let storageCache: { at: number; bytes: number } | null = null;
+
+/** Bytes used by stored resume files (cached for a minute). */
+export async function storageBytes(): Promise<number> {
+  if (storageCache && Date.now() - storageCache.at < 60_000) return storageCache.bytes;
+  let total = 0;
+  async function walk(dir: string) {
+    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(full);
+      else total += (await fs.promises.stat(full).catch(() => null))?.size || 0;
+    }
+  }
+  await walk(RESUMES_DIR);
+  try {
+    total += (await fs.promises.stat(STORE_FILE)).size;
+  } catch {
+    /* no snapshot yet */
+  }
+  storageCache = { at: Date.now(), bytes: total };
+  return total;
+}
+
+/** Jobs of any workspace (platform admin test lab). */
+export function allJobsBrief(limit = 300): Array<{ id: string; orgId: string | null; orgName: string; title: string; departmentName: string }> {
+  return Array.from(jobs.values())
+    .sort((a, b) => (b.updatedAtISO || '').localeCompare(a.updatedAtISO || ''))
+    .slice(0, limit)
+    .map((j) => ({
+      id: j.id,
+      orgId: j.orgId,
+      orgName: (j.orgId && orgs.get(j.orgId)?.name) || '—',
+      title: j.roleTitle || j.departmentName,
+      departmentName: j.departmentName,
+    }));
+}
+
+export function getJobUnsafe(id: string): Job | null {
+  return jobs.get(id) || null;
 }

@@ -21,6 +21,9 @@ export interface OrgPublic {
   isDemo: boolean;
   demoExpiresAt: string | null;
   createdAtISO: string;
+  /** Suspended by a platform admin — members cannot sign in. */
+  suspended?: boolean;
+  suspendedReason?: string | null;
 }
 
 export interface UserPublic {
@@ -32,6 +35,9 @@ export interface UserPublic {
   title: string;
   createdAtISO: string;
   lastLoginISO: string | null;
+  /** Operator of the whole deployment (/admin). */
+  platformAdmin?: boolean;
+  disabled?: boolean;
 }
 
 export interface AiStatus {
@@ -42,8 +48,11 @@ export interface AiStatus {
   label: string;
   /** Persian explanation when unavailable. */
   reason: string | null;
-  /** True while the circuit breaker is cooling down after repeated failures. */
+  /** True while every key of the pool is cooling down after limits/errors. */
   coolingDown: boolean;
+  /** Key pool size and how many keys are usable right now. */
+  keys?: number;
+  readyKeys?: number;
 }
 
 export interface AuthPayload {
@@ -57,6 +66,8 @@ export interface MeResponse {
   org: OrgPublic;
   ai: AiStatus;
   unread: number;
+  /** Present when a platform admin opened this session for support. */
+  support?: { adminName: string; expiresAt: number } | null;
 }
 
 export type ActivityType =

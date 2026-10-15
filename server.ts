@@ -6,7 +6,9 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import * as db from './server/db';
-import { requireAuth } from './server/auth';
+import { maintenanceGate, requireAuth } from './server/auth';
+import { initPlatform, systemSettings } from './server/platform';
+import { adminRoutes } from './server/routes/admin';
 import { aiStatus } from './server/ai/provider';
 import { authRoutes } from './server/routes/auth';
 import { orgRoutes } from './server/routes/org';
@@ -19,17 +21,19 @@ dotenv.config({ override: true });
 async function startServer() {
   await db.initStore();
   db.purgeExpired();
+  initPlatform();
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', true);
 
-  // 30mb comfortably fits a 20mb resume as base64 and still bounds a request.
-  app.use(express.json({ limit: '30mb' }));
+  // 40mb fits the largest allowed resume (25mb, /admin › تنظیمات سامانه) as base64.
+  app.use(express.json({ limit: '40mb' }));
   // A rejected body (too large / malformed) must come back as JSON.
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!err) return next();
     if (err.type === 'entity.too.large') {
-      return res.status(413).json({ error: 'حجم فایل بیش از حد مجاز است؛ هر رزومه حداکثر ۲۰ مگابایت.' });
+      const mb = systemSettings().maxFileMb.toLocaleString('fa-IR');
+      return res.status(413).json({ error: `حجم فایل بیش از حد مجاز است؛ هر رزومه حداکثر ${mb} مگابایت.` });
     }
     if (err.type === 'entity.parse.failed' || err instanceof SyntaxError) {
       return res.status(400).json({ error: 'درخواست قابل خواندن نیست.' });
@@ -51,6 +55,8 @@ async function startServer() {
 
   // ---------------- Authenticated API ----------------
   app.use('/api', requireAuth);
+  app.use('/api/admin', adminRoutes()); // platform admins — also during maintenance
+  app.use('/api', maintenanceGate);
   app.use('/api', orgRoutes());
   app.use('/api', jobRoutes());
   app.use('/api', resumeRoutes());

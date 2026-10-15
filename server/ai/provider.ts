@@ -1,21 +1,25 @@
 /**
- * AI provider abstraction for HOVIDA.
+ * AI provider layer for HOVIDA.
  *
- * The platform operator chooses the engine through environment variables:
+ * Keys come from the platform settings (/admin › کلیدهای هوش مصنوعی, up to
+ * five, encrypted at rest) plus the legacy environment variables
+ * (GEMINI_API_KEY, OPENAI_API_KEY/OPENAI_BASE_URL/OPENAI_MODEL). Every request
+ * runs through the key pool (keypool.ts): when a key hits a rate limit, runs
+ * out of quota or fails, the *same* request continues on the next key, so the
+ * user never notices. Only when every key is benched do callers fall back to
+ * the clearly-labelled local engine.
  *
- *   AI_PROVIDER      auto | gemini | openai | off        (default: auto)
- *   GEMINI_API_KEY   Google AI Studio key                 (provider: gemini)
- *   GEMINI_MODEL     optional model override
- *   OPENAI_API_KEY   key of any OpenAI-compatible gateway (provider: openai)
- *   OPENAI_BASE_URL  e.g. https://api.openai.com/v1 or an Iranian gateway URL
- *   OPENAI_MODEL     e.g. gpt-4o-mini
- *
- * `auto` prefers Gemini when its key exists, otherwise the OpenAI-compatible
- * gateway. A shared circuit breaker stops hammering a failing provider; callers
- * then fall back to the clearly-labelled local engine.
+ * Providers:
+ *  - gemini  — Google Gemini (optional custom base URL for a proxy/mirror).
+ *  - openai  — any OpenAI-compatible chat/completions gateway.
  */
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import type { AiStatus } from '../../src/types/app';
+import type { AiCallLog, AiPurpose } from '../../src/types/admin';
+import * as db from '../db';
+import * as pool from './keypool';
+import type { PoolEntry } from './keypool';
+import { aiSettings, envForcedOff, keyEntryForTest, poolEntries } from '../platform';
 
 export type ProviderId = 'gemini' | 'openai';
 
@@ -29,16 +33,23 @@ export interface GenerateOptions {
   temperature?: number;
   /** Budget for a single upstream call. */
   timeoutMs?: number;
-  /** Absolute budget across failover models / retries. */
+  /** Absolute budget across keys / models / retries. */
   deadlineMs?: number;
   /** `deep` asks the model to think harder (user-requested deep review). */
   depth?: 'fast' | 'deep';
-  /** Original resume file (PDF / image) for multimodal reading. */
+  /** Attachments for multimodal reading (PDF pages, scans, photos, audio/video). */
+  files?: AiFile[];
+  /** @deprecated single attachment — use `files`. */
   file?: AiFile;
-  /** When true and the provider rejects the file part, retry with text only. */
+  /** When true and no key can read the attachments, continue with text only. */
   fileOptional?: boolean;
   /** Expect a JSON object back (default true). */
   json?: boolean;
+  /** System instruction (the behaviour configuration). */
+  system?: string;
+  purpose?: AiPurpose;
+  /** Admin «test this key»: use only this key, even if it is benched. */
+  onlyKeyId?: string;
 }
 
 export class AiUnavailableError extends Error {
@@ -48,70 +59,56 @@ export class AiUnavailableError extends Error {
   }
 }
 
-// ---------------------------------------------------------------- breaker ----
-
+/** Thrown when every key is benched right now (callers use the local engine). */
 export const CIRCUIT_OPEN = 'AI_CIRCUIT_OPEN';
-let circuitOpenUntil = 0;
-let consecutiveFailures = 0;
 
-export function isCircuitOpen(): boolean {
-  return Date.now() < circuitOpenUntil;
-}
-export function recordSuccess() {
-  consecutiveFailures = 0;
-  circuitOpenUntil = 0;
-}
-export function resetCircuitBreaker() {
-  consecutiveFailures = 0;
-  circuitOpenUntil = 0;
-}
-export function recordFailure(isQuota: boolean, isHighDemand: boolean) {
-  // 503 "high demand" spikes are short and model-level; they don't trip the breaker.
-  if (isHighDemand) return;
-  consecutiveFailures++;
-  if (consecutiveFailures >= 5) circuitOpenUntil = Date.now() + (isQuota ? 15_000 : 8_000);
-}
+// ------------------------------------------------------------- persistence ----
 
-function isQuotaError(err: any): boolean {
-  return err?.status === 429 || /429|quota|RESOURCE_EXHAUSTED|rate.?limit/i.test(String(err?.message || ''));
-}
-function isHighDemandError(err: any): boolean {
-  return err?.status === 503 || /503|UNAVAILABLE|overloaded|high demand/i.test(String(err?.message || ''));
-}
-function isFatalAuthError(err: any): boolean {
-  const status = err?.status || err?.code;
-  const msg = String(err?.message || '');
-  return status === 401 || status === 403 || /API key not valid|API_KEY_INVALID|invalid_api_key|Incorrect API key/i.test(msg);
+let poolLoaded = false;
+let persistTimer: NodeJS.Timeout | null = null;
+
+function ensurePoolLoaded() {
+  if (poolLoaded) return;
+  poolLoaded = true;
+  try {
+    pool.importState(db.getAiStatsBlob());
+  } catch {
+    /* fresh state */
+  }
+  pool.setChangeListener(() => {
+    if (persistTimer) return;
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      db.setAiStatsBlob(pool.exportState());
+    }, 4000);
+    persistTimer.unref?.();
+  });
 }
 
-// ----------------------------------------------------------- configuration ----
+// ------------------------------------------------------------------- calls ----
 
-export function resolveProvider(): ProviderId | null {
-  const pref = (process.env.AI_PROVIDER || 'auto').trim().toLowerCase();
-  const hasGemini = Boolean(process.env.GEMINI_API_KEY?.trim());
-  const hasOpenAI = Boolean(process.env.OPENAI_API_KEY?.trim());
-  if (pref === 'off' || pref === 'none' || pref === 'disabled') return null;
-  if (pref === 'gemini') return hasGemini ? 'gemini' : null;
-  if (pref === 'openai') return hasOpenAI ? 'openai' : null;
-  return hasGemini ? 'gemini' : hasOpenAI ? 'openai' : null;
+const CALL_LOG_CAP = 400;
+const callLog: AiCallLog[] = [];
+let callSeq = 0;
+
+function logCall(entry: Omit<AiCallLog, 'id'>) {
+  callLog.unshift({ id: `c${Date.now().toString(36)}${(callSeq++).toString(36)}`, ...entry });
+  if (callLog.length > CALL_LOG_CAP) callLog.length = CALL_LOG_CAP;
 }
+
+export function recentCalls(limit = 200): AiCallLog[] {
+  return callLog.slice(0, Math.max(1, Math.min(CALL_LOG_CAP, limit)));
+}
+
+// ------------------------------------------------------------------ config ----
 
 const GEMINI_DEFAULT = 'gemini-3.5-flash-lite';
 const GEMINI_FALLBACKS = ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.1-flash-lite'];
+const OPENAI_DEFAULT_MODEL = 'gpt-4o-mini';
+const OPENAI_DEFAULT_BASE = 'https://api.openai.com/v1';
 
-/** GEMINI_MODEL is honoured whenever it looks like a model id (no more silent deny-list). */
-export function resolveGeminiModel(): string {
-  const env = process.env.GEMINI_MODEL?.trim().replace(/^models\//, '');
-  if (env && /^gemini-[\w.-]{2,60}$/.test(env)) return env;
-  return GEMINI_DEFAULT;
-}
-
-export function resolveOpenAIModel(): string {
-  return process.env.OPENAI_MODEL?.trim() || 'gpt-4o-mini';
-}
-
-function openAIBase(): string {
-  return (process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1').trim().replace(/\/+$/, '');
+export function modelOf(e: PoolEntry): string {
+  return e.model || (e.provider === 'gemini' ? GEMINI_DEFAULT : OPENAI_DEFAULT_MODEL);
 }
 
 function hostOf(url: string): string {
@@ -122,72 +119,278 @@ function hostOf(url: string): string {
   }
 }
 
+export function providerLabel(e: PoolEntry): string {
+  if (e.provider === 'gemini') return e.baseUrl ? `Gemini (${hostOf(e.baseUrl)})` : 'Gemini';
+  return hostOf(e.baseUrl || OPENAI_DEFAULT_BASE);
+}
+
+interface RuntimeConfig {
+  envOff: boolean;
+  enabled: boolean;
+  strategy: 'failover' | 'round-robin';
+  temperature: number;
+  fastTimeoutSec: number;
+  deepTimeoutSec: number;
+  entries: PoolEntry[];
+}
+
+export function runtimeConfig(): RuntimeConfig {
+  const s = aiSettings();
+  return {
+    envOff: envForcedOff(),
+    enabled: s.enabled,
+    strategy: s.strategy,
+    temperature: s.temperature,
+    fastTimeoutSec: s.fastTimeoutSec,
+    deepTimeoutSec: s.deepTimeoutSec,
+    entries: poolEntries(),
+  };
+}
+
+/** Admin-tuned time budgets: per call and per request (across failover). */
+export function aiBudgets(depth: 'fast' | 'deep'): { timeoutMs: number; deadlineMs: number } {
+  const s = aiSettings();
+  const sec = depth === 'deep' ? s.deepTimeoutSec : s.fastTimeoutSec;
+  // One slow key may use 60% of the budget; the rest is left for failover.
+  return { timeoutMs: Math.max(8_000, Math.round(sec * 1000 * 0.6)), deadlineMs: sec * 1000 };
+}
+
+export function aiTemperature(): number {
+  return aiSettings().temperature;
+}
+
+const timeFa = (ms: number) => {
+  const sec = Math.max(1, Math.round(ms / 1000));
+  return sec < 90 ? `${sec.toLocaleString('fa-IR')} ثانیه` : `${Math.round(sec / 60).toLocaleString('fa-IR')} دقیقه`;
+};
+
 export function aiStatus(): AiStatus {
-  const provider = resolveProvider();
-  if (!provider) {
-    const off = /^(off|none|disabled)$/i.test(process.env.AI_PROVIDER || '');
-    return {
-      available: false,
-      provider: null,
-      model: null,
-      label: 'غیرفعال',
-      reason: off
-        ? 'هوش مصنوعی توسط مدیر سامانه غیرفعال شده است.'
-        : 'هیچ کلید هوش مصنوعی روی سرور تنظیم نشده است (GEMINI_API_KEY یا OPENAI_API_KEY).',
-      coolingDown: false,
-    };
-  }
-  const model = provider === 'gemini' ? resolveGeminiModel() : resolveOpenAIModel();
-  const cooling = isCircuitOpen();
+  ensurePoolLoaded();
+  const cfg = runtimeConfig();
+  const off = (reason: string): AiStatus => ({ available: false, provider: null, model: null, label: 'غیرفعال', reason, coolingDown: false, keys: 0, readyKeys: 0 });
+  if (cfg.envOff) return off('هوش مصنوعی روی این سرور خاموش است (AI_PROVIDER=off).');
+  if (!cfg.enabled) return off('هوش مصنوعی توسط مدیر سامانه غیرفعال شده است.');
+  if (!cfg.entries.length) return off('هنوز هیچ کلید هوش مصنوعی ثبت نشده است؛ مدیر سامانه باید از پنل مدیریت کلید اضافه کند.');
+  const runtime = pool.runtimeOf(cfg.entries);
+  const usable = cfg.entries.filter((_, i) => runtime[i].health !== 'invalid');
+  if (!usable.length) return off('کلیدهای هوش مصنوعی ثبت‌شده پذیرفته نشدند؛ مدیر سامانه باید آن‌ها را در پنل مدیریت بررسی کند.');
+  const readyIdx = runtime.findIndex((r) => r.health === 'ready');
+  const ready = runtime.filter((r) => r.health === 'ready').length;
+  const lead = readyIdx >= 0 ? cfg.entries[readyIdx] : usable[0];
+  const cooling = ready === 0;
+  const next = cooling ? pool.nextAvailableAt(cfg.entries) : null;
+  const n = cfg.entries.length;
   return {
     available: true,
-    provider,
-    model,
-    label: provider === 'gemini' ? `Gemini · ${model}` : `${hostOf(openAIBase())} · ${model}`,
-    reason: cooling ? 'سرویس هوش مصنوعی پس از چند خطای پیاپی، چند ثانیه در حالت استراحت است.' : null,
+    provider: lead.provider,
+    model: modelOf(lead),
+    label: `${providerLabel(lead)} · ${modelOf(lead)}${n > 1 ? ` · ${ready.toLocaleString('fa-IR')} از ${n.toLocaleString('fa-IR')} کلید آماده` : ''}`,
+    reason: cooling
+      ? `همه کلیدهای هوش مصنوعی موقتاً به محدودیت خورده‌اند${next ? `؛ حدود ${timeFa(next - Date.now())} دیگر خودکار برمی‌گردند` : ''}. تا آن زمان موتور محلی کار می‌کند.`
+      : null,
     coolingDown: cooling,
+    keys: n,
+    readyKeys: ready,
   };
+}
+
+/** True while every key is benched. */
+export function isCircuitOpen(): boolean {
+  const cfg = runtimeConfig();
+  return cfg.entries.length > 0 && pool.orderEntries(cfg.entries, 'failover').length === 0;
+}
+
+/** Explicit user actions (re-run, test) are not blocked by short error cooldowns. */
+export function resetCircuitBreaker() {
+  pool.clearTransientCooldowns();
+}
+
+// ---------------------------------------------------------- capabilities ----
+
+const GEMINI_TYPES =
+  /^(application\/pdf|text\/plain|image\/(png|jpeg|webp|heic|heif)|audio\/(wav|x-wav|mp3|mpeg|aiff|x-aiff|aac|ogg|flac|x-flac|mp4|x-m4a|m4a|webm)|video\/(mp4|mpeg|mov|quicktime|avi|x-msvideo|x-flv|mpg|webm|wmv|x-ms-wmv|3gpp))$/i;
+const OPENAI_TYPES = /^(application\/pdf|image\/(png|jpeg|webp|gif|heic|heif))$/i;
+
+function canRead(e: PoolEntry, f: AiFile): boolean {
+  return e.provider === 'gemini' ? GEMINI_TYPES.test(f.mimeType) : OPENAI_TYPES.test(f.mimeType);
+}
+
+/** Gemini inline requests are limited to ~20 MB in total. */
+const GEMINI_INLINE_BUDGET = 19 * 1024 * 1024;
+
+function unsupported(message: string) {
+  return Object.assign(new Error(message), { code: 'UNSUPPORTED_INPUT' });
+}
+
+/** Files in the shape the key's provider accepts (HEIC → JPEG for gateways). */
+async function adaptFiles(e: PoolEntry, files: AiFile[], fileOptional: boolean): Promise<AiFile[]> {
+  const out: AiFile[] = [];
+  for (const f of files) {
+    if (!canRead(e, f)) {
+      if (!fileOptional) throw unsupported(`فرمت ${f.mimeType} برای ${providerLabel(e)} قابل خواندن نیست`);
+      continue;
+    }
+    if (e.provider === 'openai' && /heic|heif/i.test(f.mimeType)) {
+      try {
+        const { heicToJpeg } = await import('../ingest/images');
+        const jpg = await heicToJpeg(Buffer.from(f.base64, 'base64'));
+        out.push({ mimeType: 'image/jpeg', base64: jpg.toString('base64'), fileName: f.fileName });
+        continue;
+      } catch {
+        if (!fileOptional) throw unsupported('تبدیل تصویر HEIC ممکن نشد');
+        continue;
+      }
+    }
+    out.push(f);
+  }
+  if (e.provider === 'gemini') {
+    let total = 0;
+    const kept: AiFile[] = [];
+    for (const f of out) {
+      total += f.base64.length;
+      if (total > GEMINI_INLINE_BUDGET) break;
+      kept.push(f);
+    }
+    if (!kept.length && out.length && !fileOptional) throw unsupported('حجم فایل برای ارسال به هوش مصنوعی بیش از حد است');
+    return kept;
+  }
+  return out;
 }
 
 // --------------------------------------------------------------- generate ----
 
 export async function generate(prompt: string, opts: GenerateOptions = {}): Promise<string> {
-  const provider = resolveProvider();
-  if (!provider) throw new AiUnavailableError();
-  if (isCircuitOpen()) throw new Error(CIRCUIT_OPEN);
-  try {
-    const text = provider === 'gemini' ? await generateGemini(prompt, opts) : await generateOpenAI(prompt, opts);
-    recordSuccess();
-    return text;
-  } catch (err: any) {
-    recordFailure(isQuotaError(err), isHighDemandError(err));
-    throw err;
+  ensurePoolLoaded();
+  const cfg = runtimeConfig();
+  if (cfg.envOff || !cfg.enabled || !cfg.entries.length) throw new AiUnavailableError();
+  const files = opts.files?.length ? opts.files : opts.file ? [opts.file] : [];
+  let ordered: PoolEntry[];
+  if (opts.onlyKeyId) {
+    const only = cfg.entries.find((e) => e.id === opts.onlyKeyId);
+    if (!only) throw new AiUnavailableError('KEY_NOT_FOUND');
+    ordered = [only];
+  } else {
+    ordered = pool.orderEntries(cfg.entries, cfg.strategy, files.length ? (e) => files.every((f) => canRead(e, f)) : undefined);
   }
+  if (!ordered.length) throw new Error(CIRCUIT_OPEN);
+
+  const deadline = Date.now() + (opts.deadlineMs ?? 20_000);
+  const temperature = opts.temperature ?? cfg.temperature;
+  let lastErr: any = null;
+  let switchedFrom: string | null = null;
+
+  for (let i = 0; i < ordered.length; i++) {
+    const entry = ordered[i];
+    const remaining = deadline - Date.now();
+    if (remaining < 1500) break;
+    const isLast = i === ordered.length - 1;
+    let sendFiles: AiFile[];
+    try {
+      sendFiles = await adaptFiles(entry, files, Boolean(opts.fileOptional));
+    } catch (err) {
+      lastErr = err; // this provider can't read the file — the next one may
+      continue;
+    }
+    const started = Date.now();
+    pool.noteAttempt(entry);
+    try {
+      const { text, model } =
+        entry.provider === 'gemini'
+          ? await callGemini(entry, prompt, sendFiles, { ...opts, temperature }, deadline, isLast)
+          : await callOpenAI(entry, prompt, sendFiles, { ...opts, temperature }, deadline);
+      const latency = Date.now() - started;
+      pool.markSuccess(entry, latency);
+      logCall({
+        at: started,
+        keyId: entry.id,
+        keyLabel: entry.label,
+        provider: entry.provider,
+        model,
+        purpose: opts.purpose || 'other',
+        ok: true,
+        latencyMs: latency,
+        error: null,
+        switchedFrom,
+        attachments: sendFiles.length,
+      });
+      return text;
+    } catch (err: any) {
+      const verdict = pool.markFailure(entry, err, { hasFiles: sendFiles.length > 0 });
+      logCall({
+        at: started,
+        keyId: entry.id,
+        keyLabel: entry.label,
+        provider: entry.provider,
+        model: modelOf(entry),
+        purpose: opts.purpose || 'other',
+        ok: false,
+        latencyMs: Date.now() - started,
+        error: `${verdict.message} — ${String(err?.message || err).slice(0, 160)}`,
+        switchedFrom,
+        attachments: sendFiles.length,
+      });
+      lastErr = err;
+      if (!verdict.tryNext) throw err;
+      switchedFrom = entry.label;
+      if (ordered.length > 1 && !isLast) {
+        console.warn(`[ai] «${entry.label}» → ${verdict.message}; switching to the next key.`);
+      }
+    }
+  }
+  throw lastErr || new Error(CIRCUIT_OPEN);
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string, onTimeout?: () => void): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`Timeout after ${ms}ms on ${label}`)), ms);
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`Timeout after ${ms}ms on ${label}`));
+    }, ms);
   });
   return Promise.race([promise, timeout]).finally(() => timer && clearTimeout(timer)) as Promise<T>;
 }
 
-async function generateGemini(prompt: string, opts: GenerateOptions): Promise<string> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey) throw new AiUnavailableError();
-  const client = new GoogleGenAI({ apiKey });
-  const models = Array.from(new Set([resolveGeminiModel(), ...GEMINI_FALLBACKS]));
-  const perCall = opts.timeoutMs ?? 10_000;
-  const deadline = Date.now() + (opts.deadlineMs ?? 20_000);
-  const contents = opts.file
-    ? { parts: [{ inlineData: { mimeType: opts.file.mimeType, data: opts.file.base64 } }, { text: prompt }] }
-    : prompt;
+const geminiClients = new Map<string, GoogleGenAI>();
 
+function geminiClient(e: PoolEntry): GoogleGenAI {
+  const cacheKey = `${e.id}|${e.baseUrl}|${e.apiKey.slice(-6)}`;
+  let client = geminiClients.get(cacheKey);
+  if (!client) {
+    client = new GoogleGenAI({ apiKey: e.apiKey, ...(e.baseUrl ? { httpOptions: { baseUrl: e.baseUrl } } : {}) });
+    geminiClients.set(cacheKey, client);
+  }
+  return client;
+}
+
+function thinkingFor(model: string, deep: boolean): Record<string, unknown> | undefined {
+  if (/^gemini-3/.test(model) || /latest$/.test(model)) {
+    return { thinkingConfig: { thinkingLevel: deep ? ThinkingLevel.HIGH : ThinkingLevel.LOW } };
+  }
+  if (/^gemini-2\.5-flash/.test(model)) return { thinkingConfig: { thinkingBudget: deep ? 4096 : 0 } };
+  return undefined;
+}
+
+async function callGemini(
+  e: PoolEntry,
+  prompt: string,
+  files: AiFile[],
+  opts: GenerateOptions,
+  deadline: number,
+  lastResort: boolean
+): Promise<{ text: string; model: string }> {
+  const client = geminiClient(e);
+  // A model chosen by the admin is respected; the default gets fallbacks.
+  const models = e.model ? [e.model] : Array.from(new Set([GEMINI_DEFAULT, ...GEMINI_FALLBACKS]));
+  const perCall = opts.timeoutMs ?? 12_000;
+  const contents = files.length
+    ? { parts: [...files.map((f) => ({ inlineData: { mimeType: f.mimeType, data: f.base64 } })), { text: prompt }] }
+    : prompt;
   let lastError: any = null;
   for (const model of models) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
+    if (remaining < 1500) break;
+    const controller = new AbortController();
     try {
       const res = await withTimeout(
         client.models.generateContent({
@@ -196,78 +399,90 @@ async function generateGemini(prompt: string, opts: GenerateOptions): Promise<st
           config: {
             temperature: opts.temperature ?? 0.1,
             responseMimeType: opts.json === false ? 'text/plain' : 'application/json',
-            thinkingConfig: { thinkingLevel: opts.depth === 'deep' ? ThinkingLevel.HIGH : ThinkingLevel.LOW },
+            ...(opts.system ? { systemInstruction: opts.system } : {}),
+            ...(thinkingFor(model, opts.depth === 'deep') || {}),
+            abortSignal: controller.signal,
           },
         }),
         Math.max(2_000, Math.min(perCall, remaining)),
-        model
+        model,
+        () => controller.abort()
       );
-      if (res.text) return res.text;
-      lastError = new Error(`مدل ${model} پاسخ متنی برنگرداند`);
+      if (res.text) return { text: res.text, model };
+      lastError = Object.assign(new Error(`مدل ${model} پاسخ متنی برنگرداند`), { status: 502 });
     } catch (err: any) {
       lastError = err;
-      if (isFatalAuthError(err)) break; // same key for every model
-      console.warn(`[ai:gemini] ${model} failed: ${String(err?.message || err).slice(0, 120)}`);
+      const kind = pool.classifyError(err);
+      // Same key, next model: unknown model or a model-level overload. Gemini
+      // free-tier limits are per model, so on the last usable key a 429 may
+      // still pass on a sibling model.
+      if (kind === 'model' || kind === 'transient' || (kind === 'rate_limit' && lastResort)) continue;
+      throw err;
     }
   }
   throw lastError || new Error('All Gemini models are temporarily unavailable.');
 }
 
-const OPENAI_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
-
-function openAIContent(prompt: string, file?: AiFile): any {
-  if (!file) return prompt;
+function openAIContent(prompt: string, files: AiFile[]): any {
+  if (!files.length) return prompt;
   const parts: any[] = [];
-  if (file.mimeType === 'application/pdf') {
-    parts.push({
-      type: 'file',
-      file: { filename: file.fileName || 'resume.pdf', file_data: `data:application/pdf;base64,${file.base64}` },
-    });
-  } else if (OPENAI_IMAGE_TYPES.includes(file.mimeType)) {
-    parts.push({ type: 'image_url', image_url: { url: `data:${file.mimeType};base64,${file.base64}` } });
+  for (const f of files) {
+    if (f.mimeType === 'application/pdf') {
+      parts.push({ type: 'file', file: { filename: f.fileName || 'resume.pdf', file_data: `data:application/pdf;base64,${f.base64}` } });
+    } else {
+      parts.push({ type: 'image_url', image_url: { url: `data:${f.mimeType};base64,${f.base64}` } });
+    }
   }
   parts.push({ type: 'text', text: prompt });
   return parts;
 }
 
-async function generateOpenAI(prompt: string, opts: GenerateOptions): Promise<string> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim();
-  if (!apiKey) throw new AiUnavailableError();
-  const deadline = Date.now() + (opts.deadlineMs ?? 30_000);
+function retryAfterHeader(res: Response): number | null {
+  const ms = Number(res.headers.get('retry-after-ms'));
+  if (Number.isFinite(ms) && ms > 0) return ms;
+  const ra = res.headers.get('retry-after');
+  if (ra) {
+    const sec = Number(ra);
+    if (Number.isFinite(sec)) return sec * 1000;
+    const at = Date.parse(ra);
+    if (!isNaN(at)) return Math.max(0, at - Date.now());
+  }
+  return null;
+}
+
+async function callOpenAI(e: PoolEntry, prompt: string, files: AiFile[], opts: GenerateOptions, deadline: number): Promise<{ text: string; model: string }> {
+  const base = (e.baseUrl || OPENAI_DEFAULT_BASE).replace(/\/+$/, '');
+  const model = modelOf(e);
   const perCall = opts.timeoutMs ?? 20_000;
   const wantJson = opts.json !== false;
-  const fileSupported =
-    !!opts.file && (opts.file.mimeType === 'application/pdf' || OPENAI_IMAGE_TYPES.includes(opts.file.mimeType));
-  if (opts.file && !fileSupported && !opts.fileOptional) {
-    throw Object.assign(new Error(`فرمت ${opts.file.mimeType} برای این سرویس هوش مصنوعی پشتیبانی نمی‌شود`), { status: 415 });
-  }
-  let useFile = fileSupported;
+  let useFiles = files.length > 0;
   let jsonMode = wantJson;
   let lastError: any = null;
+  const systemText = [
+    opts.system || 'You are HOVIDA, a careful, evidence-based HR screening assistant.',
+    wantJson ? 'Reply with one valid JSON object only — no markdown, no commentary.' : '',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 
   for (let attempt = 0; attempt < 3; attempt++) {
     const remaining = deadline - Date.now();
-    if (remaining <= 0) break;
+    if (remaining < 1500) break;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(3_000, Math.min(perCall, remaining)));
     try {
       const body: any = {
-        model: resolveOpenAIModel(),
+        model,
         temperature: opts.temperature ?? 0.1,
         messages: [
-          {
-            role: 'system',
-            content: wantJson
-              ? 'You are HOVIDA, a careful, evidence-based HR screening assistant. Reply with one valid JSON object only — no markdown, no commentary.'
-              : 'You are HOVIDA, a careful, evidence-based HR screening assistant.',
-          },
-          { role: 'user', content: openAIContent(prompt, useFile ? opts.file : undefined) },
+          { role: 'system', content: systemText },
+          { role: 'user', content: openAIContent(prompt, useFiles ? files : []) },
         ],
       };
       if (jsonMode) body.response_format = { type: 'json_object' };
-      const res = await fetch(`${openAIBase()}/chat/completions`, {
+      const res = await fetch(`${base}/chat/completions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${e.apiKey}` },
         body: JSON.stringify(body),
         signal: controller.signal,
       });
@@ -277,35 +492,35 @@ async function generateOpenAI(prompt: string, opts: GenerateOptions): Promise<st
         try {
           data = JSON.parse(raw);
         } catch {
-          throw new Error('پاسخ سرویس هوش مصنوعی قابل خواندن نبود');
+          throw Object.assign(new Error('پاسخ سرویس هوش مصنوعی قابل خواندن نبود'), { status: 502 });
         }
         const content = data?.choices?.[0]?.message?.content;
         const text = Array.isArray(content)
           ? content.map((p: any) => (typeof p === 'string' ? p : p?.text || '')).join('')
           : String(content ?? '');
-        if (text.trim()) return text;
-        lastError = new Error('سرویس هوش مصنوعی پاسخ خالی برگرداند');
+        if (text.trim()) return { text, model };
+        lastError = Object.assign(new Error('سرویس هوش مصنوعی پاسخ خالی برگرداند'), { status: 502 });
         continue;
       }
-      const err = Object.assign(new Error(`OpenAI-compatible ${res.status}: ${raw.slice(0, 240)}`), { status: res.status });
+      const err = Object.assign(new Error(`OpenAI-compatible ${res.status}: ${raw.slice(0, 300)}`), {
+        status: res.status,
+        retryAfterMs: retryAfterHeader(res),
+      });
       if (res.status === 400 || res.status === 415 || res.status === 422) {
         if (jsonMode && /response_format|json_object|json mode/i.test(raw)) {
           jsonMode = false; // gateway doesn't support JSON mode — the prompt still demands JSON
           lastError = err;
           continue;
         }
-        if (useFile && opts.fileOptional) {
-          useFile = false; // gateway/model can't read files — fall back to the extracted text
+        if (useFiles && opts.fileOptional) {
+          useFiles = false; // gateway/model can't read files — fall back to the extracted text
           lastError = err;
           continue;
         }
       }
       throw err;
     } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        lastError = new Error(`Timeout on ${resolveOpenAIModel()}`);
-        continue;
-      }
+      if (err?.name === 'AbortError') throw new Error(`Timeout on ${model} (${hostOf(base)})`);
       throw err;
     } finally {
       clearTimeout(timer);
@@ -314,16 +529,60 @@ async function generateOpenAI(prompt: string, opts: GenerateOptions): Promise<st
   throw lastError || new Error('OpenAI-compatible provider did not answer in time.');
 }
 
-/** Small round-trip used by «تنظیمات › هوش مصنوعی › آزمایش اتصال». */
+// ------------------------------------------------------------------ tests ----
+
+export interface KeyTestResult {
+  id: string;
+  label: string;
+  ok: boolean;
+  latencyMs: number;
+  model: string;
+  error: string | null;
+}
+
+const PING = 'Return exactly this JSON: {"ok": true, "message": "سلام"}';
+
+/** Round-trip through one specific key (ignores its cooldown; success clears it). */
+export async function testKey(id: string): Promise<KeyTestResult> {
+  ensurePoolLoaded();
+  const entry = keyEntryForTest(id);
+  if (!entry) return { id, label: '—', ok: false, latencyMs: 0, model: '', error: 'این کلید فعال نیست یا یافت نشد.' };
+  pool.resetKey(id);
+  const started = Date.now();
+  try {
+    const out = await generateWith(entry, PING);
+    const ok = /"ok"\s*:\s*true/.test(out);
+    return { id, label: entry.label, ok, latencyMs: Date.now() - started, model: modelOf(entry), error: ok ? null : 'پاسخ دریافت شد اما در قالب مورد انتظار نبود.' };
+  } catch (err: any) {
+    return { id, label: entry.label, ok: false, latencyMs: Date.now() - started, model: modelOf(entry), error: friendlyAiError(err, entry) };
+  }
+}
+
+async function generateWith(entry: PoolEntry, prompt: string): Promise<string> {
+  pool.noteAttempt(entry);
+  const started = Date.now();
+  try {
+    const deadline = Date.now() + 30_000;
+    const r =
+      entry.provider === 'gemini'
+        ? await callGemini(entry, prompt, [], { temperature: 0, timeoutMs: 20_000, purpose: 'test' }, deadline, true)
+        : await callOpenAI(entry, prompt, [], { temperature: 0, timeoutMs: 20_000, purpose: 'test' }, deadline);
+    pool.markSuccess(entry, Date.now() - started);
+    logCall({ at: started, keyId: entry.id, keyLabel: entry.label, provider: entry.provider, model: r.model, purpose: 'test', ok: true, latencyMs: Date.now() - started, error: null, switchedFrom: null, attachments: 0 });
+    return r.text;
+  } catch (err: any) {
+    const verdict = pool.markFailure(entry, err);
+    logCall({ at: started, keyId: entry.id, keyLabel: entry.label, provider: entry.provider, model: modelOf(entry), purpose: 'test', ok: false, latencyMs: Date.now() - started, error: `${verdict.message} — ${String(err?.message || err).slice(0, 160)}`, switchedFrom: null, attachments: 0 });
+    throw err;
+  }
+}
+
+/** «تنظیمات › هوش مصنوعی › آزمایش اتصال»: one round-trip through the pool. */
 export async function testConnection(): Promise<{ ok: boolean; latencyMs: number; error: string | null }> {
   const started = Date.now();
   resetCircuitBreaker();
   try {
-    const out = await generate('Return exactly this JSON: {"ok": true, "message": "سلام"}', {
-      temperature: 0,
-      timeoutMs: 20_000,
-      deadlineMs: 30_000,
-    });
+    const out = await generate(PING, { temperature: 0, timeoutMs: 20_000, deadlineMs: 40_000, purpose: 'test' });
     const ok = /"ok"\s*:\s*true/.test(out);
     return { ok, latencyMs: Date.now() - started, error: ok ? null : 'پاسخ دریافت شد اما در قالب مورد انتظار نبود.' };
   } catch (err: any) {
@@ -332,31 +591,36 @@ export async function testConnection(): Promise<{ ok: boolean; latencyMs: number
 }
 
 /** Converts provider/network failures into honest, actionable Persian messages. */
-export function friendlyAiError(err: any): string {
+export function friendlyAiError(err: any, entry?: PoolEntry): string {
   if (err instanceof AiUnavailableError || err?.message === 'AI_NOT_CONFIGURED') {
-    return 'هوش مصنوعی روی این سرور پیکربندی نشده است؛ مدیر سامانه باید کلید GEMINI_API_KEY یا OPENAI_API_KEY را تنظیم کند.';
+    return 'هوش مصنوعی هنوز پیکربندی نشده است؛ مدیر سامانه باید در پنل مدیریت (/admin) دست‌کم یک کلید ثبت کند.';
   }
   if (err?.message === CIRCUIT_OPEN) {
-    return 'سرویس هوش مصنوعی پس از چند خطای پیاپی موقتاً در حالت استراحت است؛ چند ثانیه دیگر دوباره تلاش کنید.';
+    return 'همه کلیدهای هوش مصنوعی موقتاً به محدودیت خورده‌اند؛ چند لحظه دیگر دوباره تلاش کنید.';
   }
-  const status = err?.status || err?.code;
-  const msg = String(err?.message || '');
-  const provider = resolveProvider();
-  if (isFatalAuthError(err) || status === 400) {
-    if (provider === 'gemini' && (process.env.GEMINI_API_KEY || '').trim().startsWith('AQ.')) {
-      return 'توکن موقت Gemini (پیشوند AQ.) پذیرفته نشد یا منقضی شده است؛ یک کلید دائمی با پیشوند AIza بسازید و در GEMINI_API_KEY قرار دهید.';
-    }
-    return provider === 'openai'
-      ? 'کلید یا آدرس سرویس سازگار با OpenAI پذیرفته نشد؛ OPENAI_API_KEY، OPENAI_BASE_URL و OPENAI_MODEL را بررسی کنید.'
-      : 'کلید GEMINI_API_KEY نامعتبر است یا به مدل انتخاب‌شده دسترسی ندارد.';
+  if (err?.code === 'UNSUPPORTED_INPUT') return String(err.message || 'این نوع فایل برای سرویس هوش مصنوعی قابل خواندن نیست.');
+  const kind = pool.classifyError(err);
+  const where = entry ? ` (${providerLabel(entry)})` : '';
+  switch (kind) {
+    case 'auth':
+      if (entry?.provider === 'gemini' && entry.apiKey.startsWith('AQ.')) {
+        return 'توکن موقت Gemini (پیشوند AQ.) پذیرفته نشد یا منقضی شده است؛ یک کلید دائمی با پیشوند AIza بسازید.';
+      }
+      return `کلید${where} پذیرفته نشد؛ کلید، آدرس سرویس و نام مدل را بررسی کنید.`;
+    case 'region':
+      return `سرویس${where} از منطقه جغرافیایی این سرور پشتیبانی نمی‌کند؛ برای Gemini یک آدرس پراکسی/درگاه در تنظیمات کلید وارد کنید یا از درگاه سازگار با OpenAI استفاده کنید.`;
+    case 'model':
+      return `مدل انتخاب‌شده${where} یافت نشد یا برای این کلید در دسترس نیست؛ نام مدل را بررسی کنید.`;
+    case 'rate_limit':
+      return 'محدودیت نرخ سرویس هوش مصنوعی پر شده است؛ چند لحظه دیگر دوباره تلاش کنید.';
+    case 'quota':
+      return `سهمیه یا اعتبار کلید${where} تمام شده است.`;
+    case 'network':
+    case 'timeout':
+      return `ارتباط با سرویس هوش مصنوعی${where} برقرار نشد یا پاسخ دیر رسید؛ شبکه سرور یا آدرس سرویس را بررسی کنید.`;
+    case 'request':
+      return `سرویس هوش مصنوعی${where} درخواست را نپذیرفت (${String(err?.message || '').slice(0, 120)}).`;
+    default:
+      return 'پاسخ سرویس هوش مصنوعی دریافت نشد؛ لطفاً دوباره تلاش کنید.';
   }
-  if (isQuotaError(err)) {
-    return 'سهمیه یا محدودیت نرخ سرویس هوش مصنوعی پر شده است؛ چند لحظه دیگر دوباره تلاش کنید.';
-  }
-  if (/fetch failed|ECONN|network|ENOTFOUND|timeout|timed? ?out|socket/i.test(msg)) {
-    return provider === 'openai'
-      ? `ارتباط با سرویس هوش مصنوعی (${hostOf(openAIBase())}) برقرار نشد؛ شبکه سرور یا آدرس OPENAI_BASE_URL را بررسی کنید.`
-      : 'ارتباط با سرویس Gemini برقرار نشد (شبکه یا فایروال سرور)؛ دسترسی سرور به generativelanguage.googleapis.com را بررسی کنید.';
-  }
-  return 'پاسخ سرویس هوش مصنوعی دریافت نشد؛ لطفاً دوباره تلاش کنید.';
 }

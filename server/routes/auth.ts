@@ -1,8 +1,8 @@
 import express from 'express';
 import * as db from '../db';
 import {
-  DEMO_TTL_MS,
   RateLimiter,
+  accessBlock,
   clientIp,
   ctxOf,
   hashPassword,
@@ -13,6 +13,7 @@ import {
   verifyPassword,
 } from '../auth';
 import { aiStatus } from '../ai/provider';
+import { demoAllowed, demoTtlMs, isPlatformAdmin, publicConfig, systemSettings } from '../platform';
 import { createDemoWorkspace } from '../demo-seed';
 import { h, str } from './util';
 
@@ -33,8 +34,9 @@ function tooMany(res: express.Response, retryAfterSec: number) {
     .json({ error: `تعداد تلاش‌ها زیاد بود؛ لطفاً ${minutes.toLocaleString('fa-IR')} دقیقه دیگر دوباره امتحان کنید.`, code: 'RATE_LIMITED' });
 }
 
+/** DISABLE_DEMO=1 on the server, or the switch in /admin › تنظیمات سامانه. */
 export function demoEnabled(): boolean {
-  return process.env.DISABLE_DEMO !== '1';
+  return demoAllowed();
 }
 
 export function authRoutes(): express.Router {
@@ -43,6 +45,9 @@ export function authRoutes(): express.Router {
   r.post(
     '/signup',
     h(async (req, res) => {
+      if (!systemSettings().signupEnabled) {
+        return res.status(403).json({ error: 'ثبت‌نام سازمان‌های تازه فعلاً بسته است؛ برای دریافت دسترسی با ما تماس بگیرید.', code: 'SIGNUP_CLOSED' });
+      }
       const limit = signupByIp.hit(clientIp(req));
       if (!limit.ok) return tooMany(res, limit.retryAfterSec);
       const orgName = str(req.body?.orgName, 80);
@@ -85,6 +90,8 @@ export function authRoutes(): express.Router {
       }
       loginFailByIpAccount.reset(`${ip}|${email}`);
       loginFailByAccount.reset(email);
+      const blocked = accessBlock(user, org);
+      if (blocked) return res.status(blocked.status).json({ error: blocked.error, code: blocked.code });
       db.updateUser(user.id, { lastLoginISO: new Date().toISOString() });
       res.json({ token: issueSession(user.id), user: db.publicUser(user), org });
     })
@@ -96,13 +103,15 @@ export function authRoutes(): express.Router {
       if (!demoEnabled()) return res.status(404).json({ error: 'نسخه نمایشی روی این سرور غیرفعال است.' });
       const limit = demoByIp.hit(clientIp(req));
       if (!limit.ok) return tooMany(res, limit.retryAfterSec);
-      const { org, user } = await createDemoWorkspace();
-      res.status(201).json({ token: issueSession(user.id, DEMO_TTL_MS), user: db.publicUser(user), org });
+      const { org, user } = await createDemoWorkspace(demoTtlMs());
+      res.status(201).json({ token: issueSession(user.id, demoTtlMs()), user: db.publicUser(user), org });
     })
   );
 
+  /** Public switches for the landing page, sign-up form, banners and upload limits. */
   r.get('/config', (_req, res) => {
-    res.json({ demo: demoEnabled() });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(publicConfig());
   });
 
   r.post('/logout', requireAuth, (req, res) => {
@@ -111,8 +120,14 @@ export function authRoutes(): express.Router {
   });
 
   r.get('/me', requireAuth, (req, res) => {
-    const { user, org } = ctxOf(req);
-    res.json({ user: db.publicUser(user), org, ai: aiStatus(), unread: db.unreadCount(user) });
+    const { user, org, support } = ctxOf(req);
+    res.json({
+      user: { ...db.publicUser(user), platformAdmin: isPlatformAdmin(user) },
+      org,
+      ai: aiStatus(),
+      unread: db.unreadCount(user),
+      support: support ? { adminName: support.adminName, expiresAt: support.expiresAt } : null,
+    });
   });
 
   r.patch(

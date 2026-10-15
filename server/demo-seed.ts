@@ -634,8 +634,8 @@ function evaluationFor(c: DemoCandidate, job: ReturnType<typeof buildTemplateUnd
   };
 }
 
-export async function createDemoWorkspace(): Promise<{ org: db.OrgRecord; user: db.UserRecord }> {
-  const expires = new Date(Date.now() + DEMO_TTL_MS).toISOString();
+export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<{ org: db.OrgRecord; user: db.UserRecord }> {
+  const expires = new Date(Date.now() + ttlMs).toISOString();
   const org = db.createOrg({ name: 'گروه نمونه آوا', isDemo: true, demoExpiresAt: expires });
   const pass = await hashPassword(crypto.randomBytes(18).toString('base64url'));
   const suffix = org.id.slice(-8);

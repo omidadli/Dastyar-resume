@@ -51,13 +51,19 @@ export function UploadDropzone({
     pending.current++;
     setUnpacking({ current: 0, total: 0 });
     try {
-      const unpacked = await processUploadFiles(raw, (current, total) => setUnpacking({ current, total }));
+      const skipped = { oversized: 0, overLimit: 0 };
+      const unpacked = await processUploadFiles(
+        raw,
+        (current, total) => setUnpacking({ current, total }),
+        { maxEntryBytes: maxBytes, maxFiles: maxFilesPerBatch },
+        skipped
+      );
       const latest = filesRef.current;
       const keys = new Set(latest.map((f) => `${f.name}_${f.size}_${f.lastModified}`));
       const next = [...latest];
-      let tooBig = 0;
+      let tooBig = skipped.oversized;
       let dupes = 0;
-      let overBatch = 0;
+      let overBatch = skipped.overLimit;
       for (const f of unpacked) {
         if (f.size > maxBytes) {
           tooBig++;

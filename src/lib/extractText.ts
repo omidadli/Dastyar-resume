@@ -456,9 +456,18 @@ export async function extractResumeContent(file: File | Blob, fileName: string):
  * Handles multi-file unpacking including ZIP files.
  * Recursively extracts files from ZIP archives with real-time progress callbacks.
  */
+export interface UnpackLimits {
+  /** Entries that declare more bytes than this are not unpacked (counted in `skipped.oversized`). */
+  maxEntryBytes?: number;
+  /** Stop once this many files are collected (the rest is counted in `skipped.overLimit`). */
+  maxFiles?: number;
+}
+
 export async function processUploadFiles(
   rawFiles: File[],
-  onProgress?: (unpackedCount: number, totalEntries: number, currentName: string) => void
+  onProgress?: (unpackedCount: number, totalEntries: number, currentName: string) => void,
+  limits: UnpackLimits = {},
+  skipped: { oversized: number; overLimit: number } = { oversized: 0, overLimit: 0 }
 ): Promise<File[]> {
   const flattened: File[] = [];
 
@@ -479,8 +488,19 @@ export async function processUploadFiles(
         });
 
         let count = 0;
-        for (const relativePath of validKeys) {
+        for (let i = 0; i < validKeys.length; i++) {
+          const relativePath = validKeys[i];
           const zipEntry = loaded.files[relativePath];
+          if (limits.maxFiles && flattened.length >= limits.maxFiles) {
+            skipped.overLimit += validKeys.length - i;
+            break;
+          }
+          // Never inflate what will be rejected anyway (and a «zip bomb» would freeze the tab).
+          const declared = Number(zipEntry._data?.uncompressedSize ?? 0);
+          if (limits.maxEntryBytes && declared > limits.maxEntryBytes) {
+            skipped.oversized++;
+            continue;
+          }
           const blob = await zipEntry.async('blob');
           const innerFileName = zipEntry.name.split('/').pop() || zipEntry.name;
           const unpackedFile = new File([blob], innerFileName, {

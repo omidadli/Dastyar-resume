@@ -1,7 +1,7 @@
 {
-  "name": "seilaneh-resume-screener",
+  "name": "hovida",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -10,10 +10,10 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/circuit.test.ts && tsx scripts/api-timeout.test.ts",
+    "test": "tsx scripts/unit.test.ts && tsx scripts/circuit.test.ts && tsx scripts/api-timeout.test.ts",
     "test:api": "node scripts/smoke.mjs",
-    "test:decisions": "node scripts/decisions.test.mjs",
-    "test:mount": "vite build --config vite.mount.config.ts && node scripts/run-mount.mjs"
+    "test:mount": "vite build --config vite.mount.config.ts && node scripts/run-mount.mjs",
+    "brand": "python3 scripts/brand/make_logo.py"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -49,5 +49,6 @@
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
     "vite": "^6.2.3"
-  }
+  },
+  "description": "هویدا — تحلیل هوشمند رزومه برای تیم‌های منابع انسانی (HOVIDA, AI resume screening SaaS)"
 }

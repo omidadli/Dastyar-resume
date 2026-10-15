@@ -62,3 +62,33 @@ export function normalizeIranianPhone(raw: string | null | undefined): string {
   if (eng.startsWith('9') && eng.length === 10) return '0' + eng;
   return eng;
 }
+
+/**
+ * Search-grade normalisation for Persian/English text: Arabic ي/ك/ى/ة → Persian,
+ * diacritics and tatweel removed, every digit system → ASCII, ZWNJ → space,
+ * lower-case. Use with `matchesSearch` so «رزومه‌ها», «رزومه ها» and
+ * «رزومهها» all find each other.
+ */
+export function normalizeForSearch(raw: string | null | undefined): string {
+  if (!raw) return '';
+  return toEnglishDigits(String(raw).normalize('NFKC'))
+    .replace(/[\u064A\u0649\u06CC]/g, 'ی')
+    .replace(/\u0643/g, 'ک')
+    .replace(/\u0629/g, 'ه')
+    .replace(/[\u0622\u0623\u0625\u0671]/g, 'ا')
+    .replace(/\u0624/g, 'و')
+    .replace(/[\u064B-\u065F\u0670\u0640]/g, '')
+    .replace(/[\u200B-\u200F\uFEFF]/g, ' ')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** True when every word of `query` appears in the haystack (space-insensitive). */
+export function matchesSearch(haystack: Array<string | null | undefined>, query: string): boolean {
+  const q = normalizeForSearch(query);
+  if (!q) return true;
+  const hay = normalizeForSearch(haystack.filter(Boolean).join(' '));
+  const hayTight = hay.replace(/\s+/g, '');
+  return q.split(' ').every((word) => hay.includes(word) || hayTight.includes(word));
+}

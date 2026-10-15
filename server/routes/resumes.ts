@@ -1,0 +1,273 @@
+import express from 'express';
+import fs from 'fs';
+import * as db from '../db';
+import { actorOf, ctxOf, signedFileUrl, verifyFileSignature } from '../auth';
+import { detectResumeMime, draftMessage, evaluateResume, KIND_TITLES } from '../ai/screening';
+import { resetCircuitBreaker } from '../ai/provider';
+import type {
+  AnalysisMode,
+  DecisionFilter,
+  DecisionStatus,
+  MatchFilter,
+  MessageKind,
+  ResumeRecord,
+  ResumeSort,
+} from '../../src/types/screening';
+import { h, int, oneOf, str } from './util';
+
+const FILE_MIME: Record<string, string> = {
+  pdf: 'application/pdf',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  doc: 'application/msword',
+  odt: 'application/vnd.oasis.opendocument.text',
+  rtf: 'application/rtf',
+  txt: 'text/plain; charset=utf-8',
+  md: 'text/markdown; charset=utf-8',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  bmp: 'image/bmp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  heic: 'image/heic',
+  heif: 'image/heif',
+};
+const PREVIEWABLE = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'txt', 'md'];
+
+const DECISION_VERB: Record<DecisionStatus, (name: string, role: string) => string> = {
+  approved: (n, r) => `«${n}» را برای «${r}» تأیید کرد`,
+  rejected: (n, r) => `«${n}» را برای «${r}» رد کرد`,
+  review: (n) => `«${n}» را در وضعیت «نیاز به بررسی» گذاشت`,
+  none: (n) => `تصمیم درباره «${n}» را بازگرداند`,
+};
+
+const displayName = (r: ResumeRecord) => r.candidateName || r.fileName;
+
+function fileExt(rec: ResumeRecord): string {
+  return (rec.filePath || rec.fileName).split('.').pop()?.toLowerCase() || 'bin';
+}
+
+export function resumeRoutes(): express.Router {
+  const r = express.Router();
+
+  r.get('/resumes', (req, res) => {
+    const { org } = ctxOf(req);
+    const q = req.query;
+    res.json(
+      db.queryResumes(org.id, {
+        jobId: q.jobId ? String(q.jobId) : undefined,
+        match: oneOf<MatchFilter>(q.match, ['all', 'high', 'review', 'low', 'insufficient'], 'all'),
+        decision: oneOf<DecisionFilter>(q.decision, ['all', 'undecided', 'pending', 'approved', 'rejected', 'review'], 'all'),
+        q: str(q.q, 120) || undefined,
+        departmentId: q.departmentId ? String(q.departmentId) : undefined,
+        minScore: q.minScore ? int(q.minScore) : undefined,
+        minYears: q.minYears ? int(q.minYears) : undefined,
+        fromJalali: q.from ? String(q.from) : undefined,
+        toJalali: q.to ? String(q.to) : undefined,
+        sort: oneOf<ResumeSort>(q.sort, ['match', 'newest', 'oldest', 'experience', 'name', 'decided'], 'match'),
+        page: q.page ? int(q.page, 1) : 1,
+        pageSize: q.pageSize ? int(q.pageSize, 10) : 10,
+      })
+    );
+  });
+
+  r.get('/resumes/compare', (req, res) => {
+    const { org } = ctxOf(req);
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const items = db.getComparable(org.id, ids);
+    if (!items.length) return res.status(404).json({ error: 'کاندیدی برای مقایسه پیدا نشد.' });
+    const job = db.getJob(org.id, items[0].jobId);
+    res.json({ job, items: items.map(db.toListItem), droppedOtherJobs: ids.length > items.length });
+  });
+
+  r.post('/resumes/bulk', (req, res) => {
+    const { org } = ctxOf(req);
+    const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown) => typeof x === 'string').slice(0, 200) : [];
+    const action = oneOf(req.body?.action, ['decision', 'delete'] as const, 'decision');
+    const recs = ids.map((id) => db.getResume(org.id, id)).filter((x): x is ResumeRecord => Boolean(x));
+    if (!recs.length) return res.status(400).json({ error: 'هیچ موردی انتخاب نشده است.' });
+    if (action === 'delete') {
+      recs.forEach((rec) => db.deleteResume(rec));
+      db.logActivity(org.id, actorOf(req), 'resume.deleted', `${recs.length.toLocaleString('fa-IR')} رزومه را حذف کرد`, { jobId: recs[0].jobId });
+      return res.json({ updated: recs.length });
+    }
+    const status = oneOf<DecisionStatus>(req.body?.status, ['approved', 'rejected', 'review', 'none'], 'review');
+    const note = typeof req.body?.note === 'string' ? req.body.note : null;
+    recs.forEach((rec) => db.setDecision(rec, status, note, actorOf(req)));
+    const label = { approved: 'تأیید', rejected: 'رد', review: 'نیاز به بررسی', none: 'بدون تصمیم' }[status];
+    db.logActivity(org.id, actorOf(req), 'decision', `وضعیت ${recs.length.toLocaleString('fa-IR')} کاندید را «${label}» ثبت کرد`, { jobId: recs[0].jobId });
+    res.json({ updated: recs.length });
+  });
+
+  r.get('/resumes/:id', (req, res) => {
+    const { org } = ctxOf(req);
+    const rec = db.getResume(org.id, req.params.id);
+    if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    res.json({ record: rec, job: db.getJob(org.id, rec.jobId) });
+  });
+
+  r.patch('/resumes/:id', (req, res) => {
+    const { org } = ctxOf(req);
+    const rec = db.getResume(org.id, req.params.id);
+    if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    const action = str(req.body?.action, 30);
+    if (action === 'decision') {
+      const status = oneOf<DecisionStatus>(req.body?.status, ['approved', 'rejected', 'review', 'none'], 'none');
+      if (req.body?.status !== status) return res.status(400).json({ error: 'وضعیت تصمیم نامعتبر است.' });
+      const note = typeof req.body?.note === 'string' ? req.body.note : null;
+      db.setDecision(rec, status, note, actorOf(req));
+      db.logActivity(org.id, actorOf(req), 'decision', DECISION_VERB[status](displayName(rec), rec.roleTitle || rec.departmentName), {
+        jobId: rec.jobId,
+        resumeId: rec.id,
+      });
+      return res.json({ record: db.toListItem(rec) });
+    }
+    if (action === 'message-sent') {
+      const kind = oneOf<MessageKind>(req.body?.kind, ['INTERVIEW_INVITE', 'INFO_REQUEST', 'BANK_NOTICE', 'REJECTION'], 'INTERVIEW_INVITE');
+      db.markMessageSent(rec);
+      db.logActivity(org.id, actorOf(req), 'message.sent', `پیام «${KIND_TITLES[kind]}» را برای «${displayName(rec)}» ارسال‌شده علامت زد`, {
+        jobId: rec.jobId,
+        resumeId: rec.id,
+      });
+      return res.json({ record: db.toListItem(rec) });
+    }
+    res.status(400).json({ error: 'عملیات نامعتبر است.' });
+  });
+
+  r.delete('/resumes/:id', (req, res) => {
+    const { org } = ctxOf(req);
+    const rec = db.getResume(org.id, req.params.id);
+    if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    db.deleteResume(rec);
+    db.logActivity(org.id, actorOf(req), 'resume.deleted', `رزومه «${displayName(rec)}» را حذف کرد`, { jobId: rec.jobId });
+    res.json({ ok: true, stats: db.getJob(org.id, rec.jobId)?.stats });
+  });
+
+  const rerun = (mode: AnalysisMode) =>
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const rec = db.getResume(org.id, req.params.id);
+      if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      const job = db.getJob(org.id, rec.jobId);
+      if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+      resetCircuitBreaker(); // explicit user action — never blocked by an earlier cooldown
+      const base64 = await db.readResumeFileBase64(rec);
+      const evaluation = await evaluateResume({
+        orgName: org.name,
+        job,
+        resumeText: rec.extractedText,
+        fileName: rec.fileName,
+        fileBase64: base64,
+        fileMime: detectResumeMime(rec.fileName, base64),
+        mode,
+      });
+      db.updateResumeEvaluation(rec, evaluation, mode === 'deep' ? 'deep' : 'rerun');
+      if (mode === 'deep' && evaluation.engine === 'ai') {
+        db.logActivity(org.id, actorOf(req), 'deep.review', `بازبینی دقیق رزومه «${displayName(rec)}» را انجام داد`, { jobId: rec.jobId, resumeId: rec.id });
+      }
+      res.json({ record: rec, engine: evaluation.engine, mode });
+    });
+
+  r.post('/resumes/:id/rerun', rerun('standard'));
+  r.post('/resumes/:id/deep-rerun', rerun('deep'));
+
+  r.post('/resumes/:id/talent', (req, res) => {
+    const { org } = ctxOf(req);
+    const rec = db.getResume(org.id, req.params.id);
+    if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    const departmentId = str(req.body?.departmentId, 60);
+    const dept = org.departments.find((d) => d.id === departmentId);
+    if (!dept) return res.status(400).json({ error: 'دپارتمان مقصد را انتخاب کنید.' });
+    const tags = Array.isArray(req.body?.tags) ? req.body.tags.filter((t: unknown) => typeof t === 'string').map((t: string) => t.slice(0, 40)) : [];
+    db.addToTalent(rec, dept.id, str(req.body?.note, 400), tags);
+    db.logActivity(org.id, actorOf(req), 'talent.added', `«${displayName(rec)}» را به بانک استعداد «${dept.name}» افزود`, { jobId: rec.jobId, resumeId: rec.id });
+    res.json({ record: db.toListItem(rec) });
+  });
+
+  r.delete('/resumes/:id/talent', (req, res) => {
+    const { org } = ctxOf(req);
+    const rec = db.getResume(org.id, req.params.id);
+    if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    res.json({ record: db.toListItem(db.removeFromTalent(rec)) });
+  });
+
+  /** Background upload of the original file after a fast text-only evaluation. */
+  r.post(
+    '/resumes/:id/file',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const rec = db.getResume(org.id, req.params.id);
+      if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      const base64 = typeof req.body?.fileBase64 === 'string' ? req.body.fileBase64 : '';
+      if (base64.length < 20) return res.status(400).json({ error: 'محتوای فایل الزامی است.' });
+      const ok = await db.attachResumeFile(rec, str(req.body?.fileName, 200) || rec.fileName, base64);
+      if (!ok) return res.status(500).json({ error: 'ذخیره فایل ممکن نشد.' });
+      res.json({ ok: true });
+    })
+  );
+
+  /** Short-lived signed URL for previews/downloads (no bearer token in URLs). */
+  r.get('/resumes/:id/file-url', (req, res) => {
+    const { org } = ctxOf(req);
+    const rec = db.getResume(org.id, req.params.id);
+    if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    const ext = fileExt(rec);
+    const inline = String(req.query.inline || '') === '1';
+    if (!rec.filePath) {
+      return res.json({ hasFile: false, url: null, expiresAt: null, fileName: rec.fileName, ext, mimeType: null, previewable: false });
+    }
+    const signed = signedFileUrl(rec.id, inline);
+    res.json({
+      hasFile: true,
+      url: signed.url,
+      expiresAt: signed.expiresAt,
+      fileName: rec.fileName,
+      ext,
+      mimeType: FILE_MIME[ext] || 'application/octet-stream',
+      previewable: PREVIEWABLE.includes(ext),
+    });
+  });
+
+  r.post(
+    '/messages/draft',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const kind = oneOf<MessageKind>(req.body?.kind, ['INTERVIEW_INVITE', 'INFO_REQUEST', 'BANK_NOTICE', 'REJECTION'], 'INTERVIEW_INVITE');
+      const rec = db.getResume(org.id, str(req.body?.resumeId, 80));
+      if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      res.json(await draftMessage(rec, kind, org));
+    })
+  );
+
+  return r;
+}
+
+/** Mounted WITHOUT requireAuth: access is granted by the HMAC signature. */
+export function fileRoutes(): express.Router {
+  const r = express.Router();
+  r.get('/files/:id', (req, res) => {
+    const id = req.params.id;
+    const exp = Number(req.query.exp);
+    const inline = String(req.query.inline || '') === '1';
+    if (!verifyFileSignature(id, exp, inline, String(req.query.sig || ''))) {
+      return res.status(403).json({ error: 'پیوند فایل منقضی شده یا نامعتبر است؛ صفحه را تازه کنید.' });
+    }
+    const rec = db.getResumeUnsafe(id);
+    if (!rec || !rec.filePath) return res.status(404).json({ error: 'فایل در دسترس نیست.' });
+    const full = db.resolveFilePath(rec.filePath);
+    if (!full || !fs.existsSync(full)) return res.status(404).json({ error: 'فایل روی سرور موجود نیست.' });
+    const ext = fileExt(rec);
+    res.setHeader('Content-Type', FILE_MIME[ext] || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(rec.fileName)}`);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    fs.createReadStream(full).pipe(res);
+  });
+  return r;
+}

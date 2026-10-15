@@ -1,80 +1,69 @@
-import { ResumeRecord, ScreeningBatch } from '../types/screening';
-import { toPersianDigits } from './normalizeFa';
-import { DECISION_META, decisionOf, isPendingHumanDecision } from './decisions';
+import type { Job, ResumeListItem } from '../types/screening';
+import { api } from './api';
+import { DECISION_META, matchMeta } from './match';
+import { candidateName, faDate, toPersianDigits } from './format';
 
-const CAT_LABEL: Record<string, string> = {
-  INTERVIEW: 'مصاحبه شود',
-  REVIEW: 'بررسی شود',
-  REJECT: 'رد شود',
-  UNJUDGEABLE: 'غیرقابل ارزیابی',
-  ERROR: 'خطا در تحلیل',
-};
-
-/** The HR decision is reported separately from هوشا's suggestion. */
-function decisionText(r: ResumeRecord): string {
-  const d = decisionOf(r);
-  if (d === 'none') return isPendingHumanDecision(r) ? 'در انتظار تصمیم' : '—';
-  return DECISION_META[d].label;
+async function allCandidates(jobId: string): Promise<ResumeListItem[]> {
+  const out: ResumeListItem[] = [];
+  let page = 1;
+  for (;;) {
+    const res = await api.resumes.list({ jobId, page, pageSize: 100, sort: 'match' });
+    out.push(...res.items);
+    if (page >= res.totalPages) break;
+    page++;
+  }
+  return out;
 }
 
-export async function exportBatchToExcel(batch: ScreeningBatch, records: ResumeRecord[]) {
-  const XLSX = await import('xlsx');
+/** Two-sheet workbook: job summary + every candidate with evidence and the human decision. */
+export async function exportJobToExcel(job: Job) {
+  const [XLSX, records] = await Promise.all([import('xlsx'), allCandidates(job.id)]);
   const wb = XLSX.utils.book_new();
-
-  const summaryRows = [
-    { مورد: 'دپارتمان', مقدار: batch.departmentName },
-    { مورد: 'عنوان شغلی', مقدار: batch.roleTitle || '—' },
-    { مورد: 'تاریخ غربالگری', مقدار: batch.createdAtJalali },
-    { مورد: 'نگاه هوشا به شغل', مقدار: batch.understanding.plainExplanation },
-    { مورد: 'آستانه مصاحبه', مقدار: toPersianDigits(batch.understanding.thresholds.interview) },
-    { مورد: 'آستانه بررسی', مقدار: toPersianDigits(batch.understanding.thresholds.review) },
-    { مورد: 'کل رزومه‌ها', مقدار: toPersianDigits(batch.stats.total) },
-    { مورد: 'مصاحبه شود', مقدار: toPersianDigits(batch.stats.interview) },
-    { مورد: 'بررسی شود', مقدار: toPersianDigits(batch.stats.review) },
-    { مورد: 'رد شود', مقدار: toPersianDigits(batch.stats.reject) },
-    { مورد: 'غیرقابل ارزیابی', مقدار: toPersianDigits(batch.stats.unjudgeable) },
-    {
-      مورد: 'تصمیم کاربر (تایید / رد / نیاز به بررسی)',
-      مقدار: `${toPersianDigits(records.filter((r) => decisionOf(r) === 'approved').length)} / ${toPersianDigits(
-        records.filter((r) => decisionOf(r) === 'rejected').length
-      )} / ${toPersianDigits(records.filter((r) => decisionOf(r) === 'review').length)}`,
-    },
+  const s = job.stats;
+  const summary = [
+    { مورد: 'فرصت شغلی', مقدار: job.roleTitle },
+    { مورد: 'دپارتمان', مقدار: job.departmentName },
+    { مورد: 'تاریخ ایجاد', مقدار: faDate(job.createdAtISO) },
+    { مورد: 'منبع معیارها', مقدار: job.criteriaSource === 'template' ? 'الگوی آماده دپارتمان' : 'پیشنهاد هوش مصنوعی' },
+    { مورد: 'معیارهای ارزیابی', مقدار: job.understanding.criteria.map((c) => `${c.title} (${toPersianDigits(c.weight)}٪${c.mustHave ? '، الزامی' : ''})`).join('؛ ') },
+    { مورد: 'آستانه تطابق بالا / بررسی', مقدار: `${toPersianDigits(job.understanding.thresholds.interview)}٪ / ${toPersianDigits(job.understanding.thresholds.review)}٪` },
+    { مورد: 'کل رزومه‌ها', مقدار: toPersianDigits(s.total) },
+    { مورد: 'تطابق بالا', مقدار: toPersianDigits(s.interview) },
+    { مورد: 'نیازمند بررسی', مقدار: toPersianDigits(s.review) },
+    { مورد: 'تطابق پایین', مقدار: toPersianDigits(s.reject) },
+    { مورد: 'اطلاعات ناکافی / خطا', مقدار: toPersianDigits(s.unjudgeable + s.error) },
+    { مورد: 'تصمیم‌ها (تأیید / رد / نیاز به بررسی)', مقدار: `${toPersianDigits(s.approved)} / ${toPersianDigits(s.rejected)} / ${toPersianDigits(s.reviewDecision)}` },
   ];
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'خلاصه');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'خلاصه');
 
-  const rows = records
-    .filter((r) => !r.deleted)
-    .sort((a, b) => {
-      const order = { INTERVIEW: 0, REVIEW: 1, REJECT: 2, UNJUDGEABLE: 3, ERROR: 4 } as const;
-      if (order[a.category] !== order[b.category]) return order[a.category] - order[b.category];
-      return b.score - a.score;
-    })
-    .map((r) => ({
-      'دسته': CAT_LABEL[r.category] || r.category,
-      'رتبه در دسته': r.rankInCategory != null ? toPersianDigits(r.rankInCategory) : '—',
-      'نام': r.candidateName || '—',
-      'امتیاز': toPersianDigits(r.score),
-      'آخرین سمت': r.facts?.lastRole || '—',
-      'سال سابقه': r.facts?.yearsExperience != null ? toPersianDigits(r.facts.yearsExperience) : '—',
-      'تحصیلات': r.facts?.education || '—',
-      'شهر': r.contact?.city || '—',
-      'تلفن': r.contact?.phone || '—',
-      'ایمیل': r.contact?.email || '—',
-      'برچسب‌ها': r.tags.join('، '),
-      'خلاصه تحلیل': r.summary,
-      'چرا این دسته': r.whyCategory,
-      'نقاط قوت': r.strengths.map((s) => s.point).join('؛ '),
-      'کمبودها': r.weaknesses.map((w) => w.point).join('؛ '),
-      'در بانک رزومه': r.inBank ? 'بله' : 'خیر',
-      'تصمیم کاربر': decisionText(r),
-      'تاریخ تصمیم': r.decidedAtJalali || '—',
-      'دلیل/یادداشت تصمیم': r.decisionNote || '—',
-      'بازبینی دقیق': r.deepAnalysisAtJalali ? `انجام شد (${r.deepAnalysisAtJalali})` : '—',
-      'فایل': r.fileName,
-      'موتور تحلیل': r.engine === 'local' ? 'محلی (غیر هوشمند)' : r.engine === 'ai' ? 'هوشا' : '—',
-    }));
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows), 'نتایج کامل');
-
-  const safeName = (batch.roleTitle || batch.departmentName).replace(/[\\/:*?"<>|]/g, '').slice(0, 40);
-  XLSX.writeFile(wb, `غربالگری-${safeName}-${batch.createdAtJalali.replace(/\//g, '-')}.xlsx`);
+  const rows = records.map((r, i) => ({
+    ردیف: toPersianDigits(i + 1),
+    نام: candidateName(r),
+    'میزان تطابق': matchMeta(r.category).label,
+    'درصد تطابق': r.category === 'UNJUDGEABLE' || r.category === 'ERROR' ? '—' : toPersianDigits(r.score),
+    'موتور تحلیل': r.engine === 'local' ? 'موتور محلی (غیرهوشمند)' : r.engine === 'ai' ? 'هوش مصنوعی' : '—',
+    'آخرین سمت': r.facts?.lastRole || '—',
+    'سال سابقه': r.facts?.yearsExperience != null ? toPersianDigits(r.facts.yearsExperience) : '—',
+    تحصیلات: r.facts?.education || '—',
+    مهارت‌ها: (r.facts?.skills || []).join('، '),
+    شهر: r.contact?.city || '—',
+    تلفن: r.contact?.phone || '—',
+    ایمیل: r.contact?.email || '—',
+    'حقوق درخواستی': r.facts?.expectedSalary || '—',
+    'جمع‌بندی هویدا': r.summary || r.unjudgeableReason || r.errorMessage || '—',
+    'دلایل تطابق': r.strengths.map((x) => x.point).join('؛ '),
+    'نکات قابل بررسی': r.weaknesses.map((x) => x.point).join('؛ '),
+    'تصمیم شما': DECISION_META[r.decisionStatus].label,
+    'تصمیم‌گیرنده': r.decidedByName || '—',
+    'تاریخ تصمیم': r.decidedAtISO ? faDate(r.decidedAtISO) : '—',
+    'یادداشت تصمیم': r.decisionNote || '—',
+    'بانک استعداد': r.inBank ? 'بله' : 'خیر',
+    فایل: r.fileName,
+  }));
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  (sheet as any)['!cols'] = Object.keys(rows[0] || { a: 1 }).map((k) => ({ wch: k.length < 8 ? 14 : 26 }));
+  XLSX.utils.book_append_sheet(wb, sheet, 'کاندیداها');
+  const safe = job.roleTitle.replace(/[\\/:*?"<>|]/g, '').slice(0, 40) || 'job';
+  XLSX.writeFile(wb, `هویدا-${safe}.xlsx`);
+  return records.length;
 }

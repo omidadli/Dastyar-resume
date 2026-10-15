@@ -1,6 +1,10 @@
-# Render Blueprint — دستیار غربالگری رزومه سیلانه سبز
-# داده‌ها روی دیسک سرویس (فایل JSON در پوشه data/) نگهداری می‌شوند؛
-# دیسک مانت‌شده زیر برای بقای داده‌ها پس از هر ری‌دیپلوی ضروری است.
+# Render Blueprint — HOVIDA (هویدا)
+# Data lives on the service disk (data/hovida-store.json + data/resumes/).
+# The mounted disk below is required, otherwise every deploy wipes all workspaces.
+#
+# NOTE: the service and disk names are intentionally unchanged from the earlier
+# deployment, so syncing this blueprint keeps the existing disk (and its data).
+# For a brand-new deployment you can rename them, e.g. `hovida` / `hovida-data`.
 
 services:
   - type: web
@@ -14,9 +18,6 @@ services:
     buildCommand: npm install && npm run build
     startCommand: npm start
     healthCheckPath: /api/health
-    # Without this disk, data/screening-store.json and data/resumes/ live on the
-    # ephemeral root filesystem and every deploy silently wipes all screening
-    # history, talent-bank entries and the original resume files.
     disk:
       name: seilaneh-data
       mountPath: /opt/render/project/src/data
@@ -24,11 +25,23 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      # server.ts reads PORT from the environment (it used to be hardcoded to
-      # 3000, which made this health check unreachable and the deploy fail).
       - key: PORT
         value: "10000"
+      - key: APP_SECRET
+        generateValue: true
+      - key: AI_PROVIDER
+        value: auto
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_MODEL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_BASE_URL
+        sync: false
+      - key: OPENAI_MODEL
+        sync: false
+      - key: DISABLE_DEMO
+        sync: false
+      - key: LEGACY_OWNER_EMAIL
         sync: false

@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from '../src/App';
+import { navigate } from '../src/lib/router';
 
 /** Test entry: mounts the real App into whatever container it is handed. */
 export function mount(el: HTMLElement) {
@@ -9,5 +10,5 @@ export function mount(el: HTMLElement) {
   return root;
 }
 
-// Imported separately so the splash watchdog can be exercised on its own.
-export {SplashScreen} from '../src/components/common/SplashScreen';
+// Same router instance as the mounted App, so the test can move between pages.
+export { navigate };

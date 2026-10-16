@@ -19,7 +19,7 @@ import { useAuth } from '../../lib/auth';
 import { navigate } from '../../lib/router';
 import { useOnChange } from '../../lib/events';
 import type { ActivityItem, ActivityType } from '../../types/app';
-import { Drawer, EmptyState, IconButton, Skeleton } from '../ui';
+import { Drawer, EmptyState, ErrorState, IconButton, Skeleton } from '../ui';
 import { faRelative } from '../../lib/format';
 
 export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
@@ -72,6 +72,7 @@ export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unre
 export function NotificationsPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { user, setUnread } = useAuth();
   const [items, setItems] = useState<ActivityItem[] | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
   const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
 
   const load = (markSeen: boolean) =>
@@ -92,13 +93,19 @@ export function NotificationsPanel({ open, onClose }: { open: boolean; onClose: 
           setUnreadIds(ids);
           if (r.unread > 0) api.insights.markSeen().then(() => setUnread(0)).catch(() => {});
         }
+        setFailed(null);
         setItems(r.items);
       })
-      .catch(() => setItems([]));
+      .catch((err) => {
+        // A failed background refresh keeps the list on screen; only the
+        // opening load reports the failure (never as «no activity yet»).
+        if (markSeen) setFailed(err?.message || 'دریافت اعلان‌ها ممکن نشد.');
+      });
 
   useEffect(() => {
     if (!open) return;
     setItems(null);
+    setFailed(null);
     void load(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
@@ -117,7 +124,16 @@ export function NotificationsPanel({ open, onClose }: { open: boolean; onClose: 
         <IconButton icon={X} label="بستن" onClick={onClose} />
       </div>
       <div className="flex-1 overflow-y-auto hv-scroll p-2">
-        {items === null ? (
+        {failed ? (
+          <ErrorState
+            message={failed}
+            onRetry={() => {
+              setFailed(null);
+              setItems(null);
+              void load(true);
+            }}
+          />
+        ) : items === null ? (
           <div className="p-3 flex flex-col gap-3">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="flex gap-3">

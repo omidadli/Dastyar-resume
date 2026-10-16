@@ -126,7 +126,7 @@ export default function Reports() {
             <Button
               variant="secondary"
               icon={Download}
-              disabled={!data || !data.totals.analyzed}
+              disabled={Boolean(error) || !data || !data.totals.analyzed}
               onClick={() => data && exportReport(data).then(() => toast('گزارش اکسل آماده شد.')).catch(() => toast('ساخت فایل ممکن نشد.', 'error'))}
             >
               خروجی اکسل
@@ -145,12 +145,13 @@ export default function Reports() {
           <Skeleton className="h-[340px] rounded-card" />
         </div>
       )}
-      {data && data.totals.analyzed === 0 && (
+      {!error && data && data.totals.analyzed === 0 && (
         <div className="hv-card">
           <EmptyState icon={BarChart3} title="در این بازه هنوز رزومه‌ای تحلیل نشده است" description="بازه زمانی بزرگ‌تری انتخاب کنید یا با بارگذاری رزومه‌ها شروع کنید." />
         </div>
       )}
-      {data && data.totals.analyzed > 0 && (
+      {/* After a failed range switch, never show the previous range's figures under the new label. */}
+      {!error && data && data.totals.analyzed > 0 && (
         <div className="flex flex-col gap-5">
           <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
             <Stat icon={FileCheck2} label="رزومه‌های تحلیل‌شده" value={faNumber(data.totals.analyzed)} note={`در ${faNumber(data.jobs.length)} فرصت شغلی`} />

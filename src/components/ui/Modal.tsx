@@ -51,9 +51,18 @@ export function useEscapeLayer(open: boolean, onClose: () => void) {
 
 /** Puts keyboard focus back where it was (the button that opened the overlay). */
 export function useRestoreFocus(open: boolean) {
+  // Read while rendering the opening frame, not in the effect: React applies
+  // `autoFocus` inside the overlay during commit — before effects run — so the
+  // effect would record the overlay's own field and focus would be lost when
+  // it closes. (A menu item moves focus back to its trigger before opening a
+  // dialog, so the trigger is what gets recorded here.)
+  const opener = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) opener.current = document.activeElement as HTMLElement | null;
+  wasOpen.current = open;
   useEffect(() => {
     if (!open) return;
-    const before = document.activeElement as HTMLElement | null;
+    const before = opener.current;
     return () => {
       if (before && before !== document.body && before.isConnected) {
         window.setTimeout(() => {

@@ -1287,7 +1287,7 @@ export function evaluateResumeLocal(
   resumeText: string,
   understanding: JobUnderstanding,
   _answers: ScreeningAnswers,
-  fileName: string
+  _fileName: string
 ): CandidateEvaluation {
   const text = normalizePersianText(resumeText || '');
   const digitsText = toEnglishDigits(text);

@@ -208,7 +208,7 @@ function Topbar({ onSearch, onBell }: { onSearch: () => void; onBell: () => void
   );
 }
 
-function MobileNav({ onMore }: { onMore: () => void }) {
+function MobileNav({ onMore, moreOpen }: { onMore: () => void; moreOpen: boolean }) {
   const { pathname } = useLocation();
   const compare = useCompare();
   const items: { to?: string; label: string; icon: LucideIcon; active: boolean; badge?: number; onClick?: () => void }[] = [
@@ -252,7 +252,14 @@ function MobileNav({ onMore }: { onMore: () => void }) {
               {inner}
             </Link>
           ) : (
-            <button key={it.label} onClick={it.onClick} className="flex flex-col items-center justify-center gap-0.5">
+            <button
+              key={it.label}
+              type="button"
+              onClick={it.onClick}
+              aria-haspopup="dialog"
+              aria-expanded={moreOpen}
+              className="flex flex-col items-center justify-center gap-0.5"
+            >
               {inner}
             </button>
           );
@@ -289,7 +296,8 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
             <p className="text-sm font-bold text-ink truncate">{user?.name}</p>
             <p className="text-xs text-ink-3 truncate">{org?.name}</p>
           </div>
-          <IconButton icon={X} label="بستن" onClick={onClose} />
+          {/* Focus moves into the sheet so Tab stays inside it (trapTabKey). */}
+          <IconButton icon={X} label="بستن" onClick={onClose} autoFocus />
         </div>
         <div className="p-3 grid gap-1">
           {[
@@ -350,9 +358,12 @@ function PlatformBanners() {
       {support && (
         <div className="bg-[#5B3A0A] text-white text-[12.5px]">
           <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-2 text-center">
+            {/* Icon + ONE text run: loose text beside <b> would become separate flex items (columns on a phone). */}
             <span className="inline-flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-[#FCD34D]" />
-              نشست پشتیبانی: شما با حساب <b className="font-bold">{user?.name}</b> کار می‌کنید (گشوده‌شده توسط {support.adminName}). همه کارها به نام این کاربر ثبت می‌شود.
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-[#FCD34D]" />
+              <span>
+                نشست پشتیبانی: شما با حساب <b className="font-bold">{user?.name}</b> کار می‌کنید (گشوده‌شده توسط {support.adminName}). همه کارها به نام این کاربر ثبت می‌شود.
+              </span>
             </span>
             <button
               onClick={async () => {
@@ -411,8 +422,10 @@ function DemoBanner() {
     <div className="bg-[#1f2a23] text-white text-[12.5px]">
       <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 px-4 py-2 text-center">
         <span className="inline-flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-[#7ee29a]" />
-          شما در <b className="font-bold">نسخه نمایشی</b> هستید؛ همه داده‌ها ساختگی‌اند و این فضای کاری {demoTimeLeft(org.demoExpiresAt)} پاک می‌شود.
+          <Sparkles className="w-3.5 h-3.5 shrink-0 text-[#7ee29a]" />
+          <span>
+            شما در <b className="font-bold">نسخه نمایشی</b> هستید؛ همه داده‌ها ساختگی‌اند و این فضای کاری {demoTimeLeft(org.demoExpiresAt)} پاک می‌شود.
+          </span>
         </span>
         <button
           onClick={async () => {
@@ -478,7 +491,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Topbar onSearch={() => setSearchOpen(true)} onBell={() => setBellOpen(true)} />
         <main className={`flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-1 pb-28 ${trayVisible ? 'lg:pb-28' : 'lg:pb-12'}`}>{children}</main>
       </div>
-      <MobileNav onMore={() => setMoreOpen(true)} />
+      <MobileNav onMore={() => setMoreOpen(true)} moreOpen={moreOpen} />
       <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} />
       <NotificationsPanel open={bellOpen} onClose={() => setBellOpen(false)} />

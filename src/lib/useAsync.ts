@@ -3,11 +3,22 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 export interface AsyncState<T> {
   data: T | null;
   error: string | null;
+  /** HTTP status of the last failure (0 = network / timeout), null when none. */
+  errorStatus: number | null;
   loading: boolean;
   /** Re-runs the loader; keeps showing the previous data while loading. */
   reload: () => void;
+  /**
+   * Background re-run (event-bus refreshes): a transient failure — network,
+   * timeout, 5xx — keeps the current data on screen instead of replacing the
+   * view with an error; the next refresh tries again. 4xx still surfaces.
+   */
+  refresh: () => void;
   setData: React.Dispatch<React.SetStateAction<T | null>>;
 }
+
+const isTransient = (status: unknown) => typeof status !== 'number' || status === 0 || status >= 500;
+const sameDeps = (a: unknown[] | null, b: unknown[]) => Boolean(a && a.length === b.length && a.every((x, i) => Object.is(x, b[i])));
 
 /**
  * Loads data for a view and re-loads whenever `deps` change. Stale responses
@@ -17,24 +28,42 @@ export interface AsyncState<T> {
 export function useAsync<T>(loader: (signal: AbortSignal) => Promise<T>, deps: unknown[]): AsyncState<T> {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   const loaderRef = useRef(loader);
   loaderRef.current = loader;
+  const silentRef = useRef(false);
+  /** The deps the data on screen was loaded for. */
+  const dataDepsRef = useRef<unknown[] | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
     let alive = true;
+    const effectDeps = deps;
+    const silent = silentRef.current;
+    silentRef.current = false;
     setLoading(true);
-    setError(null);
+    if (!silent) {
+      setError(null);
+      setErrorStatus(null);
+    }
     loaderRef
       .current(controller.signal)
       .then((d) => {
-        if (alive) setData(d);
+        if (!alive) return;
+        dataDepsRef.current = effectDeps;
+        setData(d);
+        setError(null);
+        setErrorStatus(null);
       })
       .catch((err) => {
         if (!alive || err?.name === 'AbortError') return;
+        // Only when what is on screen belongs to these very deps (not to the
+        // previous filter of a change that landed in the same render).
+        if (silent && sameDeps(dataDepsRef.current, effectDeps) && isTransient(err?.status)) return;
         setError(err?.message || 'دریافت اطلاعات ممکن نشد.');
+        setErrorStatus(typeof err?.status === 'number' ? err.status : 0);
       })
       .finally(() => {
         if (alive) setLoading(false);
@@ -47,7 +76,11 @@ export function useAsync<T>(loader: (signal: AbortSignal) => Promise<T>, deps: u
   }, [...deps, tick]);
 
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  return { data, error, loading, reload, setData };
+  const refresh = useCallback(() => {
+    silentRef.current = true;
+    setTick((t) => t + 1);
+  }, []);
+  return { data, error, errorStatus, loading, reload, refresh, setData };
 }
 
 /** Debounced copy of a value (search inputs). */

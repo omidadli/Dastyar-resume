@@ -39,16 +39,29 @@ export default function Talent({ dept }: { dept?: string }) {
     [active, q, tags.join(','), minScore, minYears, sort, page]
   );
   useOnChange(['talent', 'resumes'], () => {
-    overview.reload();
-    list.reload();
+    overview.refresh();
+    list.refresh();
   });
+  // The server clamps an out-of-range page (the last page emptied by a
+  // delete): follow it, or a later refresh would jump to the stale number.
+  useEffect(() => {
+    if (list.data && list.data.page !== page) setPage(list.data.page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list.data]);
+
+  // An address with a department this workspace does not have.
+  useEffect(() => {
+    if (dept && overview.data && !overview.data.departments.some((d) => d.id === dept)) navigate('/app/talent', { replace: true });
+  }, [dept, overview.data]);
 
   const [selected, setSelected] = useState<ResumeListItem | null>(null);
   const departments = overview.data?.departments || [];
+  // Chosen tags stay visible (and removable) even when they drop out of the top 16.
+  const shownTags = Array.from(new Set([...tags, ...(overview.data?.tags || []).slice(0, 16)]));
   const update = (r: ResumeListItem) => {
     setSelected(r);
     list.setData((d) => (d ? { ...d, items: d.items.map((x) => (x.id === r.id ? r : x)) } : d));
-    if (!r.inBank) list.reload();
+    if (!r.inBank) list.refresh();
   };
 
   return (
@@ -69,6 +82,7 @@ export default function Talent({ dept }: { dept?: string }) {
           return (
             <button
               key={d.id}
+              aria-pressed={isActive}
               onClick={() => navigate(d.id === 'all' ? '/app/talent' : `/app/talent/${d.id}`, { keepScroll: true })}
               className={`shrink-0 inline-flex items-center gap-2 h-10 pr-3 pl-3.5 rounded-full border text-[13px] font-semibold transition-colors ${
                 isActive ? 'bg-brand-strong border-brand-strong text-white' : d.count ? 'bg-surface border-line text-ink-2 hover:border-line-strong' : 'bg-surface border-line text-ink-4'
@@ -121,9 +135,9 @@ export default function Talent({ dept }: { dept?: string }) {
             />
           </div>
         </div>
-        {(overview.data?.tags.length || 0) > 0 && (
+        {shownTags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
-            {overview.data!.tags.slice(0, 16).map((t) => {
+            {shownTags.map((t) => {
               const on = tags.includes(t);
               return (
                 <button key={t} onClick={() => setTags(on ? tags.filter((x) => x !== t) : [...tags, t])} aria-pressed={on}>
@@ -202,9 +216,11 @@ export default function Talent({ dept }: { dept?: string }) {
             jobTitle={selected.roleTitle || undefined}
             onChange={update}
             onDeleted={() => {
+              const goneId = selected.id;
               setSelected(null);
-              list.reload();
-              overview.reload();
+              list.setData((d) => (d ? { ...d, items: d.items.filter((x) => x.id !== goneId) } : d));
+              list.refresh();
+              overview.refresh();
             }}
             onClose={() => setSelected(null)}
           />

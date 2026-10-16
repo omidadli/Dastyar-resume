@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { PublicConfig } from '../types/admin';
-import { api } from './api';
+import { api, MAINTENANCE_EVENT } from './api';
 
 /**
  * Public switches set by the platform admin (/admin › تنظیمات سامانه):
@@ -57,10 +57,12 @@ export function ConfigProvider({ children }: { children: React.ReactNode }) {
     }, 120_000);
     const onFocus = () => void refreshPublicConfig();
     window.addEventListener('focus', onFocus);
+    window.addEventListener(MAINTENANCE_EVENT, onFocus);
     return () => {
       listeners.delete(setConfig);
       window.clearInterval(id);
       window.removeEventListener('focus', onFocus);
+      window.removeEventListener(MAINTENANCE_EVENT, onFocus);
     };
   }, []);
   return <ConfigCtx.Provider value={config}>{children}</ConfigCtx.Provider>;

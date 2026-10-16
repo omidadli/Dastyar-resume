@@ -431,7 +431,8 @@ function TimeoutInput({ label, value, min, max, onSave }: { label: string; value
   useEffect(() => setV(String(value)), [value]);
   const commit = () => {
     const n = Math.round(Number(v));
-    if (!Number.isFinite(n)) return setV(String(value));
+    // An emptied field reverts — Number('') is 0, which would silently save the minimum.
+    if (!v.trim() || !Number.isFinite(n)) return setV(String(value));
     const clamped = Math.max(min, Math.min(max, n));
     setV(String(clamped));
     if (clamped !== value) onSave(clamped);
@@ -535,7 +536,7 @@ function KeyCard({
           )}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <Switch checked={k.enabled} onChange={onToggle} />
+          <Switch checked={k.enabled} onChange={onToggle} ariaLabel={`فعال بودن کلید «${k.label}»`} />
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 mt-3 pt-3 border-t border-line-2">

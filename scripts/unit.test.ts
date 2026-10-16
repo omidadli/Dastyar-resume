@@ -211,5 +211,39 @@ const u: JobUnderstanding = {
   assert(Boolean(interview?.evidence.includes('هماهنگی مصاحبه‌ها')), 'local engine: evidence is the line with the keyword', interview?.evidence);
 }
 
+// ---- Comparison tray: one tray per workspace, never shown in another ----
+{
+  const store = new Map<string, string>();
+  (globalThis as any).localStorage = {
+    getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+  };
+  store.set('hovida.compare.v1', JSON.stringify({ jobId: 'j0', jobTitle: 'old', items: [{ id: 'r0', name: 'legacy', score: 1, category: 'REVIEW' }] }));
+  const c = await import('../src/lib/compare');
+  const item = (id: string) => ({ id, name: id, score: 50, category: 'REVIEW' });
+  const trayKeys = () => Array.from(store.keys()).filter((k) => k.startsWith('hovida.compare'));
+  assert(!store.has('hovida.compare.v1'), 'compare: the old browser-wide tray is dropped');
+  assert(c.toggleCompare('j1', 'job', item('a')) === 'added' && trayKeys().length === 0, 'compare: nothing is persisted while signed out');
+  c.clearCompare();
+  c.setCompareScope('orgA');
+  c.toggleCompare('j1', 'job', item('a'));
+  c.toggleCompare('j1', 'job', item('b'));
+  assert(JSON.parse(store.get('hovida.compare.v2:orgA') || '{}').items?.length === 2, 'compare: the tray is stored under its own workspace');
+  c.setCompareScope('orgB');
+  assert(!c.isInCompare('a') && !c.isInCompare('b'), 'compare: another workspace starts with its own empty tray');
+  c.toggleCompare('j9', 'other', item('z'));
+  c.setCompareScope('orgA');
+  assert(c.isInCompare('a') && c.isInCompare('b') && !c.isInCompare('z'), 'compare: switching back shows the first tray untouched');
+  c.clearCompare();
+  c.setCompareScope(null);
+  assert(
+    JSON.parse(store.get('hovida.compare.v2:orgA') || '{}').items?.length === 0 && JSON.parse(store.get('hovida.compare.v2:orgB') || '{}').items?.length === 1,
+    'compare: signing out clears only the current workspace tray'
+  );
+  assert(!c.isInCompare('a') && !c.isInCompare('z'), 'compare: signed out, the tray is empty');
+  delete (globalThis as any).localStorage;
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

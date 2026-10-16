@@ -80,13 +80,25 @@ function AdminLogin() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // The fields themselves: an autofilled password may never fire an input event.
+    const fd = new FormData(e.currentTarget);
+    const field = (k: string, fallback: string) => {
+      const v = fd.get(k);
+      return typeof v === 'string' ? v : fallback;
+    };
+    const em = field('email', email).trim();
+    const pw = field('password', password);
+    if (!em || !pw) {
+      setError('ایمیل و رمز عبور را وارد کنید.');
+      return;
+    }
     setError(null);
     clearNotice();
     setLoading(true);
     try {
-      signIn(await api.auth.login({ email: email.trim(), password }));
+      signIn(await api.auth.login({ email: em, password: pw }));
     } catch (err: any) {
       setError(err?.message || 'ورود ممکن نشد.');
     } finally {
@@ -102,9 +114,9 @@ function AdminLogin() {
           {error || notice}
         </Callout>
       )}
-      <form onSubmit={submit} className="mt-5 flex flex-col gap-4">
-        <TextInput label="ایمیل" type="email" latin autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-        <TextInput label="رمز عبور" type="password" latin autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+      <form onSubmit={submit} className="mt-5 flex flex-col gap-4" noValidate>
+        <TextInput label="ایمیل" name="email" type="email" latin autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
+        <TextInput label="رمز عبور" name="password" type="password" latin autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         <Button type="submit" size="lg" block loading={loading}>
           ورود به پنل
         </Button>

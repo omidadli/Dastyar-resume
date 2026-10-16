@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { AiStatus, AuthPayload, MeResponse, OrgPublic, UserPublic } from '../types/app';
 import { api, getToken, lastSessionWasDemo, setToken, TOKEN_KEY, UNAUTHORIZED_EVENT } from './api';
-import { clearCompare } from './compare';
+import { clearCompare, setCompareScope } from './compare';
 import { navigate } from './router';
 
 /**
@@ -81,6 +81,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const reset = useCallback(() => {
     setToken(null);
     clearCompare(); // the tray holds candidate names — never show them to the next account
+    setCompareScope(null);
     setUser(null);
     setOrg(null);
     setAi(null);
@@ -98,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const me = await api.auth.me();
       if (getToken() !== token) return; // signed out / switched account meanwhile
+      setCompareScope(me.org.id); // before the first signed-in render
       setUser((prev) => keepIfSame(prev, me.user));
       setOrg((prev) => keepIfSame(prev, me.org));
       setAi((prev) => keepIfSame(prev, me.ai));
@@ -155,6 +157,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('storage', onStorage);
   }, [reset, refresh]);
 
+  // The comparison tray belongs to the workspace this tab is signed in to.
+  useEffect(() => {
+    setCompareScope(status === 'authed' ? (org?.id ?? null) : null);
+  }, [status, org?.id]);
+
   // Keep AI status and unread notifications fresh while the app is open.
   useEffect(() => {
     if (status !== 'authed') return;
@@ -166,6 +173,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = useCallback((payload: AuthPayload) => {
     setToken(payload.token, { demo: payload.org.isDemo });
+    setCompareScope(payload.org.id);
     clearCompare();
     isDemoRef.current = payload.org.isDemo;
     setUser(payload.user);

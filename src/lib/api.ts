@@ -122,6 +122,13 @@ export class ApiError extends Error {
 
 /** Fired once per expired session so the AuthProvider can sign the user out. */
 export const UNAUTHORIZED_EVENT = 'hovida:unauthorized';
+/**
+ * Fired when maintenance mode starts or ends as seen by this tab's requests,
+ * so the public config (and its banner) refreshes now rather than within the
+ * next two-minute poll.
+ */
+export const MAINTENANCE_EVENT = 'hovida:maintenance';
+let maintenanceSeen = false;
 
 export interface RequestOptions {
   timeoutMs?: number;
@@ -160,6 +167,11 @@ async function request<T>(method: string, url: string, body?: unknown, opts: Req
     opts.signal?.removeEventListener('abort', onAbort);
   }
   const data = await res.json().catch(() => ({}));
+  const inMaintenance = res.status === 503 && (data as any)?.code === 'MAINTENANCE';
+  if (inMaintenance !== maintenanceSeen && (inMaintenance || res.ok)) {
+    maintenanceSeen = inMaintenance;
+    window.dispatchEvent(new Event(MAINTENANCE_EVENT));
+  }
   if (!res.ok) {
     // Only a rejection of the *current* session signs the tab out: a late 401
     // for a token that a fresh login has since replaced must not wipe it.

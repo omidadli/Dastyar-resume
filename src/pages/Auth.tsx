@@ -80,12 +80,25 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const submit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    // Read the fields themselves: a browser-autofilled password can reach the
+    // DOM without an input event, so React state may still be empty.
+    const fd = new FormData(e.currentTarget);
+    const field = (k: string, fallback: string) => {
+      const v = fd.get(k);
+      return typeof v === 'string' ? v : fallback;
+    };
+    const em = field('email', email).trim();
+    const pw = field('password', password);
+    if (!em || !pw) {
+      setError('ایمیل و رمز عبور را وارد کنید.');
+      return;
+    }
     setError(null);
     setLoading(true);
     try {
-      const payload = await api.auth.login({ email: email.trim(), password });
+      const payload = await api.auth.login({ email: em, password: pw });
       clearNotice();
       signIn(payload);
       const next = query.get('next');
@@ -115,10 +128,10 @@ export function LoginPage() {
         </Callout>
       )}
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-        <TextInput label="ایمیل کاری" type="email" icon={Mail} latin autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="name@company.ir" />
-        <TextInput label="رمز عبور" type="password" latin autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        <TextInput label="ایمیل کاری" name="email" type="email" icon={Mail} latin autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} required placeholder="name@company.ir" />
+        <TextInput label="رمز عبور" name="password" type="password" latin autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         {error && <Callout tone="danger">{error}</Callout>}
-        <Button type="submit" size="lg" block loading={loading} iconEnd={ArrowLeft} disabled={!email || !password}>
+        <Button type="submit" size="lg" block loading={loading} iconEnd={ArrowLeft}>
           ورود
         </Button>
       </form>

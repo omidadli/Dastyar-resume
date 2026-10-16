@@ -92,9 +92,24 @@ async function startServer() {
     });
   }
 
-  app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error('Unhandled error:', err);
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return next(err);
+    // Client mistakes — e.g. a malformed %-escape in the address (URIError,
+    // status 400) — are not server faults: answer with the client status, and
+    // give page addresses the app shell so the user sees «این صفحه پیدا نشد».
+    const status = Number(err?.status ?? err?.statusCode);
+    const clientError = err instanceof URIError || (Number.isInteger(status) && status >= 400 && status < 500);
+    if (clientError) {
+      const code = Number.isInteger(status) && status >= 400 && status < 500 ? status : 400;
+      const url = req.originalUrl || '';
+      if (url.startsWith('/api')) return res.status(code).json({ error: 'آدرس درخواست نامعتبر است.' });
+      if (process.env.NODE_ENV === 'production' && req.method === 'GET' && !url.startsWith('/assets/')) {
+        res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        return res.status(404).sendFile(path.join(process.cwd(), 'dist', 'index.html'));
+      }
+      return res.status(code).type('text/plain').send('Bad request');
+    }
+    console.error('Unhandled error:', err);
     res.status(500).json({ error: 'خطای داخلی سرور' });
   });
 

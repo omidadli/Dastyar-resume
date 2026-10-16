@@ -83,6 +83,22 @@ async function main() {
   await api.jobs.list().catch(() => {});
   assert(dispatched.length === 1 && dispatched[0] === 'hovida:unauthorized', 'a 401 for the current session signs out');
 
+  // Maintenance mode seen by this tab: one event when it starts, one when a
+  // request succeeds again — never one per failing request.
+  dispatched.length = 0;
+  (globalThis as any).fetch = () => Promise.resolve({ ok: false, status: 503, json: () => Promise.resolve({ error: 'در حال به‌روزرسانی', code: 'MAINTENANCE' }) });
+  const m1 = await api.jobs.list().catch((e) => e);
+  await api.jobs.list().catch(() => {});
+  assert(m1?.status === 503 && m1?.code === 'MAINTENANCE', 'a maintenance reply rejects with its code');
+  assert(dispatched.filter((t) => t === 'hovida:maintenance').length === 1, 'maintenance start is announced once', dispatched.join(','));
+  (globalThis as any).fetch = () => Promise.resolve({ ok: false, status: 404, json: () => Promise.resolve({ error: 'x' }) });
+  await api.jobs.list().catch(() => {});
+  assert(dispatched.filter((t) => t === 'hovida:maintenance').length === 1, 'another error does not end maintenance');
+  installOkFetch({ items: [] });
+  await api.jobs.list();
+  await api.jobs.list();
+  assert(dispatched.filter((t) => t === 'hovida:maintenance').length === 2, 'the first success after maintenance is announced once', dispatched.join(','));
+
   // Another tab stored a newer session; clearing ours must not remove it.
   store.set('hovida.session.v1', 'other-tab-token');
   setToken(null);

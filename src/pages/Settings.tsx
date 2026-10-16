@@ -18,7 +18,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { Button, Callout, Card, CardHeader, ConfirmDialog, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
+import { Button, Callout, Card, CardHeader, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
 import { copyText } from '../lib/clipboard';
 import { useAuth, useCan } from '../lib/auth';
@@ -284,7 +284,11 @@ function TeamTab() {
           </Callout>
         </div>
       )}
-      {q.loading && !q.data ? (
+      {q.error && !q.data ? (
+        <div className="border-t border-line-2">
+          <ErrorState message={q.error} onRetry={q.reload} />
+        </div>
+      ) : q.loading && !q.data ? (
         <div className="p-6 flex justify-center">
           <Spinner />
         </div>
@@ -584,18 +588,26 @@ function AccountTab() {
         {org?.isDemo ? (
           <Callout tone="info">در نسخه نمایشی امکان تغییر رمز عبور وجود ندارد.</Callout>
         ) : (
-          <>
+          <form
+            noValidate
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (pw.current && pw.next.length >= 8 && !savingPw) void savePw();
+            }}
+          >
+            {/* Tells password managers which saved login to update. */}
+            <input type="text" name="username" autoComplete="username" value={user.email} readOnly hidden />
             <div className="flex flex-col gap-4">
               <TextInput label="رمز فعلی" type="password" latin value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} error={pwError?.field === 'currentPassword' ? pwError.message : null} autoComplete="current-password" />
               <TextInput label="رمز تازه" type="password" latin value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} hint="دست‌کم ۸ کاراکتر، ترکیبی از حروف و عدد" error={pwError?.field === 'newPassword' ? pwError.message : null} autoComplete="new-password" />
               {pwError && !pwError.field && <Callout tone="danger">{pwError.message}</Callout>}
             </div>
             <div className="flex justify-end mt-5 pt-4 border-t border-line-2">
-              <Button icon={KeyRound} onClick={savePw} loading={savingPw} disabled={!pw.current || pw.next.length < 8}>
+              <Button type="submit" icon={KeyRound} loading={savingPw} disabled={!pw.current || pw.next.length < 8}>
                 تغییر رمز
               </Button>
             </div>
-          </>
+          </form>
         )}
       </Card>
     </div>

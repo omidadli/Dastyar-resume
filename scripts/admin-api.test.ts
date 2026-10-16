@@ -153,9 +153,17 @@ async function main() {
   };
 
   try {
+    // ------------------------------------------- malformed addresses ----
+    const shell = await call('GET', '/app/jobs/%E0%A4%A');
+    assert(shell.status === 404 && typeof shell.json === 'string' && shell.json.includes('id="root"'), 'a malformed %-escape in a page address gets the app shell (404), not a 500', String(shell.status));
+    const badAsset = await call('GET', '/assets/%E0%A4%A.js');
+    assert(badAsset.status === 404 && !String(badAsset.json).includes('id="root"'), 'a malformed asset address is a plain 404, never the HTML shell', String(badAsset.status));
+
     // --------------------------------------------------------- claim ----
     const a = await call('POST', '/api/auth/signup', null, { orgName: 'سازمان مدیر', name: 'مدیر اصلی', email: 'admin@example.com', password: 'Admin12345' });
     const A = a.json.token as string;
+    const badApi = await call('GET', '/api/jobs/%E0%A4%A', A);
+    assert(badApi.status === 400 && badApi.json?.error === 'آدرس درخواست نامعتبر است.', 'a malformed %-escape in an API path is a JSON 400, not a 500', `${badApi.status} ${JSON.stringify(badApi.json)}`);
     let me = await call('GET', '/api/admin/me', A);
     assert(me.json.isAdmin === false && me.json.setupPending === true, 'before claiming: not admin, setup pending');
     assert((await call('POST', '/api/admin/claim', A, { code: 'HV-WRONG-CODE-0000' })).status === 400, 'wrong setup code refused');

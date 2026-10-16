@@ -171,6 +171,8 @@ export default function Behavior() {
               <input
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
+                aria-label="یادداشت این نسخه"
+                maxLength={160}
                 placeholder="یادداشت این نسخه (اختیاری)"
                 className="flex-1 min-w-[180px] h-9 rounded-[10px] border border-line bg-surface px-3 text-[13px] focus:outline-none focus:border-brand"
               />
@@ -380,7 +382,7 @@ function IndustriesTab({ draft, defaults, onChange }: { draft: BehaviorConfig; d
                     {ind.keywords.length > 4 ? '…' : ''}
                   </span>
                 </button>
-                <Switch checked={ind.enabled} onChange={(v) => update(ind.id, { enabled: v })} />
+                <Switch checked={ind.enabled} onChange={(v) => update(ind.id, { enabled: v })} ariaLabel={`فعال بودن صنعت «${ind.name}»`} />
               </div>
               {isOpen && (
                 <div className="px-4 pb-4 pt-1 border-t border-line-2 grid gap-3">

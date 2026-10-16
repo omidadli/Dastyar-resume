@@ -149,11 +149,17 @@ export default function JobDetail({ id }: { id: string }) {
   );
   const items = listQ.data?.items || [];
   const counts = listQ.data?.counts;
+  // The server clamps an out-of-range page (the last page emptied by a
+  // delete): follow it, or a later refresh would jump to the stale number.
+  useEffect(() => {
+    if (listQ.data && listQ.data.page !== page) setPage(listQ.data.page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listQ.data]);
 
   useOnChange(['resumes', 'jobs'], (d) => {
     if (d.jobId && d.jobId !== id) return;
-    listQ.reload();
-    jobQ.reload();
+    listQ.refresh();
+    jobQ.refresh();
   });
 
   // Selected candidate (?c=) — from the current page, or fetched directly.
@@ -327,7 +333,9 @@ export default function JobDetail({ id }: { id: string }) {
     return parts.filter(Boolean).join(' · ');
   }, [job]);
 
-  if (jobQ.error) {
+  // A hiccup while the opening is already on screen (after an action, say)
+  // keeps the page; a 4xx — deleted, no access — replaces it.
+  if (jobQ.error && (!job || (jobQ.errorStatus !== null && jobQ.errorStatus >= 400 && jobQ.errorStatus < 500))) {
     return <ErrorState message={jobQ.error} onRetry={jobQ.reload} />;
   }
   if (!job) {
@@ -356,9 +364,11 @@ export default function JobDetail({ id }: { id: string }) {
       criteria={job.understanding.criteria}
       onChange={updateItem}
       onDeleted={() => {
+        const goneId = selected.id;
         closeCandidate();
-        listQ.reload();
-        jobQ.reload();
+        listQ.setData((d) => (d ? { ...d, items: d.items.filter((x) => x.id !== goneId) } : d));
+        listQ.refresh();
+        jobQ.refresh();
       }}
       onClose={closeCandidate}
     />
@@ -393,7 +403,7 @@ export default function JobDetail({ id }: { id: string }) {
               width={220}
               items={[
                 { label: 'ویرایش اطلاعات', icon: Pencil, onClick: () => setEditOpen(true) },
-                { label: 'خروجی اکسل', icon: Download, onClick: () => void doExport(), disabled: !s.total },
+                { label: exporting ? 'در حال ساخت فایل اکسل…' : 'خروجی اکسل', icon: Download, onClick: () => void doExport(), disabled: !s.total || exporting },
                 'divider',
                 job.status !== 'open'
                   ? { label: 'باز کردن دوباره', icon: Play, onClick: () => void setStatus('open') }

@@ -20,8 +20,8 @@ export default function Jobs() {
   const [q, setQ] = useState(query.get('q') || '');
   const dq = useDebounced(q, 250);
   const { runs } = useAnalysis();
-  const { data, error, loading, reload } = useAsync(() => api.jobs.list({ status, q: dq }), [status, dq]);
-  useOnChange(['jobs', 'resumes'], () => reload());
+  const { data, error, loading, reload, refresh } = useAsync(() => api.jobs.list({ status, q: dq }), [status, dq]);
+  useOnChange(['jobs', 'resumes'], () => refresh());
 
   const counts = data?.counts;
   return (

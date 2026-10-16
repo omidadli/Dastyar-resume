@@ -6,6 +6,9 @@ const CONTROL =
   'hover:border-line-strong focus:outline-none focus:border-brand focus:ring-[3px] focus:ring-brand/15 ' +
   'disabled:bg-canvas disabled:text-ink-4 disabled:cursor-not-allowed';
 
+/** Id of the hint / error line under a control, read out by screen readers on focus. */
+const describedBy = (inputId: string) => `${inputId}-desc`;
+
 export function Field({
   label,
   hint,
@@ -36,11 +39,13 @@ export function Field({
       )}
       {children}
       {error ? (
-        <p className="text-xs text-low-ink font-medium" role="alert">
+        <p id={htmlFor ? describedBy(htmlFor) : undefined} className="text-xs text-low-ink font-medium" role="alert">
           {error}
         </p>
       ) : hint ? (
-        <p className="text-xs text-ink-3 leading-relaxed">{hint}</p>
+        <p id={htmlFor ? describedBy(htmlFor) : undefined} className="text-xs text-ink-3 leading-relaxed">
+          {hint}
+        </p>
       ) : null}
     </div>
   );
@@ -74,6 +79,7 @@ export const TextInput = React.forwardRef<HTMLInputElement, InputProps>(function
           type={isPassword && show ? 'text' : type}
           required={required}
           aria-invalid={Boolean(error)}
+          aria-describedby={error || hint ? describedBy(inputId) : undefined}
           dir={latin ? 'ltr' : undefined}
           className={`${CONTROL} h-11 ${Icon ? 'pr-10' : 'pr-3.5'} ${isPassword ? 'pl-10' : 'pl-3.5'} ${latin ? 'text-left hv-latin' : ''} ${
             error ? 'border-low/60 focus:border-low focus:ring-low/15' : ''
@@ -115,6 +121,8 @@ export const TextArea = React.forwardRef<HTMLTextAreaElement, TextAreaProps>(fun
         ref={ref}
         id={inputId}
         required={required}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error || hint ? describedBy(inputId) : undefined}
         dir="auto"
         className={`${CONTROL} min-h-[96px] px-3.5 py-2.5 leading-relaxed resize-y ${className}`}
         {...rest}
@@ -146,6 +154,8 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(function 
         ref={ref}
         id={inputId}
         required={required}
+        aria-invalid={Boolean(error)}
+        aria-describedby={error || hint ? describedBy(inputId) : undefined}
         className={`${CONTROL} appearance-none ${compact ? 'h-9 text-[13px] pr-3 pl-8' : 'h-11 pr-3.5 pl-9'} font-medium ${className}`}
         {...rest}
       >
@@ -263,12 +273,15 @@ export function Switch({
   label,
   description,
   disabled,
+  ariaLabel,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
   label?: React.ReactNode;
   description?: React.ReactNode;
   disabled?: boolean;
+  /** Accessible name when there is no visible label. */
+  ariaLabel?: string;
 }) {
   return (
     <label className={`flex items-start justify-between gap-4 ${disabled ? 'opacity-50' : 'cursor-pointer'}`}>
@@ -279,7 +292,15 @@ export function Switch({
         </span>
       )}
       <span className="relative inline-flex shrink-0 mt-0.5">
-        <input type="checkbox" className="peer sr-only" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} />
+        <input
+          type="checkbox"
+          role="switch"
+          aria-label={ariaLabel}
+          className="peer sr-only"
+          checked={checked}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.checked)}
+        />
         <span className={`w-10 h-6 rounded-full transition-colors ${checked ? 'bg-brand-strong' : 'bg-line-strong'} peer-focus-visible:ring-[3px] peer-focus-visible:ring-brand/30`} />
         <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${checked ? 'right-5' : 'right-1'}`} />
       </span>

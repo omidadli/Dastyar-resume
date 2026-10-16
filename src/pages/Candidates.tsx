@@ -52,7 +52,8 @@ export default function Candidates() {
           jobId: jobId || undefined,
           departmentId: dept || undefined,
           match: tab === 'pending' ? 'all' : match,
-          fromJalali: range === 'all' ? undefined : jalaliDaysAgo(Number(range)),
+          // «۷ روز اخیر» = today and the 6 days before it (the filter is inclusive).
+          fromJalali: range === 'all' ? undefined : jalaliDaysAgo(Number(range) - 1),
           sort,
           q,
           page,
@@ -62,7 +63,13 @@ export default function Candidates() {
       ),
     [tab, jobId, dept, range, match, sort, q, page]
   );
-  useOnChange(['resumes'], () => listQ.reload());
+  useOnChange(['resumes'], () => listQ.refresh());
+  // The server clamps an out-of-range page (the last page emptied by a
+  // delete): follow it, or a later refresh would jump to the stale number.
+  useEffect(() => {
+    if (listQ.data && listQ.data.page !== page) setPage(listQ.data.page);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listQ.data]);
 
   const [selected, setSelected] = useState<ResumeListItem | null>(null);
 
@@ -190,8 +197,10 @@ export default function Candidates() {
             jobTitle={selected.roleTitle || undefined}
             onChange={update}
             onDeleted={() => {
+              const goneId = selected.id;
               setSelected(null);
-              listQ.reload();
+              listQ.setData((d) => (d ? { ...d, items: d.items.filter((x) => x.id !== goneId) } : d));
+              listQ.refresh();
             }}
             onClose={() => setSelected(null)}
           />

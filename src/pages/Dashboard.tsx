@@ -31,8 +31,8 @@ export default function Dashboard() {
   const { user, org, ai } = useAuth();
   const { runs } = useAnalysis();
   const { query } = useLocation();
-  const { data, error, loading, reload } = useAsync(() => api.insights.dashboard(), []);
-  useOnChange(['resumes', 'jobs', 'activity'], () => reload());
+  const { data, error, loading, reload, refresh } = useAsync(() => api.insights.dashboard(), []);
+  useOnChange(['resumes', 'jobs', 'activity'], () => refresh());
 
   const firstName = (user?.name || '').split(' ')[0];
   const isNew = data && data.kpis.totalJobs === 0;

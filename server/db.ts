@@ -39,7 +39,6 @@ import type {
   ActivityItem,
   ActivityType,
   DashboardData,
-  Department,
   OrgPublic,
   ReportRange,
   ReportsData,
@@ -164,6 +163,17 @@ export async function initStore() {
     } catch (err) {
       console.error('[store] snapshot unreadable — starting empty (file kept as .corrupt):', err);
       await fs.promises.copyFile(STORE_FILE, STORE_FILE + '.corrupt').catch(() => {});
+      // Whatever was loaded before the failure is a half-snapshot: never keep
+      // (and later save) an inconsistent mix of orgs without users, etc.
+      orgs.clear();
+      users.clear();
+      sessions.clear();
+      jobs.clear();
+      resumes.clear();
+      activity = [];
+      platformBlob = null;
+      auditLog = [];
+      aiStatsBlob = null;
     }
   }
   await migrateLegacySnapshot();
@@ -904,6 +914,14 @@ export function toListItem(r: ResumeRecord): ResumeListItem {
   return rest;
 }
 
+/** The job opening disappeared (deleted, or its workspace removed) mid-request. */
+export class JobGoneError extends Error {
+  code = 'JOB_NOT_FOUND';
+  constructor() {
+    super('این فرصت شغلی حذف شده است.');
+  }
+}
+
 export async function saveEvaluation(input: {
   job: Job;
   uploadedBy: string | null;
@@ -920,7 +938,13 @@ export async function saveEvaluation(input: {
   const { job } = input;
   const stamp = nowStamp(input.at);
   const id = uid('res');
+  if (jobs.get(job.id) !== job) throw new JobGoneError();
   const file = await writeResumeFile(job.orgId || 'legacy', job.id, id, input.fileName, input.fileBase64);
+  // Deleted (or its workspace removed) while the file was being written.
+  if (jobs.get(job.id) !== job) {
+    deleteFileQuietly(file?.relPath);
+    throw new JobGoneError();
+  }
   const ev = input.evaluation;
   const isError = !ev && !input.unjudgeableReason;
   const category: ResumeCategory = ev
@@ -1066,6 +1090,11 @@ export function applyCalibration(rec: ResumeRecord, score: number, recommendatio
 export async function attachResumeFile(rec: ResumeRecord, fileName: string, base64: string): Promise<boolean> {
   const file = await writeResumeFile(rec.orgId || 'legacy', rec.jobId, rec.id, fileName, base64);
   if (!file) return false;
+  if (resumes.get(rec.id) !== rec) {
+    // Deleted meanwhile: never leave an orphan file on disk.
+    deleteFileQuietly(file.relPath);
+    return false;
+  }
   if (rec.filePath && rec.filePath !== file.relPath) deleteFileQuietly(rec.filePath);
   rec.filePath = file.relPath;
   rec.fileSize = file.size;

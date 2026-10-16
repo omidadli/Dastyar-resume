@@ -56,6 +56,15 @@ interface AuthValue {
 
 const AuthCtx = createContext<AuthValue | null>(null);
 
+/**
+ * The 60-second refresh returns fresh objects even when nothing changed; keep
+ * the previous ones so effects keyed on them (forms seeded from the org…)
+ * don't re-run and wipe what the user is typing.
+ */
+function keepIfSame<T>(prev: T, next: T): T {
+  return prev !== null && JSON.stringify(prev) === JSON.stringify(next) ? prev : next;
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<Status>(getToken() ? 'loading' : 'anon');
   const [user, setUser] = useState<UserPublic | null>(null);
@@ -89,11 +98,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const me = await api.auth.me();
       if (getToken() !== token) return; // signed out / switched account meanwhile
-      setUser(me.user);
-      setOrg(me.org);
-      setAi(me.ai);
+      setUser((prev) => keepIfSame(prev, me.user));
+      setOrg((prev) => keepIfSame(prev, me.org));
+      setAi((prev) => keepIfSame(prev, me.ai));
       setUnread(me.unread);
-      setSupport(me.support ?? null);
+      setSupport((prev) => keepIfSame(prev, me.support ?? null));
       setStatus('authed');
     } catch (err: any) {
       if (getToken() !== token) return;
@@ -161,13 +170,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isDemoRef.current = payload.org.isDemo;
     setUser(payload.user);
     setOrg(payload.org);
+    setSupport(null);
     setNotice(null);
     setStatus('authed');
+    const token = payload.token;
     api.auth
       .me()
       .then((me) => {
+        if (getToken() !== token) return; // signed out / switched meanwhile
+        setUser((prev) => keepIfSame(prev, me.user));
+        setOrg((prev) => keepIfSame(prev, me.org));
         setAi(me.ai);
         setUnread(me.unread);
+        setSupport(me.support ?? null);
       })
       .catch(() => {});
   }, []);

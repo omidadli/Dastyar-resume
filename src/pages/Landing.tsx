@@ -125,29 +125,31 @@ export default function Landing() {
     <div className="min-h-screen bg-surface text-ink" dir="rtl">
       {/* Header */}
       <header className="sticky top-0 z-30 bg-surface/90 backdrop-blur border-b border-line-2">
-        <div className="max-w-[1200px] mx-auto px-5 h-16 sm:h-[72px] flex items-center gap-6">
-          <Link to="/" aria-label="هویدا">
+        <div className="max-w-[1200px] mx-auto px-4 sm:px-5 h-16 sm:h-[72px] flex items-center gap-3 sm:gap-6">
+          <Link to="/" aria-label="هویدا" className="shrink-0">
             <HovidaLogo height={32} />
           </Link>
+          {/* Same order as the sections on the page */}
           <nav className="hidden md:flex items-center gap-6 text-[14px] font-semibold text-ink-2">
-            <a href="#features" className="hover:text-ink">
-              امکانات
-            </a>
             <a href="#how" className="hover:text-ink">
               روش کار
+            </a>
+            <a href="#features" className="hover:text-ink">
+              امکانات
             </a>
             <a href="#trust" className="hover:text-ink">
               اعتماد و امنیت
             </a>
           </nav>
-          <div className="mr-auto flex items-center gap-2">
+          <div className="mr-auto flex items-center gap-1.5 sm:gap-2">
             {authed ? (
               <ButtonLink to="/app" iconEnd={ArrowLeft}>
                 ورود به فضای کاری
               </ButtonLink>
             ) : (
               <>
-                <ButtonLink to="/login" variant="ghost" className="max-sm:hidden">
+                {/* Returning users on phones need «ورود» right here, not only in the footer. */}
+                <ButtonLink to="/login" variant="ghost" className="max-sm:px-3">
                   ورود
                 </ButtonLink>
                 <ButtonLink to="/signup">ساخت فضای کاری</ButtonLink>

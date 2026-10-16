@@ -25,11 +25,14 @@ export function smsLink(raw: string | null | undefined, body?: string): string |
   return `sms:${n.startsWith('98') ? '0' + n.slice(2) : n}${b}`;
 }
 
+/**
+ * mailto: needs %20 for spaces (RFC 6068) — URLSearchParams writes «+», which
+ * Outlook, Gmail and Apple Mail show literally — and CRLF line breaks.
+ */
 export function mailLink(email: string | null | undefined, subject?: string, body?: string): string | null {
-  if (!email) return null;
-  const params = new URLSearchParams();
-  if (subject) params.set('subject', subject);
-  if (body) params.set('body', body);
-  const qs = params.toString();
-  return `mailto:${email}${qs ? '?' + qs : ''}`;
+  const to = (email || '').trim();
+  if (!to || /\s/.test(to)) return null;
+  const enc = (v: string) => encodeURIComponent(v.replace(/\r?\n/g, '\r\n'));
+  const params = [subject ? `subject=${enc(subject)}` : '', body ? `body=${enc(body)}` : ''].filter(Boolean).join('&');
+  return `mailto:${to}${params ? `?${params}` : ''}`;
 }

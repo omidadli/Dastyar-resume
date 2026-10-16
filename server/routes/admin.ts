@@ -364,7 +364,7 @@ export function adminRoutes(): express.Router {
           return res.status(400).json({ error: 'هر فضای کاری باید دست‌کم یک مالک داشته باشد؛ ابتدا فرد دیگری را مالک کنید.' });
         }
         patch.role = role;
-        changes.push(`نقش → ${role}`);
+        changes.push(`نقش → ${({ owner: 'مالک', admin: 'مدیر', member: 'عضو' } as const)[role]}`);
       }
     }
     if (typeof req.body?.disabled === 'boolean' && req.body.disabled !== Boolean(target.disabled)) {
@@ -393,8 +393,10 @@ export function adminRoutes(): express.Router {
       if (!target) return res.status(404).json({ error: 'کاربر یافت نشد.' });
       const password = tempPassword();
       db.updateUser(target.id, { passwordHash: await hashPassword(password) });
-      db.deleteSessionsOfUser(target.id);
-      log(req, 'user.reset_password', target.email, 'رمز موقت ساخته شد و همه نشست‌ها بسته شد');
+      // Resetting your own password must not sign out the tab doing it.
+      const keep = target.id === ctxOf(req).user.id ? ctxOf(req).tokenHash : undefined;
+      db.deleteSessionsOfUser(target.id, keep);
+      log(req, 'user.reset_password', target.email, keep ? 'رمز موقت ساخته شد و نشست‌های دیگر بسته شد' : 'رمز موقت ساخته شد و همه نشست‌ها بسته شد');
       res.json({ tempPassword: password });
     })
   );

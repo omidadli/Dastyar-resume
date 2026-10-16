@@ -32,6 +32,14 @@ function evalConcurrency(total: number): number {
   return clamp(isLikelyMobile() ? 2 : 3, 1, Math.max(1, total));
 }
 
+/**
+ * Errors that will fail every remaining file the same way (opening closed or
+ * deleted by a teammate, maintenance mode): stop the run once, clearly,
+ * instead of sending two doomed requests per file.
+ */
+const FATAL_CODES = new Set(['JOB_CLOSED', 'JOB_NOT_FOUND', 'MAINTENANCE']);
+const isFatal = (err: any): boolean => Boolean(err && FATAL_CODES.has(err.code));
+
 export interface RunResult {
   total: number;
   aiCount: number;
@@ -74,7 +82,26 @@ export async function runJobAnalysis(
   let extractedCount = 0;
   const result: RunResult = { total, aiCount: 0, localCount: 0, unjudgeable: 0, errors: 0 };
   let phase: 'extracting' | 'evaluating' | 'calibrating' | 'done' = 'extracting';
-  const active = new Set<string>();
+  /** Files being evaluated right now: item id → file name (names may repeat). */
+  const active = new Map<string, string>();
+  let fatal: (Error & { code?: string }) | null = null;
+
+  // Originals of text-only evaluations are uploaded quietly afterwards — two
+  // at a time, so a batch of 200 never holds 200 base64 copies in memory.
+  const attachQueue: Array<() => Promise<unknown>> = [];
+  let attachRunning = 0;
+  const pumpAttachments = () => {
+    while (attachRunning < 2 && attachQueue.length) {
+      const task = attachQueue.shift()!;
+      attachRunning++;
+      task()
+        .catch(() => {})
+        .finally(() => {
+          attachRunning--;
+          pumpAttachments();
+        });
+    }
+  };
   const startTime = Date.now();
   let lastProgressAt = Date.now();
   const markProgress = () => (lastProgressAt = Date.now());
@@ -128,7 +155,7 @@ export async function runJobAnalysis(
       statusText,
       subStatusText,
       currentEvaluatingName: current,
-      activeEvaluatingNames: Array.from(active),
+      activeEvaluatingNames: Array.from(active.values()),
       phase,
       extractedCount,
       estimatedSecondsRemaining: eta,
@@ -206,7 +233,7 @@ export async function runJobAnalysis(
     const heartbeat = setInterval(() => {
       if (active.size > 0 && phase === 'evaluating') {
         tick++;
-        const name = Array.from(active)[0];
+        const name = active.values().next().value as string;
         emit(`هویدا در حال تحلیل «${name}»`, name, microSteps[tick % microSteps.length]);
       } else if (phase !== 'done' && Date.now() - lastProgressAt > STALL_WARNING_MS) {
         emit('در انتظار پاسخ سرور…');
@@ -214,7 +241,7 @@ export async function runJobAnalysis(
     }, 1000);
 
     async function evalWorker() {
-      while (next < items.length) {
+      while (next < items.length && !fatal) {
         throwIfAborted();
         const item = items[next++];
         // With clean extracted text the base64 file is NOT sent (≈5KB vs MBs).
@@ -237,6 +264,7 @@ export async function runJobAnalysis(
             result.unjudgeable++;
           } catch (err: any) {
             if (err?.name === 'AbortError') throw err;
+            if (isFatal(err)) fatal = fatal || err;
             item.status = 'error';
             item.errorMessage = err?.message || 'ثبت فایل ناموفق بود.';
             result.errors++;
@@ -248,7 +276,7 @@ export async function runJobAnalysis(
         }
 
         item.status = 'evaluating';
-        active.add(item.name);
+        active.set(item.id, item.name);
         markProgress();
         emit(`هویدا در حال تحلیل «${item.name}»`, item.name, microSteps[0]);
         try {
@@ -277,12 +305,19 @@ export async function runJobAnalysis(
           if (hasCleanText && item.file && item.file.size <= maxInlineFileBytes()) {
             const file = item.file;
             const recId = record.id;
-            fileToBase64(file)
-              .then((b64) => api.resumes.attachFile(recId, item.name, b64))
-              .catch(() => {});
+            const name = item.name;
+            attachQueue.push(() => fileToBase64(file).then((b64) => api.resumes.attachFile(recId, name, b64)));
+            pumpAttachments();
           }
         } catch (err: any) {
           if (err?.name === 'AbortError' || signal?.aborted) throw err;
+          if (isFatal(err)) {
+            fatal = fatal || err;
+            item.status = 'error';
+            item.errorMessage = err.message;
+            result.errors++;
+            continue; // `finally` still runs; the loop then stops
+          }
           try {
             const { record } = await api.jobs.evaluate(
               jobId,
@@ -304,7 +339,7 @@ export async function runJobAnalysis(
           item.errorMessage = err?.message || 'خطا در تحلیل';
           result.errors++;
         } finally {
-          active.delete(item.name);
+          active.delete(item.id);
           processed++;
           markProgress();
           emit(`تحلیل ${processed.toLocaleString('fa-IR')} از ${total.toLocaleString('fa-IR')} رزومه انجام شد`, item.name);
@@ -319,6 +354,14 @@ export async function runJobAnalysis(
     if (evalAbort) {
       await api.jobs.analysis(jobId, 'cancel').catch(() => {});
       throw (evalAbort as PromiseRejectedResult).reason;
+    }
+    if (fatal) {
+      const stopped = fatal as Error & { code?: string };
+      if (stopped.code !== 'JOB_NOT_FOUND') await api.jobs.analysis(jobId, 'cancel').catch(() => {});
+      const saved = result.aiCount + result.localCount + result.unjudgeable;
+      throw new Error(
+        `${stopped.message}${saved ? ` ${saved.toLocaleString('fa-IR')} رزومه پیش از توقف ثبت شد.` : ''}`
+      );
     }
 
     // ---- Step C: relative calibration + finish ----

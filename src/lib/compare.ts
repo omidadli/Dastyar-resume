@@ -75,13 +75,28 @@ export function toggleCompare(jobId: string, jobTitle: string, item: CompareItem
   return 'added';
 }
 
-export function removeFromCompare(id: string) {
-  const items = state.items.filter((i) => i.id !== id);
+export function removeFromCompare(...ids: string[]) {
+  if (!state.items.some((i) => ids.includes(i.id))) return;
+  const items = state.items.filter((i) => !ids.includes(i.id));
   save({ ...state, items, jobId: items.length ? state.jobId : null });
 }
 
 export function clearCompare() {
   save({ jobId: null, jobTitle: '', items: [] });
+}
+
+/** A deleted job opening takes its candidates out of the tray too. */
+export function forgetCompareJob(jobId: string) {
+  if (state.jobId === jobId) clearCompare();
+}
+
+// Keep every open tab's tray in step.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== KEY) return;
+    state = load();
+    listeners.forEach((l) => l());
+  });
 }
 
 export function isInCompare(id: string): boolean {

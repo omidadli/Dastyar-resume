@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Clock3,
@@ -54,7 +54,7 @@ import { RejectModal } from '../components/candidates/CandidateModals';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAnalysis } from '../lib/analysis';
-import { clearCompare, toggleCompare } from '../lib/compare';
+import { clearCompare, forgetCompareJob, removeFromCompare, toggleCompare } from '../lib/compare';
 import { emitChange, useOnChange } from '../lib/events';
 import { exportJobToExcel } from '../lib/excelExport';
 import { EMPLOYMENT_LABELS, MATCH_FILTERS } from '../lib/match';
@@ -71,17 +71,21 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
   const [location, setLocation] = useState(job.location);
   const [extraNotes, setExtraNotes] = useState(job.extraNotes);
   const [saving, setSaving] = useState(false);
+  const jobRef = useRef(job);
+  jobRef.current = job;
+  // Seed the form when it opens — not on every background refresh of the job
+  // (those arrive every few seconds during an analysis and would wipe typing).
   useEffect(() => {
     if (open) {
-      setRoleTitle(job.roleTitle);
-      setLocation(job.location);
-      setExtraNotes(job.extraNotes);
+      setRoleTitle(jobRef.current.roleTitle);
+      setLocation(jobRef.current.location);
+      setExtraNotes(jobRef.current.extraNotes);
     }
-  }, [open, job]);
+  }, [open]);
   const save = async () => {
     setSaving(true);
     try {
-      const { job: updated } = await api.jobs.update(job.id, { roleTitle, location, extraNotes });
+      const { job: updated } = await api.jobs.update(job.id, { roleTitle: roleTitle.trim(), location: location.trim(), extraNotes });
       onSaved(updated);
       emitChange('jobs', job.id);
       toast('اطلاعات فرصت شغلی به‌روز شد.');
@@ -155,6 +159,9 @@ export default function JobDetail({ id }: { id: string }) {
   // Selected candidate (?c=) — from the current page, or fetched directly.
   const selectedId = query.get('c');
   const [selected, setSelected] = useState<ResumeListItem | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  selectedIdRef.current = selectedId;
+  const fetchingRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedId) {
       setSelected(null);
@@ -165,14 +172,28 @@ export default function JobDetail({ id }: { id: string }) {
       setSelected(inList);
       return;
     }
-    if (selected?.id === selectedId) return;
+    if (selected?.id === selectedId || fetchingRef.current === selectedId) return;
+    fetchingRef.current = selectedId;
     api.resumes
       .get(selectedId)
       .then(({ record }) => {
+        if (selectedIdRef.current !== record.id) return; // another candidate was opened meanwhile
+        if (record.jobId !== id) {
+          // A link to a candidate of another opening: show it where it belongs.
+          navigate(`/app/jobs/${record.jobId}?c=${record.id}`, { replace: true });
+          return;
+        }
         const { extractedText: _t, ...item } = record;
         setSelected(item);
       })
-      .catch(() => setQuery({ c: null }));
+      .catch((err) => {
+        if (selectedIdRef.current !== selectedId) return;
+        toast(err?.status === 404 ? 'این کاندید حذف شده است.' : err?.message || 'باز کردن کاندید ممکن نشد.', err?.status === 404 ? 'info' : 'error');
+        setQuery({ c: null });
+      })
+      .finally(() => {
+        if (fetchingRef.current === selectedId) fetchingRef.current = null;
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId, listQ.data]);
 
@@ -186,7 +207,7 @@ export default function JobDetail({ id }: { id: string }) {
 
   // Bulk selection
   const [sel, setSel] = useState<Set<string>>(new Set());
-  useEffect(() => setSel(new Set()), [id, match, decision, q, page]);
+  useEffect(() => setSel(new Set()), [id, match, decision, minYears, sort, q, page]);
   const toggle = (rid: string) =>
     setSel((s) => {
       const n = new Set(s);
@@ -217,8 +238,10 @@ export default function JobDetail({ id }: { id: string }) {
   const doBulkDelete = async () => {
     setBulkBusy(true);
     try {
-      const { updated } = await api.resumes.bulk(Array.from(sel), 'delete');
+      const ids = Array.from(sel);
+      const { updated } = await api.resumes.bulk(ids, 'delete');
       toast(`${faNumber(updated)} رزومه برای همیشه حذف شد.`);
+      removeFromCompare(...ids);
       setSel(new Set());
       setBulkDelete(false);
       if (selectedId && sel.has(selectedId)) closeCandidate();
@@ -256,6 +279,8 @@ export default function JobDetail({ id }: { id: string }) {
   const setStatus = async (status: Job['status']) => {
     if (!job) return;
     try {
+      // A closed opening accepts no more resumes: stop this tab's run first.
+      if (status === 'closed' && running) analysis.cancel(id);
       const { job: updated } = await api.jobs.update(job.id, { status });
       jobQ.setData({ job: updated });
       emitChange('jobs', job.id);
@@ -269,7 +294,9 @@ export default function JobDetail({ id }: { id: string }) {
   const doDeleteJob = async () => {
     if (!job) return;
     try {
+      if (running) analysis.cancel(id);
       await api.jobs.remove(job.id);
+      forgetCompareJob(job.id);
       emitChange('jobs');
       toast('فرصت شغلی و همه رزومه‌هایش حذف شد.');
       navigate('/app/jobs', { replace: true });
@@ -323,6 +350,7 @@ export default function JobDetail({ id }: { id: string }) {
   const panelOpen = Boolean(selected);
   const sidePanel = selected && (
     <CandidatePanel
+      key={selected.id}
       record={selected}
       jobTitle={job.roleTitle}
       criteria={job.understanding.criteria}
@@ -365,12 +393,12 @@ export default function JobDetail({ id }: { id: string }) {
               width={220}
               items={[
                 { label: 'ویرایش اطلاعات', icon: Pencil, onClick: () => setEditOpen(true) },
-                { label: 'خروجی اکسل', icon: Download, onClick: doExport, disabled: !s.total },
+                { label: 'خروجی اکسل', icon: Download, onClick: () => void doExport(), disabled: !s.total },
                 'divider',
                 job.status !== 'open'
-                  ? { label: 'باز کردن دوباره', icon: Play, onClick: () => setStatus('open') }
-                  : { label: 'توقف موقت', icon: Pause, onClick: () => setStatus('paused') },
-                ...(job.status !== 'closed' ? [{ label: 'بستن فرصت شغلی', icon: XCircle, onClick: () => setStatus('closed') }] : []),
+                  ? { label: 'باز کردن دوباره', icon: Play, onClick: () => void setStatus('open') }
+                  : { label: 'توقف موقت', icon: Pause, onClick: () => void setStatus('paused') },
+                ...(job.status !== 'closed' ? [{ label: 'بستن فرصت شغلی', icon: XCircle, onClick: () => void setStatus('closed') }] : []),
                 'divider',
                 { label: 'حذف فرصت شغلی', icon: Trash2, tone: 'danger', onClick: () => setDeleteOpen(true), disabled: !canDelete },
               ]}

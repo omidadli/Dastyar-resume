@@ -116,6 +116,25 @@ export function QuestionsEditor({
 
 // ----------------------------------------------------------------- criteria ----
 
+/** Shares of 100 that always add up to exactly 100 (largest-remainder rounding). */
+export function weightShares(weights: number[]): number[] {
+  const total = weights.reduce((s, w) => s + Math.max(0, w), 0);
+  if (!total) return weights.map(() => 0);
+  const exact = weights.map((w) => (Math.max(0, w) / total) * 100);
+  const shares = exact.map(Math.floor);
+  let left = 100 - shares.reduce((s, v) => s + v, 0);
+  const order = exact.map((v, i) => ({ i, r: v - Math.floor(v) })).sort((a, b) => b.r - a.r || a.i - b.i);
+  for (const { i } of order) {
+    if (left <= 0) break;
+    shares[i]++;
+    left--;
+  }
+  return shares;
+}
+
+/** A criterion title the server accepts. */
+export const criterionTitleOk = (c: Criterion) => c.title.trim().length >= 2;
+
 /** Editable weighted criteria; weights are shown as shares of 100. */
 export function CriteriaEditor({
   understanding,
@@ -127,13 +146,15 @@ export function CriteriaEditor({
   readOnly?: boolean;
 }) {
   const criteria = understanding.criteria;
-  const total = criteria.reduce((s, c) => s + c.weight, 0) || 1;
+  const shares = weightShares(criteria.map((c) => c.weight));
+  const [justAdded, setJustAdded] = React.useState<string | null>(null);
   const update = (next: Criterion[]) => onChange?.({ ...understanding, criteria: next });
   const patch = (id: string, p: Partial<Criterion>) => update(criteria.map((c) => (c.id === id ? { ...c, ...p } : c)));
   return (
     <div className="flex flex-col gap-2.5">
-      {criteria.map((c) => {
-        const share = Math.round((c.weight / total) * 100);
+      {criteria.map((c, i) => {
+        const share = shares[i];
+        const titleMissing = !readOnly && !criterionTitleOk(c);
         return (
           <div key={c.id} className="rounded-[12px] border border-line bg-surface p-3.5">
             <div className="flex items-start gap-3">
@@ -144,7 +165,13 @@ export function CriteriaEditor({
                   value={c.title}
                   onChange={(e) => patch(c.id, { title: e.target.value })}
                   aria-label="عنوان معیار"
-                  className="flex-1 min-w-0 bg-transparent text-[13.5px] font-semibold text-ink leading-relaxed border-b border-transparent hover:border-line focus:border-brand focus:outline-none py-0.5"
+                  aria-invalid={titleMissing}
+                  placeholder="عنوان معیار را بنویسید، مثلاً «تجربه فروش B2B»"
+                  maxLength={140}
+                  autoFocus={justAdded === c.id}
+                  className={`flex-1 min-w-0 bg-transparent text-[13.5px] font-semibold text-ink leading-relaxed border-b hover:border-line focus:border-brand focus:outline-none py-0.5 placeholder:font-normal placeholder:text-ink-4 ${
+                    titleMissing ? 'border-low/50' : 'border-transparent'
+                  }`}
                 />
               )}
               <span className="text-[13px] font-extrabold text-ink hv-num shrink-0 w-10 text-left">{toPersianDigits(share)}٪</span>
@@ -158,13 +185,17 @@ export function CriteriaEditor({
               </div>
               {!readOnly && (
                 <div className="flex items-center gap-1">
-                  <IconButton icon={Minus} label="کاهش وزن" size="sm" onClick={() => patch(c.id, { weight: Math.max(1, c.weight - 5) })} />
-                  <IconButton icon={Plus} label="افزایش وزن" size="sm" onClick={() => patch(c.id, { weight: Math.min(100, c.weight + 5) })} />
+                  <IconButton icon={Minus} label="کاهش وزن" size="sm" disabled={c.weight <= 1} onClick={() => patch(c.id, { weight: Math.max(1, c.weight - 5) })} />
+                  <IconButton icon={Plus} label="افزایش وزن" size="sm" disabled={c.weight >= 100} onClick={() => patch(c.id, { weight: Math.min(100, c.weight + 5) })} />
                 </div>
               )}
               <label className={`inline-flex items-center gap-1.5 text-[12px] font-semibold ${readOnly ? '' : 'cursor-pointer'} ${c.mustHave ? 'text-low-ink' : 'text-ink-3'}`}>
-                <input type="checkbox" className="sr-only" checked={c.mustHave} disabled={readOnly} onChange={(e) => patch(c.id, { mustHave: e.target.checked })} />
-                <span className={`w-4 h-4 rounded border flex items-center justify-center ${c.mustHave ? 'bg-low-ink border-low-ink text-white' : 'border-line-strong'}`}>
+                <input type="checkbox" className="sr-only peer" checked={c.mustHave} disabled={readOnly} onChange={(e) => patch(c.id, { mustHave: e.target.checked })} />
+                <span
+                  className={`w-4 h-4 rounded border flex items-center justify-center peer-focus-visible:ring-2 peer-focus-visible:ring-brand/50 peer-focus-visible:ring-offset-1 ${
+                    c.mustHave ? 'bg-low-ink border-low-ink text-white' : 'border-line-strong'
+                  }`}
+                >
                   {c.mustHave && <Check className="w-3 h-3" strokeWidth={3} />}
                 </span>
                 الزامی
@@ -176,9 +207,11 @@ export function CriteriaEditor({
       {!readOnly && criteria.length < 8 && (
         <button
           type="button"
-          onClick={() =>
-            update([...criteria, { id: `c${Date.now().toString(36)}`, title: 'معیار تازه — عنوان را ویرایش کنید', weight: 10, mustHave: false }])
-          }
+          onClick={() => {
+            const id = `c${Date.now().toString(36)}`;
+            setJustAdded(id);
+            update([...criteria, { id, title: '', weight: 10, mustHave: false }]);
+          }}
           className="h-11 rounded-[12px] border border-dashed border-line-strong text-[13px] font-semibold text-ink-3 hover:text-brand-ink hover:border-brand/40 inline-flex items-center justify-center gap-1.5"
         >
           <Plus className="w-4 h-4" />

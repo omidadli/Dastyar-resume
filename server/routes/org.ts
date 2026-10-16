@@ -68,7 +68,11 @@ export function orgRoutes(): express.Router {
         return res.status(409).json({ error: 'این ایمیل برای مدیر سامانه رزرو شده است؛ صاحب آن باید خودش ثبت‌نام کند.', field: 'email' });
       }
       if (db.listMembers(org.id).length >= 50) return res.status(400).json({ error: 'سقف ۵۰ عضو برای هر فضای کاری پر شده است.' });
-      const member = db.createUser({ orgId: org.id, name, email, title, role, passwordHash: await hashPassword(password) });
+      const passwordHash = await hashPassword(password);
+      // Re-check after the (async) hash: a parallel request may have used the address.
+      if (db.findUserByEmail(email)) return res.status(409).json({ error: 'این ایمیل قبلاً در هویدا ثبت شده است.', field: 'email' });
+      if (db.listMembers(org.id).length >= 50) return res.status(400).json({ error: 'سقف ۵۰ عضو برای هر فضای کاری پر شده است.' });
+      const member = db.createUser({ orgId: org.id, name, email, title, role, passwordHash });
       db.logActivity(org.id, actorOf(req), 'member.added', `«${member.name}» را به تیم اضافه کرد`);
       res.status(201).json({ member: { ...db.publicUser(member), isYou: false }, members: members(org.id, user.id) });
     })

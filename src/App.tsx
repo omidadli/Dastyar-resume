@@ -97,10 +97,11 @@ function appPage(pathname: string): React.ReactNode {
   if (pathname === '/app/jobs') return <Jobs />;
   if (pathname === '/app/jobs/new') return <JobNew />;
   let m = matchPath('/app/jobs/:id', pathname);
-  if (m) return <JobDetail id={m.id} />;
+  // Keyed: moving between two openings (notification, search) starts with fresh filters and panels.
+  if (m) return <JobDetail key={m.id} id={m.id} />;
   if (pathname === '/app/candidates') return <Candidates />;
   m = matchPath('/app/candidates/:id', pathname);
-  if (m) return <CandidatePage id={m.id} />;
+  if (m) return <CandidatePage key={m.id} id={m.id} />;
   if (pathname === '/app/compare') return <Compare />;
   if (pathname === '/app/talent') return <Talent />;
   m = matchPath('/app/talent/:dept', pathname);

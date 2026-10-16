@@ -125,6 +125,9 @@ export function jobRoutes(): express.Router {
     const job = db.getJob(org.id, req.params.id);
     if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
     const prevStatus = job.status;
+    if (typeof req.body?.roleTitle === 'string' && str(req.body.roleTitle, 120).length < 2) {
+      return res.status(400).json({ error: 'عنوان فرصت شغلی را وارد کنید.', field: 'roleTitle' });
+    }
     const status = req.body?.status ? oneOf<JobStatus>(req.body.status, ['open', 'paused', 'closed'], job.status) : undefined;
     const updated = db.updateJob(org.id, job.id, {
       ...(typeof req.body?.roleTitle === 'string' ? { roleTitle: str(req.body.roleTitle, 120) } : {}),
@@ -166,9 +169,11 @@ export function jobRoutes(): express.Router {
     h(async (req, res) => {
       const { org, user } = ctxOf(req);
       const job = db.getJob(org.id, req.params.id);
-      if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+      if (!job) return res.status(404).json({ error: 'این فرصت شغلی حذف شده است.', code: 'JOB_NOT_FOUND' });
       if (job.status === 'closed') {
-        return res.status(409).json({ error: 'این فرصت شغلی بسته شده است؛ برای افزودن رزومه ابتدا آن را دوباره باز کنید.' });
+        return res
+          .status(409)
+          .json({ error: 'این فرصت شغلی بسته شده است؛ برای افزودن رزومه ابتدا آن را دوباره باز کنید.', code: 'JOB_CLOSED' });
       }
       const fileName = str(req.body?.fileName, 200);
       if (!fileName) return res.status(400).json({ error: 'نام فایل الزامی است.' });
@@ -225,17 +230,24 @@ export function jobRoutes(): express.Router {
         console.error('evaluate failed:', err?.message);
       }
 
-      const record = await db.saveEvaluation({
-        job,
-        uploadedBy: user.id,
-        fileName,
-        extractedText: text,
-        unjudgeableReason: reason,
-        fileBase64,
-        evaluation,
-        meta,
-        errorMessage: evaluation || reason ? undefined : errorMessage || 'تحلیل این فایل ممکن نشد؛ دوباره تلاش کنید.',
-      });
+      let record;
+      try {
+        record = await db.saveEvaluation({
+          job,
+          uploadedBy: user.id,
+          fileName,
+          extractedText: text,
+          unjudgeableReason: reason,
+          fileBase64,
+          evaluation,
+          meta,
+          errorMessage: evaluation || reason ? undefined : errorMessage || 'تحلیل این فایل ممکن نشد؛ دوباره تلاش کنید.',
+        });
+      } catch (err) {
+        // Deleted by a teammate while the AI was reading this file.
+        if (err instanceof db.JobGoneError) return res.status(404).json({ error: err.message, code: err.code });
+        throw err;
+      }
       res.json({ record: db.toListItem(record), stats: db.getJob(org.id, job.id)?.stats });
     })
   );

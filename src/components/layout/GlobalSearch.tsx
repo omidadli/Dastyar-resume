@@ -5,7 +5,7 @@ import { api } from '../../lib/api';
 import { navigate } from '../../lib/router';
 import { useDebounced } from '../../lib/useAsync';
 import type { SearchResults } from '../../types/app';
-import { MatchPill, Monogram, Spinner } from '../ui';
+import { MatchPill, Monogram, Spinner, trapTabKey, useEscapeLayer, useLockScroll, useRestoreFocus } from '../ui';
 import { faNumber, toPersianDigits } from '../../lib/format';
 
 interface Row {
@@ -17,38 +17,58 @@ interface Row {
 /** Ctrl/⌘+K command palette: candidates, job openings and quick actions. */
 export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [q, setQ] = useState('');
-  const [results, setResults] = useState<SearchResults | null>(null);
+  const [results, setResults] = useState<{ q: string; data: SearchResults } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounced = useDebounced(q.trim(), 220);
+  useLockScroll(open);
+  useEscapeLayer(open, onClose);
+  useRestoreFocus(open);
 
   useEffect(() => {
     if (open) {
       setQ('');
       setResults(null);
+      setFailed(false);
       setActive(0);
-      setTimeout(() => inputRef.current?.focus(), 20);
+      const t = window.setTimeout(() => inputRef.current?.focus(), 20);
+      return () => window.clearTimeout(t);
     }
   }, [open]);
 
   useEffect(() => {
     if (!open || !debounced) {
       setResults(null);
+      setLoading(false);
+      setFailed(false);
       return;
     }
     const controller = new AbortController();
     setLoading(true);
+    setFailed(false);
     api.insights
       .search(debounced, { signal: controller.signal })
       .then((r) => {
-        setResults(r);
+        setResults({ q: debounced, data: r });
         setActive(0);
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (controller.signal.aborted || err?.name === 'AbortError') return;
+        setResults(null);
+        setFailed(true);
+      })
+      .finally(() => {
+        // A newer query owns the spinner now.
+        if (!controller.signal.aborted) setLoading(false);
+      });
     return () => controller.abort();
   }, [debounced, open]);
+
+  // Results belong to the query that produced them: while a newer one is on
+  // its way, show nothing rather than the previous answer under the new words.
+  const fresh = results && results.q === debounced ? results.data : null;
 
   const rows: Row[] = useMemo(() => {
     const out: Row[] = [];
@@ -72,7 +92,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
       });
       return out;
     }
-    for (const c of results?.candidates || []) {
+    for (const c of fresh?.candidates || []) {
       out.push({
         key: `c-${c.id}`,
         to: `/app/jobs/${c.jobId}?c=${c.id}`,
@@ -94,7 +114,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
         ),
       });
     }
-    for (const j of results?.jobs || []) {
+    for (const j of fresh?.jobs || []) {
       out.push({
         key: `j-${j.id}`,
         to: `/app/jobs/${j.id}`,
@@ -115,7 +135,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
       });
     }
     return out;
-  }, [debounced, results]);
+  }, [debounced, fresh]);
 
   if (!open) return null;
 
@@ -134,17 +154,22 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
     } else if (e.key === 'Enter' && rows[active]) {
       e.preventDefault();
       go(rows[active].to);
-    } else if (e.key === 'Escape') {
-      onClose();
     }
   };
 
-  const candidateCount = results?.candidates.length || 0;
+  const candidateCount = fresh?.candidates.length || 0;
+  const waiting = Boolean(debounced) && !fresh && !failed;
 
   return createPortal(
     <div className="fixed inset-0 z-[90] flex items-start justify-center px-3 pt-[8vh] sm:pt-[12vh]" dir="rtl">
       <div className="absolute inset-0 bg-[#18211c]/40 backdrop-blur-[2px] animate-fade-in" onClick={onClose} />
-      <div role="dialog" aria-modal="true" aria-label="جست‌وجو" className="relative w-full max-w-[620px] bg-surface rounded-[18px] shadow-pop animate-pop-in overflow-hidden">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="جست‌وجو"
+        onKeyDown={trapTabKey}
+        className="relative w-full max-w-[620px] bg-surface rounded-[18px] shadow-pop animate-pop-in overflow-hidden"
+      >
         <div className="flex items-center gap-3 px-4 h-14 border-b border-line">
           <Search className="w-5 h-5 text-ink-4 shrink-0" strokeWidth={1.8} />
           <input
@@ -156,21 +181,28 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             className="flex-1 bg-transparent outline-none text-[15px] text-ink placeholder:text-ink-4"
             aria-label="عبارت جست‌وجو"
           />
-          {loading && <Spinner className="w-4 h-4" />}
+          {(loading || (q.trim() && q.trim() !== debounced)) && <Spinner className="w-4 h-4" />}
           <kbd className="hidden sm:inline hv-latin text-[11px] font-semibold text-ink-3 border border-line rounded-md px-1.5 py-0.5">Esc</kbd>
         </div>
         <div className="max-h-[60vh] overflow-y-auto hv-scroll p-2">
           {!debounced && <p className="px-3 pt-1 pb-2 text-[11.5px] font-bold text-ink-4">دسترسی سریع</p>}
-          {debounced && !loading && rows.length === 0 && (
+          {debounced && failed && (
+            <div className="px-4 py-10 text-center">
+              <p className="text-sm font-semibold text-ink-2">جست‌وجو انجام نشد.</p>
+              <p className="text-xs text-ink-3 mt-1">اتصال اینترنت را بررسی کنید و دوباره بنویسید.</p>
+            </div>
+          )}
+          {debounced && fresh && rows.length === 0 && (
             <div className="px-4 py-10 text-center">
               <p className="text-sm font-semibold text-ink-2">نتیجه‌ای برای «{debounced}» پیدا نشد.</p>
               <p className="text-xs text-ink-3 mt-1">املای دیگری را امتحان کنید؛ جست‌وجو به نیم‌فاصله و «ی/ي» حساس نیست.</p>
             </div>
           )}
+          {waiting && <p className="px-3 py-6 text-center text-[12.5px] text-ink-3">در حال جست‌وجو…</p>}
           {debounced && candidateCount > 0 && <p className="px-3 pt-1 pb-1.5 text-[11.5px] font-bold text-ink-4">کاندیداها</p>}
           {rows.map((r, i) => (
             <React.Fragment key={r.key}>
-              {debounced && i === candidateCount && (results?.jobs.length || 0) > 0 && (
+              {debounced && i === candidateCount && (fresh?.jobs.length || 0) > 0 && (
                 <p className="px-3 pt-3 pb-1.5 text-[11.5px] font-bold text-ink-4">فرصت‌های شغلی</p>
               )}
               <button className="w-full text-right block" onMouseEnter={() => setActive(i)} onClick={() => go(r.to)}>

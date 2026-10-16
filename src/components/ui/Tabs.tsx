@@ -2,6 +2,24 @@ import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import { CountBadge } from './Pills';
 
+/**
+ * Arrow-key navigation shared by tabs and segmented controls (ARIA tablist /
+ * radiogroup patterns). RTL: ArrowLeft moves forward, ArrowRight back.
+ */
+function arrowNav<T extends string>(e: React.KeyboardEvent<HTMLElement>, ids: T[], current: T, onChange: (id: T) => void) {
+  const i = ids.indexOf(current);
+  let next: number | null = null;
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') next = (i + 1) % ids.length;
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') next = (i - 1 + ids.length) % ids.length;
+  else if (e.key === 'Home') next = 0;
+  else if (e.key === 'End') next = ids.length - 1;
+  if (next === null || !ids.length) return;
+  e.preventDefault();
+  onChange(ids[next]);
+  const group = e.currentTarget;
+  window.requestAnimationFrame(() => group.querySelectorAll<HTMLButtonElement>('button')[next!]?.focus());
+}
+
 export interface TabItem<T extends string> {
   id: T;
   label: string;
@@ -24,15 +42,21 @@ export function Tabs<T extends string>({
   size?: 'sm' | 'md';
 }) {
   return (
-    <div role="tablist" className={`flex items-center gap-1 border-b border-line overflow-x-auto hv-scroll ${className}`}>
+    <div
+      role="tablist"
+      onKeyDown={(e) => arrowNav(e, items.map((t) => t.id), value, onChange)}
+      className={`flex items-center gap-1 border-b border-line overflow-x-auto hv-scroll ${className}`}
+    >
       {items.map((t) => {
         const active = t.id === value;
         const Icon = t.icon;
         return (
           <button
             key={t.id}
+            type="button"
             role="tab"
             aria-selected={active}
+            tabIndex={active || !items.some((x) => x.id === value) ? 0 : -1}
             onClick={() => onChange(t.id)}
             className={`relative inline-flex items-center gap-1.5 whitespace-nowrap font-semibold transition-colors ${
               size === 'sm' ? 'h-10 px-2.5 text-[13px]' : 'h-11 px-3 text-sm'
@@ -64,14 +88,20 @@ export function Segmented<T extends string>({
   size?: 'sm' | 'md';
 }) {
   return (
-    <div role="radiogroup" className={`inline-flex items-center p-1 gap-0.5 rounded-[11px] bg-line-2 max-w-full overflow-x-auto hv-scroll ${className}`}>
+    <div
+      role="radiogroup"
+      onKeyDown={(e) => arrowNav(e, items.map((it) => it.id), value, onChange)}
+      className={`inline-flex items-center p-1 gap-0.5 rounded-[11px] bg-line-2 max-w-full overflow-x-auto hv-scroll ${className}`}
+    >
       {items.map((it) => {
         const active = it.id === value;
         return (
           <button
             key={it.id}
+            type="button"
             role="radio"
             aria-checked={active}
+            tabIndex={active || !items.some((x) => x.id === value) ? 0 : -1}
             onClick={() => onChange(it.id)}
             className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-[8px] font-semibold transition-all ${
               size === 'sm' ? 'h-7 px-2.5 text-xs' : 'h-8 px-3 text-[13px]'

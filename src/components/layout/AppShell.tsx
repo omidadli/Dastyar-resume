@@ -29,11 +29,12 @@ import { useAuth } from '../../lib/auth';
 import { usePublicConfig } from '../../lib/config';
 import { useAnalysis } from '../../lib/analysis';
 import { useCompare } from '../../lib/compare';
-import { Button, IconButton, Menu, Monogram } from '../ui';
+import { Button, IconButton, Menu, Monogram, trapTabKey, useEscapeLayer, useLockScroll, useRestoreFocus } from '../ui';
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationsPanel } from './NotificationsPanel';
 import { CompareTray, useCompareTrayVisible } from './CompareTray';
 import { toPersianDigits } from '../../lib/format';
+import { useMediaQuery } from '../../lib/useAsync';
 
 const ROLE_LABEL = { owner: 'مالک فضای کاری', admin: 'مدیر', member: 'عضو تیم' } as const;
 
@@ -71,13 +72,14 @@ function AiStatusChip() {
   );
 }
 
-function UserCard({ compact }: { compact?: boolean }) {
+function UserCard() {
   const { user, org, signOut, support } = useAuth();
   if (!user || !org) return null;
   const isPlatformAdmin = Boolean(user.platformAdmin) && !support;
   return (
     <Menu
       align="start"
+      side="top"
       width={240}
       header={
         <div className="min-w-0">
@@ -98,15 +100,13 @@ function UserCard({ compact }: { compact?: boolean }) {
           className={`w-full flex items-center gap-2.5 p-2 rounded-[12px] text-right transition-colors ${open ? 'bg-line-2' : 'hover:bg-line-2'}`}
         >
           <Monogram name={user.name} size={36} />
-          {!compact && (
-            <span className="flex-1 min-w-0">
-              <span className="block text-[13px] font-bold text-ink truncate">{user.name}</span>
-              <span className="block text-[11.5px] text-ink-3 truncate">
-                {user.title || ROLE_LABEL[user.role]} · {org.name}
-              </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[13px] font-bold text-ink truncate">{user.name}</span>
+            <span className="block text-[11.5px] text-ink-3 truncate">
+              {user.title || ROLE_LABEL[user.role]} · {org.name}
             </span>
-          )}
-          {!compact && <ChevronDown className="w-4 h-4 text-ink-4 shrink-0" />}
+          </span>
+          <ChevronDown className={`w-4 h-4 text-ink-4 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
       )}
     />
@@ -176,7 +176,7 @@ function AnalysisPill() {
   );
 }
 
-function Topbar({ onSearch, onBell, onMenu }: { onSearch: () => void; onBell: () => void; onMenu: () => void }) {
+function Topbar({ onSearch, onBell }: { onSearch: () => void; onBell: () => void }) {
   const { unread, org } = useAuth();
   return (
     <header className="sticky top-0 z-20 bg-canvas/85 backdrop-blur-md border-b border-line lg:border-transparent">
@@ -264,6 +264,9 @@ function MobileNav({ onMore }: { onMore: () => void }) {
 
 function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { signOut, user, org, support } = useAuth();
+  useLockScroll(open);
+  useEscapeLayer(open, onClose);
+  useRestoreFocus(open);
   if (!open) return null;
   const go = (to: string) => {
     onClose();
@@ -272,7 +275,13 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <div className="lg:hidden fixed inset-0 z-[75]" dir="rtl">
       <div className="absolute inset-0 bg-[#18211c]/35 animate-fade-in" onClick={onClose} />
-      <div className="absolute bottom-0 inset-x-0 bg-surface rounded-t-[22px] shadow-pop animate-sheet-up hv-safe-bottom">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="منوی بیشتر"
+        onKeyDown={trapTabKey}
+        className="absolute bottom-0 inset-x-0 bg-surface rounded-t-[22px] shadow-pop animate-sheet-up hv-safe-bottom"
+      >
         <div className="mx-auto mt-2.5 w-10 h-1 rounded-full bg-line-strong" />
         <div className="flex items-center gap-3 px-5 pt-4 pb-3 border-b border-line">
           <Monogram name={user?.name} size={40} />
@@ -428,11 +437,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      // e.code is the physical key: Ctrl+K / «/» also work on the Persian layout
+      // (where e.key is «ن» and «.»).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.code === 'KeyK' || e.key.toLowerCase() === 'k')) {
         e.preventDefault();
         setSearchOpen(true);
+        return;
       }
-      if (e.key === '/' && !(e.target as HTMLElement)?.closest('input, textarea, select, [contenteditable]')) {
+      const typing = (e.target as HTMLElement)?.closest?.('input, textarea, select, [contenteditable]');
+      if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && (e.key === '/' || (e.code === 'Slash' && !e.shiftKey))) {
+        // Not on top of an open dialog — the search would cover it.
+        if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
         e.preventDefault();
         setSearchOpen(true);
       }
@@ -441,7 +456,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  useEffect(() => setMoreOpen(false), [pathname]);
+  // A route change (link, Back button) closes whatever overlay was open.
+  useEffect(() => {
+    setMoreOpen(false);
+    setSearchOpen(false);
+    setBellOpen(false);
+  }, [pathname]);
+  // The «بیشتر» sheet exists only below lg: never leave it open (and the page
+  // scroll-locked) behind a window that was widened.
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  useEffect(() => {
+    if (isDesktop) setMoreOpen(false);
+  }, [isDesktop]);
 
   return (
     <div className="min-h-screen bg-canvas" dir="rtl">
@@ -449,7 +475,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="lg:pr-[256px] min-h-screen flex flex-col">
         <PlatformBanners />
         <DemoBanner />
-        <Topbar onSearch={() => setSearchOpen(true)} onBell={() => setBellOpen(true)} onMenu={() => setMoreOpen(true)} />
+        <Topbar onSearch={() => setSearchOpen(true)} onBell={() => setBellOpen(true)} />
         <main className={`flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-1 pb-28 ${trayVisible ? 'lg:pb-28' : 'lg:pb-12'}`}>{children}</main>
       </div>
       <MobileNav onMore={() => setMoreOpen(true)} />

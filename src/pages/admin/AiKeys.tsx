@@ -1,11 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   ArrowDown,
   ArrowUp,
   CheckCircle2,
-  Eye,
-  EyeOff,
   KeyRound,
   Pencil,
   Plus,
@@ -60,12 +58,12 @@ export default function AiKeys() {
   const calls = useAsync(() => adminApi.calls(12), []);
   const [form, setForm] = useState<FormState | null>(null);
   const [formError, setFormError] = useState<{ message: string; field?: string } | null>(null);
-  const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [results, setResults] = useState<Record<string, KeyTestResult>>({});
   const [removing, setRemoving] = useState<AiKeyPublic | null>(null);
   const [, tick] = useState(0);
+  const reordering = useRef(false);
 
   // Live health: cooldowns end and counters move while the page is open.
   useEffect(() => {
@@ -113,7 +111,6 @@ export default function AiKeys() {
 
   const openForm = (k?: AiKeyPublic) => {
     setFormError(null);
-    setShowKey(false);
     setForm(
       k
         ? { id: k.id, label: k.label, provider: k.provider, apiKey: '', baseUrl: k.baseUrl, model: k.model, rpm: k.rpm ? String(k.rpm) : '', dailyLimit: k.dailyLimit ? String(k.dailyLimit) : '', enabled: k.enabled }
@@ -136,9 +133,10 @@ export default function AiKeys() {
       ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
     };
     try {
+      const before = new Set(data.keys.map((k) => k.id));
       const next = form.id ? await adminApi.updateKey(form.id, body) : await adminApi.addKey(body);
       setData(next);
-      const savedId = form.id || next.keys.filter((k) => k.source === 'admin').slice(-1)[0]?.id;
+      const savedId = form.id || next.keys.find((k) => k.source === 'admin' && !before.has(k.id))?.id;
       setForm(null);
       toast(form.id ? 'کلید به‌روز شد.' : 'کلید اضافه شد؛ در حال آزمایش اتصال…');
       if (savedId && (!form.id || form.apiKey.trim())) void test(savedId);
@@ -150,11 +148,15 @@ export default function AiKeys() {
   };
 
   const move = (index: number, dir: -1 | 1) => {
+    if (reordering.current) return; // the list on screen is about to change
     const ids = adminKeys.map((k) => k.id);
     const j = index + dir;
     if (j < 0 || j >= ids.length) return;
     [ids[index], ids[j]] = [ids[j], ids[index]];
-    void apply(() => adminApi.reorderKeys(ids), 'ترتیب کلیدها ذخیره شد.');
+    reordering.current = true;
+    void apply(() => adminApi.reorderKeys(ids), 'ترتیب کلیدها ذخیره شد.').finally(() => {
+      reordering.current = false;
+    });
   };
 
   return (
@@ -306,7 +308,7 @@ export default function AiKeys() {
                   {c.switchedFrom ? `${c.switchedFrom} ← ` : ''}
                   <b className="text-ink-2">{c.keyLabel}</b>
                 </span>
-                <span className="text-ink-4 hv-num">{faNumber(c.latencyMs)}ms</span>
+                <span className="text-ink-4 hv-num">{faNumber(c.latencyMs)} میلی‌ثانیه</span>
                 {!c.ok && <span className="text-low-ink basis-full sm:basis-auto truncate">{c.error}</span>}
               </li>
             ))}
@@ -347,27 +349,20 @@ export default function AiKeys() {
               />
               <TextInput label="نام نمایشی" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} placeholder="مثلاً: کلید اصلی" />
             </div>
-            <div className="relative">
-              <TextInput
-                label="کلید API"
-                latin
-                type={showKey ? 'text' : 'password'}
-                autoComplete="off"
-                value={form.apiKey}
-                onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-                placeholder={form.id ? 'برای تغییر، کلید تازه را وارد کنید' : form.provider === 'gemini' ? 'AIza…' : 'sk-…'}
-                error={formError?.field === 'apiKey' ? formError.message : null}
-                hint="کلید رمزنگاری‌شده ذخیره می‌شود و دیگر به‌طور کامل نمایش داده نمی‌شود."
-              />
-              <button
-                type="button"
-                onClick={() => setShowKey((v) => !v)}
-                className="absolute left-2.5 top-[34px] w-8 h-8 rounded-md flex items-center justify-center text-ink-4 hover:text-ink-2"
-                aria-label={showKey ? 'پنهان کردن کلید' : 'نمایش کلید'}
-              >
-                {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+            {/* type="password" brings TextInput's own show/hide toggle (a second one used to sit on top of it). */}
+            <TextInput
+              label="کلید API"
+              latin
+              type="password"
+              // "off" is ignored for password fields: the browser would offer the admin's saved login password here.
+              autoComplete="new-password"
+              spellCheck={false}
+              value={form.apiKey}
+              onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
+              placeholder={form.id ? 'برای تغییر، کلید تازه را وارد کنید' : form.provider === 'gemini' ? 'AIza…' : 'sk-…'}
+              error={formError?.field === 'apiKey' ? formError.message : null}
+              hint="کلید رمزنگاری‌شده ذخیره می‌شود و دیگر به‌طور کامل نمایش داده نمی‌شود."
+            />
             <TextInput
               label={form.provider === 'gemini' ? 'آدرس پراکسی/درگاه Gemini' : 'آدرس سرویس (Base URL)'}
               optional={form.provider === 'gemini'}
@@ -562,7 +557,7 @@ function KeyCard({
           </span>
           {runtime?.lastLatencyMs ? (
             <span>
-              سرعت: <b className="text-ink-2 hv-num">{faNumber(runtime.lastLatencyMs)}ms</b>
+              سرعت: <b className="text-ink-2 hv-num">{faNumber(runtime.lastLatencyMs)} میلی‌ثانیه</b>
             </span>
           ) : null}
         </div>

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Columns3, ExternalLink, Trophy, X } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
 import { DecisionBar } from '../components/candidates/CandidatePanel';
@@ -9,7 +9,14 @@ import { candidateName, toPersianDigits } from '../lib/format';
 import { Link, navigate, useLocation } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import type { ResumeListItem } from '../types/screening';
+import type { Job, ResumeListItem } from '../types/screening';
+
+interface CompareData {
+  job: Job | null;
+  items: ResumeListItem[];
+  droppedOtherJobs: boolean;
+  missingIds?: string[];
+}
 
 function Row({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -32,12 +39,32 @@ export default function Compare() {
   const { query } = useLocation();
   const tray = useCompare();
   const idsParam = query.get('ids');
-  const ids = (idsParam ? idsParam.split(',') : tray.items.map((i) => i.id)).filter(Boolean).slice(0, 4);
-  const q = useAsync(() => (ids.length ? api.resumes.compare(ids) : Promise.resolve(null)), [ids.join(',')]);
-  const items = q.data?.items || [];
-  const job = q.data?.job;
+  const ids = Array.from(new Set((idsParam ? idsParam.split(',') : tray.items.map((i) => i.id)).filter(Boolean))).slice(0, 4);
+  const q = useAsync<CompareData | null>(
+    () =>
+      ids.length
+        ? api.resumes.compare(ids).catch((err) => {
+            // None of them exists any more (deleted): an empty comparison, not an error page.
+            if (err?.status === 404) return { job: null, items: [], droppedOtherJobs: false, missingIds: ids };
+            throw err;
+          })
+        : Promise.resolve(null),
+    [ids.join(',')]
+  );
+  const data = q.data;
+  const items = useMemo(() => data?.items || [], [data]);
+  const job = data?.job;
+  // Deleted candidates leave the tray as well, so it stops offering them. The
+  // notice stays put although the trimmed tray triggers a fresh request.
+  const [missing, setMissing] = useState(0);
+  useEffect(() => {
+    if (!data?.missingIds?.length) return;
+    setMissing(data.missingIds.length);
+    removeFromCompare(...data.missingIds);
+  }, [data]);
 
-  const setItems = (next: ResumeListItem[]) => q.setData((d) => (d ? { ...d, items: next } : d));
+  const updateItem = (u: ResumeListItem) =>
+    q.setData((d) => (d ? { ...d, items: d.items.map((x) => (x.id === u.id ? u : x)) } : d));
 
   const sharedSkills = useMemo(() => {
     const counts = new Map<string, number>();
@@ -51,10 +78,15 @@ export default function Compare() {
     navigate(rest.length ? `/app/compare?ids=${rest.join(',')}` : '/app/compare', { replace: true, keepScroll: true });
   };
 
-  if (!ids.length) {
+  if (!ids.length || (data && !job)) {
     return (
       <div>
         <PageHeader title="مقایسه کاندیداها" subtitle="تا چهار کاندید از یک فرصت شغلی را معیار به معیار کنار هم ببینید." />
+        {missing > 0 && (
+          <Callout tone="info" className="mb-4">
+            کاندیداهای انتخاب‌شده حذف شده‌اند و از مقایسه کنار رفتند.
+          </Callout>
+        )}
         <div className="hv-card">
           <EmptyState
             icon={Columns3}
@@ -99,9 +131,19 @@ export default function Compare() {
           </ButtonLink>
         }
       />
-      {q.data?.droppedOtherJobs && (
+      {data?.droppedOtherJobs && (
         <Callout tone="info" className="mb-4">
           فقط کاندیداهای یک فرصت شغلی قابل مقایسه‌اند؛ موارد مربوط به فرصت‌های دیگر کنار گذاشته شدند.
+        </Callout>
+      )}
+      {missing > 0 && (
+        <Callout tone="info" className="mb-4">
+          {toPersianDigits(missing)} کاندید انتخاب‌شده حذف شده بود و از مقایسه کنار رفت.
+        </Callout>
+      )}
+      {items.length === 1 && (
+        <Callout tone="info" className="mb-4">
+          برای مقایسه دست‌کم یک کاندید دیگر از همین فرصت شغلی اضافه کنید.
         </Callout>
       )}
       <div className="hv-card overflow-x-auto hv-scroll">
@@ -250,7 +292,7 @@ export default function Compare() {
             <Row label="تصمیم شما">
               {items.map((r) => (
                 <Cell key={r.id}>
-                  <DecisionBar record={r} compact short onChange={(u) => setItems(items.map((x) => (x.id === u.id ? u : x)))} />
+                  <DecisionBar record={r} compact short onChange={updateItem} />
                   <Link to={`/app/candidates/${r.id}`} className="inline-flex items-center gap-1 text-[12px] font-semibold text-brand-ink mt-2.5 hover:underline">
                     <ExternalLink className="w-3.5 h-3.5" />
                     رزومه کامل

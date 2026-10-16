@@ -21,9 +21,9 @@ export interface CandidateTableProps {
 function Signals({ r }: { r: ResumeListItem }) {
   return (
     <span className="inline-flex items-center gap-1 text-ink-4">
-      {r.engine === 'local' && <Cpu className="w-3.5 h-3.5 text-review-ink" aria-label="تحلیل محلی" />}
-      {r.inBank && <Archive className="w-3.5 h-3.5" aria-label="در بانک استعداد" />}
-      {r.messageStatus === 'sent' && <MailCheck className="w-3.5 h-3.5" aria-label="پیام ارسال شده" />}
+      {r.engine === 'local' && <Cpu className="w-3.5 h-3.5 text-review-ink" role="img" aria-label="تحلیل محلی" />}
+      {r.inBank && <Archive className="w-3.5 h-3.5" role="img" aria-label="در بانک استعداد" />}
+      {r.messageStatus === 'sent' && <MailCheck className="w-3.5 h-3.5" role="img" aria-label="پیام ارسال شده" />}
     </span>
   );
 }
@@ -87,11 +87,22 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                     <tr
                       key={r.id}
                       onClick={() => onOpen(r)}
-                      className={`group cursor-pointer transition-colors ${active ? 'bg-brand-soft/70' : isSel ? 'bg-brand-tint' : 'hover:bg-canvas'}`}
-                      aria-selected={active}
+                      // Rows open with the keyboard too (Tab to a row, then Enter or Space).
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onOpen(r);
+                        }
+                      }}
+                      aria-current={active ? 'true' : undefined}
+                      className={`group cursor-pointer transition-colors outline-none focus-visible:bg-brand-tint focus-visible:shadow-[inset_0_0_0_2px_var(--color-brand)] ${
+                        active ? 'bg-brand-soft/70' : isSel ? 'bg-brand-tint' : 'hover:bg-canvas'
+                      }`}
                     >
                       {selectable && (
-                        <td className="pr-4 py-3 border-b border-line-2 relative" onClick={(e) => e.stopPropagation()}>
+                        <td className="pr-4 py-3 border-b border-line-2 relative" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                           {active && <span className="absolute right-0 top-2 bottom-2 w-[3px] rounded-l-full bg-brand" />}
                           <Checkbox checked={Boolean(isSel)} onChange={() => onToggle?.(r.id)} />
                         </td>
@@ -172,11 +183,17 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                     role="button"
                     tabIndex={0}
                     onClick={() => onOpen(r)}
-                    onKeyDown={(e) => e.key === 'Enter' && onOpen(r)}
+                    onKeyDown={(e) => {
+                      if (e.target !== e.currentTarget) return; // keys on the checkbox stay with the checkbox
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onOpen(r);
+                      }
+                    }}
                     className={`hv-card p-3.5 flex items-center gap-3 active:bg-canvas ${isSel ? 'ring-2 ring-brand/40' : ''}`}
                   >
                     {selectable && (
-                      <span onClick={(e) => e.stopPropagation()}>
+                      <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                         <Checkbox checked={Boolean(isSel)} onChange={() => onToggle?.(r.id)} />
                       </span>
                     )}

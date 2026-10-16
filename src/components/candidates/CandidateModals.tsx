@@ -33,7 +33,9 @@ export function MessageModal({
   onClose: () => void;
   onSent?: (r: ResumeListItem) => void;
 }) {
-  const [kind, setKind] = useState<MessageKind>('INTERVIEW_INVITE');
+  // The right message type from the start: seeding it in an effect would
+  // first request (and pay for) an AI draft of the wrong type.
+  const [kind, setKind] = useState<MessageKind>(() => (record ? defaultKind(record) : 'INTERVIEW_INVITE'));
   const [draft, setDraft] = useState<DraftMessage | null>(null);
   const [subject, setSubject] = useState('');
   const [body, setBody] = useState('');
@@ -42,35 +44,36 @@ export function MessageModal({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (record) setKind(defaultKind(record));
-  }, [record?.id]);
-
-  useEffect(() => {
     if (!record) return;
-    let alive = true;
+    const controller = new AbortController(); // switching type cancels the previous draft
     setLoading(true);
     setDraft(null);
     api.messages
-      .draft(record.id, kind)
+      .draft(record.id, kind, { signal: controller.signal })
       .then((d) => {
-        if (!alive) return;
+        if (controller.signal.aborted) return;
         setDraft(d);
         setSubject(d.subject);
         setBody(d.body);
       })
-      .catch((e) => toast(e?.message || 'تهیه پیش‌نویس ممکن نشد.', 'error'))
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
+      .catch((e) => {
+        if (controller.signal.aborted) return;
+        toast(e?.message || 'تهیه پیش‌نویس ممکن نشد.', 'error');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record?.id, kind]);
 
   if (!record) return null;
   const phone = record.contact?.phone;
   const email = record.contact?.email;
-  const wa = whatsappLink(phone, body);
-  const sms = smsLink(phone, body);
-  const mail = mailLink(email, subject, body);
+  // No links to the previous type's text while the new draft is loading.
+  const wa = loading ? null : whatsappLink(phone, body);
+  const sms = loading ? null : smsLink(phone, body);
+  const mail = loading ? null : mailLink(email, subject, body);
 
   const copy = async () => {
     if (await copyText(`${subject}\n\n${body}`)) {
@@ -185,6 +188,8 @@ export function TalentModal({
     setDept([record.bankDepartmentId, record.departmentId].find(known) || org?.departments[0]?.id || '');
     setNote(record.bankNote || '');
     setTags(Array.from(new Set([...(record.bankTags || []), ...record.tags])).slice(0, 8));
+    // Seed once per candidate: later refreshes of `record`/`org` must not wipe the form.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record?.id]);
 
   if (!record || !org) return null;

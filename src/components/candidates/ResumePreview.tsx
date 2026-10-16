@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, ExternalLink, FileText, FileWarning, RefreshCw } from 'lucide-react';
 import type { ResumeRecord } from '../../types/screening';
 import { api, openResumeFile, type FileUrlInfo } from '../../lib/api';
@@ -15,20 +15,27 @@ export function ResumePreview({ record, className = '' }: { record: ResumeRecord
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
 
+  const requestRef = useRef(0);
   const load = useCallback(async () => {
+    const request = ++requestRef.current; // only the latest load may update the view
     setState('loading');
     setError(null);
     setText(null);
     try {
       const i = await api.resumes.fileUrl(record.id, true);
-      setInfo(i);
+      if (request !== requestRef.current) return;
+      let body: string | null = null;
       if (i.hasFile && i.url && (i.ext === 'txt' || i.ext === 'md')) {
         const res = await fetch(i.url);
         if (!res.ok) throw new Error(`دریافت فایل ممکن نشد (${res.status})`);
-        setText((await res.text()).slice(0, 80_000));
+        body = (await res.text()).slice(0, 80_000);
       }
+      if (request !== requestRef.current) return;
+      setInfo(i);
+      setText(body);
       setState('ready');
     } catch (e: any) {
+      if (request !== requestRef.current) return;
       setError(e?.message || 'نمایش فایل ممکن نشد.');
       setState('error');
     }
@@ -55,7 +62,9 @@ export function ResumePreview({ record, className = '' }: { record: ResumeRecord
           <FileText className="w-[18px] h-[18px] text-ink-3" strokeWidth={1.7} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-bold text-ink truncate hv-latin text-right">{record.fileName}</p>
+          <p className="text-[13px] font-bold text-ink truncate text-right" dir="auto" title={record.fileName}>
+            {record.fileName}
+          </p>
           <p className="text-[11.5px] text-ink-3">
             {state === 'loading' ? 'در حال آماده‌سازی پیش‌نمایش…' : kind === 'pdf' ? 'پیش‌نمایش PDF' : kind === 'image' ? 'تصویر رزومه' : kind === 'text' ? 'متن فایل' : kind === 'none' ? 'فایل اصلی ذخیره نشده است' : 'پیش‌نمایش این قالب در مرورگر ممکن نیست'}
           </p>
@@ -100,7 +109,7 @@ export function ResumePreview({ record, className = '' }: { record: ResumeRecord
                   ? error
                   : kind === 'none'
                   ? 'فایل اصلی این رزومه روی سرور ذخیره نشده است؛ متن استخراج‌شده در ادامه آمده است.'
-                  : 'فایل‌های Word را می‌توانید دانلود کنید. متن استخراج‌شده در ادامه آمده است.'}
+                  : 'مرورگر نمی‌تواند این قالب را نمایش دهد؛ فایل اصلی را دانلود کنید. متن استخراج‌شده در ادامه آمده است.'}
               </p>
             </div>
             <div className="hv-card p-4">

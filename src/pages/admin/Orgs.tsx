@@ -208,7 +208,8 @@ export default function Orgs() {
             </Button>
             <Button
               loading={busy}
-              onClick={() => dialog?.kind === 'rename' && run(async () => replace((await adminApi.updateOrg(dialog.org.id, { name: text })).org), 'نام به‌روز شد.')}
+              disabled={text.trim().length < 2 || (dialog?.kind === 'rename' && text.trim() === dialog.org.name)}
+              onClick={() => dialog?.kind === 'rename' && run(async () => replace((await adminApi.updateOrg(dialog.org.id, { name: text.trim() })).org), 'نام به‌روز شد.')}
             >
               ذخیره
             </Button>
@@ -239,6 +240,7 @@ export default function Orgs() {
         description="همه اعضا، فرصت‌های شغلی، رزومه‌ها و فایل‌های این فضای کاری برای همیشه پاک می‌شوند. این کار برگشت‌پذیر نیست."
         confirmLabel="حذف برای همیشه"
         loading={busy}
+        confirmDisabled={dialog?.kind !== 'delete' || text.trim() !== dialog.org.name.trim()}
         onConfirm={() =>
           dialog?.kind === 'delete' &&
           run(async () => {

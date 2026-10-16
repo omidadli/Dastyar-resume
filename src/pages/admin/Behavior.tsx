@@ -20,6 +20,7 @@ import { adminApi, fileToBase64 } from '../../lib/api';
 import { normalizeImageFile } from '../../lib/extractText';
 import { useAsync } from '../../lib/useAsync';
 import { faNumber } from '../../lib/format';
+import { matchesSearch } from '../../lib/normalizeFa';
 import type { BehaviorConfig, BehaviorPayload, BehaviorSectionKey, IndustryProfile, LabResult, Strictness } from '../../types/admin';
 import type { CandidateEvaluation } from '../../types/screening';
 import { AdminHeader, faDateTime, useDebounced } from './shared';
@@ -56,6 +57,30 @@ const parseLines = (v: string) =>
     .map((x) => x.trim())
     .filter(Boolean);
 
+/**
+ * «One item per line» editor. Keeps the raw text while typing — deriving the
+ * value from the parsed list would swallow a trailing space or a fresh empty
+ * line, making multi-word items and new lines impossible to type.
+ */
+function LinesArea({ label, rows, value, onChange }: { label: string; rows: number; value: string[]; onChange: (v: string[]) => void }) {
+  const [text, setText] = useState(() => lines(value));
+  useEffect(() => {
+    // Follow outside changes (reset to default, restore) only.
+    setText((t) => (JSON.stringify(parseLines(t)) === JSON.stringify(value) ? t : lines(value)));
+  }, [value]);
+  return (
+    <TextArea
+      label={label}
+      rows={rows}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        onChange(parseLines(e.target.value));
+      }}
+    />
+  );
+}
+
 export default function Behavior() {
   const { data, error, reload, setData } = useAsync(() => adminApi.behavior(), []);
   const [tab, setTab] = useState<Tab>('rules');
@@ -63,6 +88,7 @@ export default function Behavior() {
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [restoreVersion, setRestoreVersion] = useState<number | null>(null);
 
   useEffect(() => {
     if (data && !draft) setDraft(data.config);
@@ -105,7 +131,9 @@ export default function Behavior() {
     <div className={dirty ? 'pb-24' : ''}>
       <AdminHeader
         title="رفتار هوش مصنوعی"
-        subtitle="هر چیزی که شیوه خواندن و قضاوت رزومه‌ها را شکل می‌دهد — اصول، روش امتیازدهی، قواعد خواندن هر نوع سند، انصاف و راهنمای تخصصی ۲۷ صنعت — اینجا قابل ویرایش، نسخه‌دار و آزمایش‌پذیر است."
+        subtitle={`هر چیزی که شیوه خواندن و قضاوت رزومه‌ها را شکل می‌دهد — اصول، روش امتیازدهی، قواعد خواندن هر نوع سند، انصاف و راهنمای تخصصی ${faNumber(
+          draft.industries.length
+        )} صنعت — اینجا قابل ویرایش، نسخه‌دار و آزمایش‌پذیر است.`}
         actions={
           <Chip tone="brand" icon={Layers}>
             نسخه فعال: {faNumber(data.config.version)}
@@ -129,17 +157,7 @@ export default function Behavior() {
       {tab === 'industries' && <IndustriesTab draft={draft} defaults={data.defaults} onChange={setDraft} />}
       {tab === 'lab' && <LabTab draft={draft} dirty={dirty} />}
       {tab === 'history' && (
-        <HistoryTab
-          payload={data}
-          onRestore={async (v) => {
-            try {
-              accept(await adminApi.restoreBehavior(v), `نسخه ${faNumber(v)} بازگردانده شد.`);
-            } catch (err: any) {
-              toast(err?.message || 'بازگردانی نشد.', 'error');
-            }
-          }}
-          onResetAll={() => setConfirmReset(true)}
-        />
+        <HistoryTab payload={data} onRestore={setRestoreVersion} onResetAll={() => setConfirmReset(true)} />
       )}
 
       {dirty && (
@@ -171,15 +189,36 @@ export default function Behavior() {
         open={confirmReset}
         onClose={() => setConfirmReset(false)}
         title="بازگردانی کامل به تنظیمات پیش‌فرض"
-        description="همه دستورالعمل‌ها و فهرست صنایع به حالت اولیه هویدا برمی‌گردند (به‌صورت یک نسخه تازه؛ نسخه‌های قبلی در تاریخچه می‌مانند)."
+        description={`همه دستورالعمل‌ها و فهرست صنایع به حالت اولیه هویدا برمی‌گردند (به‌صورت یک نسخه تازه؛ نسخه‌های قبلی در تاریخچه می‌مانند).${
+          dirty ? ' تغییرات ذخیره‌نشده شما هم کنار گذاشته می‌شود.' : ''
+        }`}
         confirmLabel="بازگردانی"
         tone="primary"
         onConfirm={async () => {
-          setConfirmReset(false);
           try {
             accept(await adminApi.resetBehavior(), 'تنظیمات پیش‌فرض بازگردانده شد.');
+            setConfirmReset(false);
           } catch (err: any) {
             toast(err?.message || 'انجام نشد.', 'error');
+          }
+        }}
+      />
+      <ConfirmDialog
+        open={restoreVersion !== null}
+        onClose={() => setRestoreVersion(null)}
+        title={`بازگردانی نسخه ${faNumber(restoreVersion ?? 0)}`}
+        description={`محتوای این نسخه به‌صورت نسخه‌ای تازه فعال می‌شود و از رزومه بعدی اعمال می‌شود.${
+          dirty ? ' تغییرات ذخیره‌نشده شما کنار گذاشته می‌شود.' : ''
+        }`}
+        confirmLabel="بازگردانی"
+        tone={dirty ? 'danger' : 'primary'}
+        onConfirm={async () => {
+          if (restoreVersion === null) return;
+          try {
+            accept(await adminApi.restoreBehavior(restoreVersion), `نسخه ${faNumber(restoreVersion)} بازگردانده شد.`);
+            setRestoreVersion(null);
+          } catch (err: any) {
+            toast(err?.message || 'بازگردانی نشد.', 'error');
           }
         }}
       />
@@ -279,10 +318,11 @@ function IndustriesTab({ draft, defaults, onChange }: { draft: BehaviorConfig; d
   }, [debRole, debDept, JSON.stringify(draft.industries), draft.autoIndustry]);
 
   const update = (id: string, patch: Partial<IndustryProfile>) => onChange({ ...draft, industries: draft.industries.map((i) => (i.id === id ? { ...i, ...patch } : i)) });
-  const filtered = draft.industries.filter((i) => !q.trim() || i.name.includes(q.trim()) || i.keywords.some((k) => k.toLowerCase().includes(q.trim().toLowerCase())));
+  const filtered = draft.industries.filter((i) => !q.trim() || matchesSearch([i.name, ...i.keywords], q));
 
   const addCustom = () => {
     const id = `custom-${Date.now().toString(36)}`;
+    setQ(''); // the new entry must not be hidden by the current search
     onChange({
       ...draft,
       industries: [{ id, name: 'صنعت تازه', enabled: true, builtin: false, keywords: [], competencies: [], evidence: [], credentials: [], redFlags: [], notes: '' }, ...draft.industries],
@@ -346,13 +386,13 @@ function IndustriesTab({ draft, defaults, onChange }: { draft: BehaviorConfig; d
                 <div className="px-4 pb-4 pt-1 border-t border-line-2 grid gap-3">
                   <div className="grid sm:grid-cols-2 gap-3 mt-3">
                     <TextInput label="نام صنعت" value={ind.name} onChange={(e) => update(ind.id, { name: e.target.value })} />
-                    <TextArea label="کلیدواژه‌ها (هر خط یک مورد)" rows={3} value={lines(ind.keywords)} onChange={(e) => update(ind.id, { keywords: parseLines(e.target.value) })} />
+                    <LinesArea label="کلیدواژه‌ها (هر خط یک مورد)" rows={3} value={ind.keywords} onChange={(v) => update(ind.id, { keywords: v })} />
                   </div>
                   <div className="grid sm:grid-cols-2 gap-3">
-                    <TextArea label="شایستگی‌های کلیدی" rows={5} value={lines(ind.competencies)} onChange={(e) => update(ind.id, { competencies: parseLines(e.target.value) })} />
-                    <TextArea label="شاهدهای معتبر" rows={5} value={lines(ind.evidence)} onChange={(e) => update(ind.id, { evidence: parseLines(e.target.value) })} />
-                    <TextArea label="مدارک و گواهی‌های رایج" rows={4} value={lines(ind.credentials)} onChange={(e) => update(ind.id, { credentials: parseLines(e.target.value) })} />
-                    <TextArea label="نشانه‌های نیازمند بررسی" rows={4} value={lines(ind.redFlags)} onChange={(e) => update(ind.id, { redFlags: parseLines(e.target.value) })} />
+                    <LinesArea label="شایستگی‌های کلیدی" rows={5} value={ind.competencies} onChange={(v) => update(ind.id, { competencies: v })} />
+                    <LinesArea label="شاهدهای معتبر" rows={5} value={ind.evidence} onChange={(v) => update(ind.id, { evidence: v })} />
+                    <LinesArea label="مدارک و گواهی‌های رایج" rows={4} value={ind.credentials} onChange={(v) => update(ind.id, { credentials: v })} />
+                    <LinesArea label="نشانه‌های نیازمند بررسی" rows={4} value={ind.redFlags} onChange={(v) => update(ind.id, { redFlags: v })} />
                   </div>
                   <TextArea label="نکته تکمیلی" optional rows={2} value={ind.notes} onChange={(e) => update(ind.id, { notes: e.target.value })} />
                   <div className="flex flex-wrap gap-2 justify-end">
@@ -466,7 +506,14 @@ function LabTab({ draft, dirty }: { draft: BehaviorConfig; dirty: boolean }) {
                 حذف
               </button>
             )}
-            <input type="file" className="hidden" onChange={(e) => setFile(e.target.files?.[0] || null)} />
+            <input
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                setFile(e.target.files?.[0] || null);
+                e.target.value = ''; // picking the same file again still fires onChange
+              }}
+            />
           </label>
           <div className="flex flex-wrap items-center gap-4 justify-between">
             <Segmented
@@ -540,7 +587,7 @@ function LabTab({ draft, dirty }: { draft: BehaviorConfig; dirty: boolean }) {
                           <div className="h-1.5 rounded-full bg-line-2 overflow-hidden mt-1">
                             <div className="h-full bg-brand rounded-full" style={{ width: `${c.score}%` }} />
                           </div>
-                          <p className="text-[11.5px] text-ink-3 mt-1 leading-relaxed">«{c.evidence}»</p>
+                          {c.evidence && <p className="text-[11.5px] text-ink-3 mt-1 leading-relaxed">«{c.evidence}»</p>}
                         </div>
                       ))}
                     </div>
@@ -570,7 +617,7 @@ function EvidenceList({ title, items, tone }: { title: string; items: Array<{ po
           {items.map((it, i) => (
             <li key={i} className="text-[12.5px] leading-relaxed">
               <p className="font-semibold text-ink-2">{it.point}</p>
-              <p className="text-ink-3 text-[11.5px]">«{it.evidence}»</p>
+              {it.evidence && <p className="text-ink-3 text-[11.5px]">«{it.evidence}»</p>}
             </li>
           ))}
         </ul>

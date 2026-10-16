@@ -286,7 +286,7 @@ export const api = {
       ),
     get: (id: string, opts?: RequestOptions) => get<{ record: ResumeRecord; job: Job | null }>(`/api/resumes/${id}`, opts),
     compare: (ids: string[]) =>
-      get<{ job: Job; items: ResumeListItem[]; droppedOtherJobs: boolean }>(`/api/resumes/compare?ids=${ids.map(encodeURIComponent).join(',')}`),
+      get<{ job: Job; items: ResumeListItem[]; droppedOtherJobs: boolean; missingIds?: string[] }>(`/api/resumes/compare?ids=${ids.map(encodeURIComponent).join(',')}`),
     decide: (id: string, status: DecisionStatus, note?: string | null) =>
       patch<{ record: ResumeListItem }>(`/api/resumes/${id}`, { action: 'decision', status, note: note ?? null }),
     markMessageSent: (id: string, kind: MessageKind) => patch<{ record: ResumeListItem }>(`/api/resumes/${id}`, { action: 'message-sent', kind }),
@@ -303,7 +303,8 @@ export const api = {
     fileUrl: (id: string, inline: boolean) => get<FileUrlInfo>(`/api/resumes/${id}/file-url${inline ? '?inline=1' : ''}`),
   },
   messages: {
-    draft: (resumeId: string, kind: MessageKind) => post<DraftMessage>('/api/messages/draft', { resumeId, kind }, { timeoutMs: 40_000 }),
+    draft: (resumeId: string, kind: MessageKind, opts?: RequestOptions) =>
+      post<DraftMessage>('/api/messages/draft', { resumeId, kind }, { timeoutMs: 40_000, ...opts }),
   },
   talent: {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),

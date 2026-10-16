@@ -12,7 +12,7 @@ import { MATCH_FILTERS } from '../lib/match';
 import { navigate, setQuery, useLocation } from '../lib/router';
 import { useAsync, useDebounced } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import type { Criterion, DecisionFilter, MatchFilter, ResumeListItem, ResumeSort } from '../types/screening';
+import type { DecisionFilter, MatchFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
 type Tab = 'pending' | 'all' | 'approved' | 'review' | 'rejected';
 const TAB_TO_DECISION: Record<Tab, DecisionFilter> = { pending: 'pending', all: 'all', approved: 'approved', review: 'review', rejected: 'rejected' };
@@ -21,12 +21,14 @@ export default function Candidates() {
   useTitle('رزومه‌ها');
   const { org } = useAuth();
   const { query } = useLocation();
-  const tab = (query.get('tab') as Tab) || 'pending';
-  const [jobId, setJobId] = useState(query.get('job') || '');
+  const rawTab = query.get('tab');
+  const tab: Tab = rawTab && rawTab in TAB_TO_DECISION ? (rawTab as Tab) : 'pending';
+  // The opening filter lives in the URL (?job=) so links and Back/Forward keep it.
+  const jobId = query.get('job') || '';
   const [dept, setDept] = useState('');
   const [range, setRange] = useState('all');
   const [match, setMatch] = useState<MatchFilter>('all');
-  const [sort, setSort] = useState<ResumeSort>('match');
+  const [sort, setSort] = useState<ResumeSort>(() => (tab === 'approved' || tab === 'rejected' || tab === 'review' ? 'decided' : 'match'));
   const [qInput, setQInput] = useState('');
   const q = useDebounced(qInput, 250);
   const [page, setPage] = useState(1);
@@ -37,6 +39,11 @@ export default function Candidates() {
   }, [tab]);
 
   const jobsQ = useAsync(() => api.jobs.list(), []);
+  // A link to an opening that has since been deleted: drop the filter rather
+  // than show an empty list under «همه فرصت‌ها».
+  useEffect(() => {
+    if (jobId && jobsQ.data && !jobsQ.data.items.some((j) => j.id === jobId)) setQuery({ job: null });
+  }, [jobId, jobsQ.data]);
   const listQ = useAsync(
     (signal) =>
       api.resumes.list(
@@ -58,15 +65,6 @@ export default function Candidates() {
   useOnChange(['resumes'], () => listQ.reload());
 
   const [selected, setSelected] = useState<ResumeListItem | null>(null);
-  const [criteria, setCriteria] = useState<Criterion[] | undefined>(undefined);
-  useEffect(() => {
-    if (!selected) return;
-    setCriteria(undefined);
-    api.jobs
-      .get(selected.jobId)
-      .then(({ job }) => setCriteria(job.understanding.criteria))
-      .catch(() => {});
-  }, [selected?.jobId]);
 
   const counts = listQ.data?.counts;
   const items = listQ.data?.items || [];
@@ -100,7 +98,7 @@ export default function Candidates() {
                 compact
                 aria-label="فرصت شغلی"
                 value={jobId}
-                onChange={(e) => setJobId(e.target.value)}
+                onChange={(e) => setQuery({ job: e.target.value || null })}
                 options={[{ value: '', label: 'همه فرصت‌ها' }, ...(jobsQ.data?.items || []).map((j) => ({ value: j.id, label: j.roleTitle }))]}
               />
               <Select
@@ -168,7 +166,7 @@ export default function Candidates() {
                     }
                     compact
                   />
-                ) : tab === 'pending' && !q && !jobId && !dept ? (
+                ) : tab === 'pending' && !q && !jobId && !dept && range === 'all' ? (
                   <EmptyState icon={CheckCircle2} title="کاری در صف تصمیم نیست" description="برای همه کاندیداهای با تطابق بالا یا نیازمند بررسی تصمیم ثبت شده است." compact />
                 ) : (
                   <EmptyState icon={Users} title="کاندیدایی پیدا نشد" description="فیلترها را تغییر دهید یا عبارت دیگری جست‌وجو کنید." compact />
@@ -187,8 +185,8 @@ export default function Candidates() {
       <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} width={520} label="جزئیات کاندید">
         {selected && (
           <CandidatePanel
+            key={selected.id}
             record={selected}
-            criteria={criteria}
             jobTitle={selected.roleTitle || undefined}
             onChange={update}
             onDeleted={() => {

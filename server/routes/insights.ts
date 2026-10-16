@@ -43,9 +43,9 @@ export function insightRoutes(): express.Router {
     const q = req.query;
     res.json(
       db.queryTalent(org.id, {
-        departmentId: q.departmentId ? String(q.departmentId) : undefined,
+        departmentId: str(q.departmentId, 80) || undefined,
         q: str(q.q, 120) || undefined,
-        tags: q.tags ? String(q.tags).split(',').map((t) => t.trim()).filter(Boolean) : undefined,
+        tags: str(q.tags, 600) ? str(q.tags, 600).split(',').map((t) => t.trim()).filter(Boolean) : undefined,
         minScore: q.minScore ? int(q.minScore) : undefined,
         minYears: q.minYears ? int(q.minYears) : undefined,
         sort: oneOf(q.sort, ['newest', 'score', 'experience'] as const, 'newest'),

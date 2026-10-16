@@ -34,7 +34,8 @@ import type { Criterion, DecisionStatus, EvidencePoint, ResumeListItem } from '.
 import { api, openResumeFile } from '../../lib/api';
 import { emitChange } from '../../lib/events';
 import { copyText } from '../../lib/clipboard';
-import { isInCompare, toggleCompare, useCompare } from '../../lib/compare';
+import { isInCompare, removeFromCompare, toggleCompare, useCompare } from '../../lib/compare';
+import { toEnglishDigits } from '../../lib/normalizeFa';
 import { navigate } from '../../lib/router';
 import { candidateName, faDate, faNumber, faRelative, toPersianDigits } from '../../lib/format';
 import { DECISION_META, matchMeta } from '../../lib/match';
@@ -174,15 +175,21 @@ export function DecisionBar({ record, onChange, compact, short }: { record: Resu
     try {
       const { record: updated } = await api.resumes.decide(record.id, status, note ?? null);
       onChange(updated);
+      setRejectOpen(false); // only on success — a failed request keeps the typed note
       emitChange('resumes', record.jobId);
       emitChange('activity');
       if (status !== 'none') {
         toast(`«${candidateName(record)}» ${DECISION_META[status].label} ثبت شد.`, 'success', {
           label: 'بازگردانی',
-          onClick: async () => {
-            const { record: restored } = await api.resumes.decide(prev.id, prev.decisionStatus, prev.decisionNote);
-            onChange(restored);
-            emitChange('resumes', record.jobId);
+          onClick: () => {
+            api.resumes
+              .decide(prev.id, prev.decisionStatus, prev.decisionNote)
+              .then(({ record: restored }) => {
+                onChange(restored);
+                emitChange('resumes', prev.jobId);
+                emitChange('activity');
+              })
+              .catch((e: any) => toast(e?.message || 'بازگردانی تصمیم ممکن نشد.', 'error'));
           },
         });
       }
@@ -190,7 +197,6 @@ export function DecisionBar({ record, onChange, compact, short }: { record: Resu
       toast(e?.message || 'ثبت تصمیم ممکن نشد.', 'error');
     } finally {
       setBusy(null);
-      setRejectOpen(false);
     }
   };
 
@@ -261,7 +267,26 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
 
   useEffect(() => setTab('summary'), [record.id]);
 
+  // Opened outside its job page (رزومه‌ها، بانک استعداد): fetch the opening's
+  // criteria so weights and «الزامی» marks still show.
+  const [fetchedCriteria, setFetchedCriteria] = useState<Criterion[] | undefined>(undefined);
+  useEffect(() => {
+    if (criteria) return;
+    let alive = true;
+    api.jobs
+      .get(record.jobId)
+      .then(({ job }) => {
+        if (alive) setFetchedCriteria(job.understanding.criteria);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [criteria, record.jobId]);
+  const jobCriteria = criteria ?? fetchedCriteria;
+
   const rerun = async (mode: 'standard' | 'deep') => {
+    if (rerunning) return; // one re-analysis at a time
     setRerunning(mode);
     try {
       const res = mode === 'deep' ? await api.resumes.deepRerun(record.id) : await api.resumes.rerun(record.id);
@@ -294,6 +319,7 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
   const doDelete = async () => {
     try {
       await api.resumes.remove(record.id);
+      removeFromCompare(record.id);
       emitChange('resumes', record.jobId);
       toast('رزومه و فایل اصلی آن برای همیشه حذف شد.');
       setConfirmDelete(false);
@@ -372,12 +398,12 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
             items={[
               { label: 'ارسال پیام', icon: MessageSquareText, onClick: () => setMessageOpen(true) },
               record.inBank
-                ? { label: 'خروج از بانک استعداد', icon: ArchiveX, onClick: removeTalent }
+                ? { label: 'خروج از بانک استعداد', icon: ArchiveX, onClick: () => void removeTalent() }
                 : { label: 'افزودن به بانک استعداد', icon: Archive, onClick: () => setTalentOpen(true) },
-              { label: 'دانلود فایل اصلی', icon: Download, onClick: download, disabled: !record.filePath },
+              { label: 'دانلود فایل اصلی', icon: Download, onClick: () => void download(), disabled: !record.filePath },
               'divider',
-              { label: 'تحلیل دوباره', icon: RefreshCw, onClick: () => rerun('standard') },
-              { label: 'بازبینی دقیق', icon: ScanSearch, onClick: () => rerun('deep'), hint: 'کندتر' },
+              { label: 'تحلیل دوباره', icon: RefreshCw, onClick: () => void rerun('standard'), disabled: rerunning !== null },
+              { label: 'بازبینی دقیق', icon: ScanSearch, onClick: () => void rerun('deep'), hint: 'کندتر', disabled: rerunning !== null },
               'divider',
               { label: 'حذف رزومه', icon: Trash2, tone: 'danger', onClick: () => setConfirmDelete(true) },
             ]}
@@ -430,7 +456,14 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
               <Callout tone="warning" title={meta.label}>
                 {record.unjudgeableReason || record.errorMessage || meta.hint}
                 <div className="mt-2">
-                  <Button size="sm" variant="secondary" icon={RefreshCw} loading={rerunning === 'standard'} onClick={() => rerun('standard')}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={RefreshCw}
+                    loading={rerunning === 'standard'}
+                    disabled={rerunning === 'deep'}
+                    onClick={() => void rerun('standard')}
+                  >
                     تلاش دوباره برای تحلیل
                   </Button>
                 </div>
@@ -519,7 +552,7 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
             </section>
             <section>
               <SectionTitle icon={Columns3}>سنجش معیارهای فرصت شغلی</SectionTitle>
-              <CriteriaBars record={record} criteria={criteria} />
+              <CriteriaBars record={record} criteria={jobCriteria} />
             </section>
             {record.tags.length > 0 && (
               <section>
@@ -581,7 +614,7 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
           <div className="flex flex-col gap-6">
             <section>
               <SectionTitle icon={Phone}>اطلاعات تماس</SectionTitle>
-              <ContactRow icon={Phone} value={record.contact?.phone} href={record.contact?.phone ? `tel:${record.contact.phone}` : undefined} />
+              <ContactRow icon={Phone} value={record.contact?.phone} href={telHref(record.contact?.phone)} />
               <ContactRow icon={Mail} value={record.contact?.email} href={record.contact?.email ? `mailto:${record.contact.email}` : undefined} />
               <div className="mt-3">
                 <Button size="sm" variant="secondary" icon={MessageSquareText} onClick={() => setMessageOpen(true)}>
@@ -599,7 +632,9 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
                   <FileText className="w-5 h-5 text-ink-3" strokeWidth={1.7} />
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[13px] font-semibold text-ink truncate hv-latin text-right">{record.fileName}</p>
+                  <p className="text-[13px] font-semibold text-ink truncate text-right" dir="auto" title={record.fileName}>
+                    {record.fileName}
+                  </p>
                   <p className="text-[11.5px] text-ink-3">
                     {record.fileSize ? `${faNumber(Math.max(1, Math.round(record.fileSize / 1024)))} کیلوبایت · ` : ''}
                     دریافت {faRelative(record.createdAtISO)}
@@ -646,10 +681,24 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
               )}
             </section>
             <section className="flex flex-wrap gap-2 pt-1">
-              <Button size="sm" variant="secondary" icon={RefreshCw} loading={rerunning === 'standard'} onClick={() => rerun('standard')}>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={RefreshCw}
+                loading={rerunning === 'standard'}
+                disabled={rerunning === 'deep'}
+                onClick={() => void rerun('standard')}
+              >
                 تحلیل دوباره
               </Button>
-              <Button size="sm" variant="secondary" icon={ScanSearch} loading={rerunning === 'deep'} onClick={() => rerun('deep')}>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon={ScanSearch}
+                loading={rerunning === 'deep'}
+                disabled={rerunning === 'standard'}
+                onClick={() => void rerun('deep')}
+              >
                 بازبینی دقیق
               </Button>
               <Button size="sm" variant="danger-soft" icon={Trash2} onClick={() => setConfirmDelete(true)}>
@@ -672,6 +721,15 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
       />
     </div>
   );
+}
+
+/** `tel:` links need Latin digits and nothing but digits and a leading «+». */
+function telHref(phone: string | null | undefined): string | undefined {
+  if (!phone) return undefined;
+  const digits = toEnglishDigits(phone)
+    .replace(/[^\d+]/g, '')
+    .replace(/(?!^)\+/g, '');
+  return digits.replace(/\+/g, '').length >= 5 ? `tel:${digits}` : undefined;
 }
 
 function ContactRow({ icon: Icon, value, href }: { icon: LucideIcon; value: string | null | undefined; href?: string }) {

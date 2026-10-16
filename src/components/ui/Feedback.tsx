@@ -5,8 +5,8 @@ import { Button } from './Button';
 export function Spinner({ className = 'w-5 h-5', label }: { className?: string; label?: string }) {
   return (
     <span className="inline-flex items-center gap-2 text-ink-3" role="status">
-      <Loader2 className={`${className} animate-spin text-brand`} />
-      {label && <span className="text-[13px] font-medium">{label}</span>}
+      <Loader2 className={`${className} animate-spin text-brand`} aria-hidden />
+      {label ? <span className="text-[13px] font-medium">{label}</span> : <span className="sr-only">در حال بارگذاری…</span>}
     </span>
   );
 }
@@ -44,7 +44,7 @@ export function EmptyState({
 
 export function ErrorState({ message, onRetry, className = '' }: { message: string; onRetry?: () => void; className?: string }) {
   return (
-    <div className={`flex flex-col items-center text-center py-12 px-6 ${className}`}>
+    <div className={`flex flex-col items-center text-center py-12 px-6 ${className}`} role="alert">
       <div className="w-12 h-12 rounded-[14px] bg-low-soft flex items-center justify-center mb-3">
         <AlertTriangle className="w-6 h-6 text-low-ink" strokeWidth={1.7} />
       </div>

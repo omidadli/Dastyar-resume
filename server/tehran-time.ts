@@ -1,8 +1,9 @@
 /**
- * Asia/Tehran wall-clock helper (audit fix LOC-03).
- * The server may run in any timezone (the sandbox runs UTC, 3.5h behind
- * Tehran); every attendance timestamp, Jalali "today" and legal deadline must
- * be based on Iranian local time, not the host clock.
+ * Asia/Tehran wall-clock helper.
+ * The server may run in any timezone (Render runs UTC, 3.5h behind Tehran);
+ * every Jalali stamp (resume received, message sent), Jalali "today" and the
+ * date filters of lists and reports must follow Iranian local time, not the
+ * host clock.
  */
 import { JalaliDate, formatJalaliDate, gregorianToJalali, toPersianDigits } from '../src/utils/jalali';
 

@@ -95,13 +95,15 @@ async function exportReport(d: ReportsData) {
     XLSX.utils.json_to_sheet(d.jobs.map((j) => ({ 'فرصت شغلی': j.roleTitle, دپارتمان: j.departmentName, رزومه: j.total, 'تطابق بالا': j.high, تأیید: j.approved, 'میانگین تطابق': j.avgScore }))),
     'فرصت‌ها'
   );
+  wb.Workbook = { ...(wb.Workbook || {}), Views: [{ RTL: true }] }; // opens right-to-left in Excel
   XLSX.writeFile(wb, `گزارش-هویدا-${d.range === 'all' ? 'همه' : d.range + '-روز'}.xlsx`);
 }
 
 export default function Reports() {
   useTitle('گزارش‌ها');
   const { query } = useLocation();
-  const range = (query.get('range') as ReportRange) || '90';
+  const rawRange = query.get('range');
+  const range: ReportRange = RANGES.some((r) => r.id === rawRange) ? (rawRange as ReportRange) : '90';
   const { data, error, loading, reload } = useAsync(() => api.insights.reports(range), [range]);
 
   const dist = data

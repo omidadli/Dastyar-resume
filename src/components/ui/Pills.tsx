@@ -10,7 +10,7 @@ export function MatchPill({ category, size = 'md', className = '' }: { category:
   const Icon = m.icon;
   return (
     <span className={`${PILL} ${m.pill} ${size === 'sm' ? 'h-6 px-2 text-[11.5px]' : 'h-7 px-2.5 text-xs'} ${className}`}>
-      <Icon className={size === 'sm' ? 'w-3.5 h-3.5' : 'w-3.5 h-3.5'} strokeWidth={2.1} />
+      <Icon className="w-3.5 h-3.5" strokeWidth={2.1} />
       {m.label}
     </span>
   );

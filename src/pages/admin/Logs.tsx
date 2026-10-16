@@ -59,7 +59,11 @@ function AuditLog() {
                 {a.detail && <p className="text-[12px] text-ink-3 mt-0.5 break-words">{a.detail}</p>}
               </div>
               <span className="text-[12px] text-ink-3">{a.actorName}</span>
-              {a.ip && <span className="text-[11px] text-ink-4 hv-latin">{a.ip}</span>}
+              {a.ip && (
+                <span className="text-[11px] text-ink-4 hv-latin" dir="ltr">
+                  {a.ip}
+                </span>
+              )}
             </div>
           ))}
         </div>
@@ -124,7 +128,7 @@ function AiCalls() {
                     </td>
                     <td className="px-3 py-2.5 hv-latin text-ink-3">{c.model}</td>
                     <td className="px-3 py-2.5 text-center hv-num">{c.attachments ? faNumber(c.attachments) : '—'}</td>
-                    <td className="px-3 py-2.5 text-center hv-num">{faNumber(c.latencyMs)}ms</td>
+                    <td className="px-3 py-2.5 text-center hv-num whitespace-nowrap">{faNumber(c.latencyMs)} میلی‌ثانیه</td>
                     <td className="px-3 py-2.5">
                       {c.ok ? <span className="text-high-ink font-semibold">موفق</span> : <span className="text-low-ink">{c.error}</span>}
                     </td>

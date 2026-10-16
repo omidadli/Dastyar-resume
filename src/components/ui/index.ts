@@ -6,7 +6,7 @@ export { Monogram } from './Monogram';
 export { Tabs, Segmented } from './Tabs';
 export type { TabItem } from './Tabs';
 export { Field, TextInput, TextArea, Select, SearchInput, Checkbox, Switch } from './Field';
-export { Modal, ConfirmDialog, Drawer } from './Modal';
+export { Modal, ConfirmDialog, Drawer, useEscapeLayer, useLockScroll, useRestoreFocus, trapTabKey } from './Modal';
 export { toast, Toaster } from './Toast';
 export { Spinner, Skeleton, EmptyState, ErrorState, Callout } from './Feedback';
 export { Menu } from './Menu';

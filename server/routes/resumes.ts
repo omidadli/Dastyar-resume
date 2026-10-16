@@ -80,15 +80,15 @@ export function resumeRoutes(): express.Router {
     const q = req.query;
     res.json(
       db.queryResumes(org.id, {
-        jobId: q.jobId ? String(q.jobId) : undefined,
+        jobId: str(q.jobId, 80) || undefined,
         match: oneOf<MatchFilter>(q.match, ['all', 'high', 'review', 'low', 'insufficient'], 'all'),
         decision: oneOf<DecisionFilter>(q.decision, ['all', 'undecided', 'pending', 'approved', 'rejected', 'review'], 'all'),
         q: str(q.q, 120) || undefined,
-        departmentId: q.departmentId ? String(q.departmentId) : undefined,
+        departmentId: str(q.departmentId, 80) || undefined,
         minScore: q.minScore ? int(q.minScore) : undefined,
         minYears: q.minYears ? int(q.minYears) : undefined,
-        fromJalali: q.from ? String(q.from) : undefined,
-        toJalali: q.to ? String(q.to) : undefined,
+        fromJalali: str(q.from, 10) || undefined,
+        toJalali: str(q.to, 10) || undefined,
         sort: oneOf<ResumeSort>(q.sort, ['match', 'newest', 'oldest', 'experience', 'name', 'decided'], 'match'),
         page: q.page ? int(q.page, 1) : 1,
         pageSize: q.pageSize ? int(q.pageSize, 10) : 10,
@@ -98,14 +98,22 @@ export function resumeRoutes(): express.Router {
 
   r.get('/resumes/compare', (req, res) => {
     const { org } = ctxOf(req);
-    const ids = String(req.query.ids || '')
+    const ids = str(req.query.ids, 1000)
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const items = db.getComparable(org.id, ids);
-    if (!items.length) return res.status(404).json({ error: 'کاندیدی برای مقایسه پیدا نشد.' });
+    const wanted = Array.from(new Set(ids)).slice(0, 4);
+    const found = wanted.map((id) => db.getResume(org.id, id)).filter((r): r is ResumeRecord => Boolean(r));
+    const items = db.getComparable(org.id, wanted);
+    if (!items.length) return res.status(404).json({ error: 'کاندیدی برای مقایسه پیدا نشد؛ ممکن است حذف شده باشند.' });
     const job = db.getJob(org.id, items[0].jobId);
-    res.json({ job, items: items.map(db.toListItem), droppedOtherJobs: ids.length > items.length });
+    res.json({
+      job,
+      items: items.map(db.toListItem),
+      // Two different reasons for a shorter list — the page explains each one.
+      droppedOtherJobs: found.length > items.length,
+      missingIds: wanted.filter((id) => !found.some((r) => r.id === id)),
+    });
   });
 
   r.post('/resumes/bulk', (req, res) => {
@@ -212,6 +220,8 @@ export function resumeRoutes(): express.Router {
         intakeWarnings,
         mode,
       });
+      // The AI call takes a while: a teammate may have deleted the resume meanwhile.
+      if (db.getResume(org.id, rec.id) !== rec) return res.status(404).json({ error: 'این رزومه در این فاصله حذف شده است.' });
       db.updateResumeEvaluation(rec, evaluation, mode === 'deep' ? 'deep' : 'rerun');
       // Keep the specific, actionable reason (e.g. «RAR is not supported; send a ZIP»).
       if (unreadable && evaluation.flags.scannedNoText) rec.unjudgeableReason = unreadable;
@@ -258,7 +268,11 @@ export function resumeRoutes(): express.Router {
         return res.status(413).json({ error: `حجم فایل بیش از ${maxMb.toLocaleString('fa-IR')} مگابایت است.` });
       }
       const ok = await db.attachResumeFile(rec, str(req.body?.fileName, 200) || rec.fileName, base64);
-      if (!ok) return res.status(500).json({ error: 'ذخیره فایل ممکن نشد.' });
+      if (!ok) {
+        // Deleted while the file was being written — not a server fault.
+        if (!db.getResume(org.id, rec.id)) return res.status(404).json({ error: 'این رزومه حذف شده است.' });
+        return res.status(500).json({ error: 'ذخیره فایل ممکن نشد.' });
+      }
       res.json({ ok: true });
     })
   );
@@ -269,7 +283,7 @@ export function resumeRoutes(): express.Router {
     const rec = db.getResume(org.id, req.params.id);
     if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
     const ext = fileExt(rec);
-    const inline = String(req.query.inline || '') === '1';
+    const inline = str(req.query.inline, 2) === '1';
     if (!rec.filePath) {
       return res.json({ hasFile: false, url: null, expiresAt: null, fileName: rec.fileName, ext, mimeType: null, previewable: false });
     }
@@ -305,8 +319,8 @@ export function fileRoutes(): express.Router {
   r.get('/files/:id', (req, res) => {
     const id = req.params.id;
     const exp = Number(req.query.exp);
-    const inline = String(req.query.inline || '') === '1';
-    if (!verifyFileSignature(id, exp, inline, String(req.query.sig || ''))) {
+    const inline = str(req.query.inline, 2) === '1';
+    if (!verifyFileSignature(id, exp, inline, str(req.query.sig, 200))) {
       return res.status(403).json({ error: 'پیوند فایل منقضی شده یا نامعتبر است؛ صفحه را تازه کنید.' });
     }
     const rec = db.getResumeUnsafe(id);

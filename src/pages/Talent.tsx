@@ -197,6 +197,7 @@ export default function Talent({ dept }: { dept?: string }) {
       <Drawer open={Boolean(selected)} onClose={() => setSelected(null)} width={520} label="جزئیات کاندید">
         {selected && (
           <CandidatePanel
+            key={selected.id}
             record={selected}
             jobTitle={selected.roleTitle || undefined}
             onChange={update}

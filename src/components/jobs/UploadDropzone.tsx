@@ -151,7 +151,9 @@ export function UploadDropzone({
               return (
                 <li key={`${f.name}_${f.size}_${i}`} className="flex items-center gap-3 px-3.5 py-2">
                   <Icon className="w-4 h-4 text-ink-4 shrink-0" strokeWidth={1.8} />
-                  <span className="flex-1 min-w-0 text-[13px] text-ink-2 truncate hv-latin text-right">{f.name}</span>
+                  <span className="flex-1 min-w-0 text-[13px] text-ink-2 truncate text-right" dir="auto" title={f.name}>
+                    {f.name}
+                  </span>
                   <span className="text-[11.5px] text-ink-4 shrink-0">{formatFileSize(f.size)}</span>
                   <button
                     onClick={() => onChange(files.filter((_, k) => k !== i))}

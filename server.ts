@@ -82,6 +82,10 @@ async function startServer() {
         },
       })
     );
+    // A bundle file the current build doesn't have (a tab opened before a
+    // deploy) must fail as a 404 — never come back as the HTML shell, which
+    // the browser would try to run as JavaScript.
+    app.use('/assets', (_req, res) => res.status(404).type('text/plain').send('Not found'));
     app.get('*', (_req, res) => {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       res.sendFile(path.join(distPath, 'index.html'));
@@ -118,4 +122,23 @@ async function startServer() {
   process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-startServer();
+// Last-resort guards: a stray rejection is logged instead of killing the
+// process mid-request; a truly unexpected exception still exits (the platform
+// restarts the service) — but only after the data on disk is up to date.
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaught exception — saving data and exiting:', err);
+  try {
+    db.flushSaveSync();
+  } catch {
+    /* nothing more we can do */
+  }
+  process.exit(1);
+});
+
+startServer().catch((err) => {
+  console.error('[server] failed to start:', err);
+  process.exit(1);
+});

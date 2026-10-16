@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Ban, CheckCircle2, Copy, KeyRound, LogOut, MoreHorizontal, ShieldCheck, ShieldOff, Trash2, UserCog, Users as UsersIcon, X } from 'lucide-react';
 import { Button, Callout, Chip, ConfirmDialog, EmptyState, ErrorState, Menu, Modal, SearchInput, Segmented, Select, Skeleton, toast } from '../../components/ui';
 import { adminApi } from '../../lib/api';
@@ -12,7 +12,12 @@ import type { Role } from '../../types/app';
 import { AdminHeader, ROLE_LABEL, useDebounced } from './shared';
 
 type Filter = 'all' | 'admins' | 'owners' | 'disabled';
-type Dialog = { kind: 'role'; user: AdminUserRow } | { kind: 'delete'; user: AdminUserRow } | { kind: 'password'; user: AdminUserRow; password: string } | null;
+type Dialog =
+  | { kind: 'role'; user: AdminUserRow }
+  | { kind: 'delete'; user: AdminUserRow }
+  | { kind: 'reset'; user: AdminUserRow }
+  | { kind: 'password'; user: AdminUserRow; password: string }
+  | null;
 
 export default function UsersPage() {
   const { query } = useLocation();
@@ -40,7 +45,13 @@ export default function UsersPage() {
   };
 
   const items = data?.items || [];
-  const orgName = orgId ? items[0]?.orgName : null;
+  // Remember the workspace name: a search with no hits must not turn it into «…».
+  const [orgName, setOrgName] = useState<string | null>(null);
+  const firstOrgName = orgId ? items.find((u) => u.orgId === orgId)?.orgName : undefined;
+  useEffect(() => {
+    if (!orgId) setOrgName(null);
+    else if (firstOrgName) setOrgName(firstOrgName);
+  }, [orgId, firstOrgName]);
 
   return (
     <div>
@@ -148,16 +159,7 @@ export default function UsersPage() {
                                 setDialog({ kind: 'role', user: u });
                               },
                             },
-                            {
-                              label: 'بازنشانی رمز عبور',
-                              icon: KeyRound,
-                              onClick: () =>
-                                void run(async () => {
-                                  const { tempPassword } = await adminApi.resetPassword(u.id);
-                                  setDialog({ kind: 'password', user: u, password: tempPassword });
-                                  reload();
-                                }),
-                            },
+                            { label: 'بازنشانی رمز عبور', icon: KeyRound, onClick: () => setDialog({ kind: 'reset', user: u }) },
                             { label: 'بستن همه نشست‌ها', icon: LogOut, onClick: () => void run(async () => replace((await adminApi.revokeSessions(u.id)).user), 'نشست‌ها بسته شد.') },
                             ...(!isMe && !u.platformAdminViaEnv
                               ? [
@@ -252,6 +254,28 @@ export default function UsersPage() {
           </>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={dialog?.kind === 'reset'}
+        onClose={() => setDialog(null)}
+        title={dialog?.kind === 'reset' ? `بازنشانی رمز «${dialog.user.name}»` : ''}
+        description={
+          dialog?.kind === 'reset' && dialog.user.id === me?.id
+            ? 'رمز فعلی شما از کار می‌افتد و یک رمز موقت ساخته می‌شود؛ نشست‌های شما در دستگاه‌های دیگر بسته می‌شود.'
+            : 'رمز فعلی این کاربر از کار می‌افتد، همه نشست‌هایش بسته می‌شود و یک رمز موقت ساخته می‌شود که باید از راهی امن به او بدهید.'
+        }
+        confirmLabel="ساخت رمز موقت"
+        loading={busy}
+        onConfirm={() =>
+          dialog?.kind === 'reset' &&
+          run(async () => {
+            const target = dialog.user;
+            const { tempPassword } = await adminApi.resetPassword(target.id);
+            setDialog({ kind: 'password', user: target, password: tempPassword });
+            reload();
+          })
+        }
+      />
 
       <ConfirmDialog
         open={dialog?.kind === 'delete'}

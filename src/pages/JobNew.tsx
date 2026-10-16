@@ -1,7 +1,7 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, Check, FileStack, ListChecks, RefreshCw, Sparkles, UploadCloud } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
+import { CriteriaEditor, QuestionsEditor, criterionTitleOk } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
 import { Button, Callout, Card, CardHeader, Chip, Select, Skeleton, Spinner, TextArea, TextInput, toast } from '../components/ui';
 import { api, type JobInput } from '../lib/api';
@@ -31,7 +31,7 @@ function Stepper({ step }: { step: Step }) {
         return (
           <React.Fragment key={s.n}>
             {i > 0 && <span className={`h-px w-6 sm:w-12 shrink-0 ${done || active ? 'bg-brand' : 'bg-line-strong'}`} />}
-            <li className="flex items-center gap-2 shrink-0">
+            <li className="flex items-center gap-2 shrink-0" aria-current={active ? 'step' : undefined}>
               <span
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-extrabold hv-num ${
                   done ? 'bg-brand-strong text-white' : active ? 'bg-brand-soft text-brand-stronger ring-2 ring-brand/40' : 'bg-line-2 text-ink-3'
@@ -67,6 +67,30 @@ export default function JobNew() {
 
   const departments = org?.departments || [];
   const step1Valid = Boolean(form.departmentId && form.roleTitle.trim().length >= 2);
+  const criteriaValid = Boolean(understanding?.criteria.every(criterionTitleOk));
+
+  // Leaving the page cancels a pending suggestion (it would only cost AI quota).
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const cancelSuggestion = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    lastKey.current = ''; // «ادامه» asks again next time
+    setLoadingU(false);
+    setStep(1);
+  };
+
+  /** Radio-group keyboard pattern: arrows move the choice, Tab leaves the group. */
+  const onDeptKey = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    const keys: Record<string, number> = { ArrowLeft: 1, ArrowDown: 1, ArrowRight: -1, ArrowUp: -1 }; // RTL: left = next
+    const step = keys[e.key];
+    if (!step || !departments.length) return;
+    e.preventDefault();
+    const next = departments[(index + step + departments.length) % departments.length];
+    setForm((f) => ({ ...f, departmentId: next.id }));
+    const group = e.currentTarget.parentElement;
+    window.requestAnimationFrame(() => group?.querySelector<HTMLButtonElement>(`[data-dept="${next.id}"]`)?.focus());
+  };
 
   const fetchUnderstanding = async (force = false) => {
     const key = JSON.stringify(form);
@@ -151,15 +175,19 @@ export default function JobNew() {
                 دپارتمان <span className="text-low-ink">*</span>
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2" role="radiogroup" aria-label="دپارتمان">
-                {departments.map((d) => {
+                {departments.map((d, i) => {
                   const Icon = departmentIcon(d.id);
                   const active = form.departmentId === d.id;
+                  const focusable = active || (!form.departmentId && i === 0);
                   return (
                     <button
                       key={d.id}
                       type="button"
                       role="radio"
                       aria-checked={active}
+                      data-dept={d.id}
+                      tabIndex={focusable ? 0 : -1}
+                      onKeyDown={(e) => onDeptKey(e, i)}
                       onClick={() => setForm({ ...form, departmentId: d.id })}
                       className={`flex items-center gap-2.5 p-3 rounded-[12px] border text-right transition-colors ${
                         active ? 'border-brand/50 bg-brand-tint ring-1 ring-brand/30' : 'border-line hover:border-line-strong bg-surface'
@@ -224,10 +252,13 @@ export default function JobNew() {
             <Card>
               <div className="flex items-center gap-3 mb-5">
                 <Spinner />
-                <div>
-                  <p className="text-[14px] font-bold text-ink">هویدا در حال تدوین معیارهای «{form.roleTitle}» است…</p>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[14px] font-bold text-ink">هویدا در حال تدوین معیارهای «{form.roleTitle.trim()}» است…</p>
                   <p className="text-[12.5px] text-ink-3">معمولاً کمتر از نیم دقیقه طول می‌کشد.</p>
                 </div>
+                <Button variant="ghost" size="sm" icon={ArrowRight} onClick={cancelSuggestion}>
+                  بازگشت
+                </Button>
               </div>
               <div className="flex flex-col gap-2.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -306,11 +337,17 @@ export default function JobNew() {
                       پیشنهاد دوباره
                     </Button>
                   )}
-                  <Button iconEnd={ArrowLeft} onClick={() => setStep(3)}>
+                  <Button
+                    iconEnd={ArrowLeft}
+                    onClick={() => setStep(3)}
+                    disabled={!criteriaValid}
+                    title={criteriaValid ? undefined : 'عنوان همه معیارها را بنویسید'}
+                  >
                     ادامه
                   </Button>
                 </div>
               </div>
+              {!criteriaValid && <p className="text-[12.5px] text-low-ink font-medium -mt-1 text-left">برای ادامه، عنوان همه معیارها را بنویسید (دست‌کم دو حرف).</p>}
             </>
           )}
         </div>

@@ -15,10 +15,11 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { HovidaLogo, HovidaMark } from '../../components/brand/Logo';
-import { Button, Callout, Spinner, TextInput } from '../../components/ui';
+import { Button, Callout, Spinner, TextInput, trapTabKey, useEscapeLayer, useLockScroll, useRestoreFocus } from '../../components/ui';
 import { adminApi, api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { navigate } from '../../lib/router';
+import { useMediaQuery } from '../../lib/useAsync';
 import { useTitle } from '../../lib/useTitle';
 import type { AdminMe } from '../../types/admin';
 import Overview from './Overview';
@@ -222,6 +223,13 @@ function AdminShell({ pathname }: { pathname: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   useTitle(`پنل مدیریت · ${section.label}`);
   useEffect(() => setMenuOpen(false), [pathname]);
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  useEffect(() => {
+    if (isDesktop) setMenuOpen(false); // the drawer exists only below lg
+  }, [isDesktop]);
+  useLockScroll(menuOpen);
+  useEscapeLayer(menuOpen, () => setMenuOpen(false));
+  useRestoreFocus(menuOpen);
   const brand = (
     <div className="flex items-center gap-2.5">
       <HovidaMark size={30} />
@@ -243,17 +251,33 @@ function AdminShell({ pathname }: { pathname: string }) {
 
       <header className="lg:hidden sticky top-0 z-30 bg-[#1E2521] h-14 px-4 flex items-center justify-between">
         {brand}
-        <button onClick={() => setMenuOpen(true)} aria-label="منو" className="w-10 h-10 rounded-[10px] flex items-center justify-center text-white hover:bg-white/10">
+        <button
+          onClick={() => setMenuOpen(true)}
+          aria-label="منو"
+          aria-expanded={menuOpen}
+          className="w-10 h-10 rounded-[10px] flex items-center justify-center text-white hover:bg-white/10"
+        >
           <MenuIcon className="w-5 h-5" />
         </button>
       </header>
       {menuOpen && (
         <div className="lg:hidden fixed inset-0 z-50">
           <div className="absolute inset-0 bg-black/40" onClick={() => setMenuOpen(false)} />
-          <div className="absolute inset-y-0 right-0 w-[280px] bg-[#1E2521] px-4 py-5 flex flex-col animate-fade-in">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="منوی پنل مدیریت"
+            onKeyDown={trapTabKey}
+            className="absolute inset-y-0 right-0 w-[280px] max-w-[85vw] bg-[#1E2521] px-4 py-5 flex flex-col animate-fade-in"
+          >
             <div className="flex items-center justify-between mb-6">
               {brand}
-              <button onClick={() => setMenuOpen(false)} aria-label="بستن" className="w-9 h-9 rounded-[10px] flex items-center justify-center text-white hover:bg-white/10">
+              <button
+                onClick={() => setMenuOpen(false)}
+                aria-label="بستن"
+                autoFocus
+                className="w-9 h-9 rounded-[10px] flex items-center justify-center text-white hover:bg-white/10"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -275,11 +299,16 @@ function AdminShell({ pathname }: { pathname: string }) {
 export default function AdminApp({ pathname }: { pathname: string }) {
   const { status, user } = useAuth();
   const [access, setAccess] = useState<AdminMe | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
   const check = useCallback(async () => {
+    setCheckError(null);
     try {
       setAccess(await adminApi.me());
-    } catch {
-      setAccess({ isAdmin: false, setupPending: false });
+    } catch (err: any) {
+      // 403 = this session may not use the panel (e.g. a support session).
+      // Anything else (offline, server restarting) is not a «no access» answer.
+      if (err?.status === 403) setAccess({ isAdmin: false, setupPending: false });
+      else setCheckError(err?.message || 'بررسی دسترسی ممکن نشد.');
     }
   }, []);
   useEffect(() => {
@@ -288,6 +317,19 @@ export default function AdminApp({ pathname }: { pathname: string }) {
   }, [status, user?.id, check]);
 
   if (status !== 'authed') return <AdminLogin />;
+  if (checkError) {
+    return (
+      <Centered>
+        <h1 className="text-[18px] font-extrabold text-ink">بررسی دسترسی انجام نشد</h1>
+        <Callout tone="danger" className="mt-4">
+          {checkError}
+        </Callout>
+        <Button block className="mt-5" onClick={() => void check()}>
+          تلاش دوباره
+        </Button>
+      </Centered>
+    );
+  }
   if (!access) {
     return (
       <div dir="rtl" className="min-h-screen flex items-center justify-center bg-canvas">

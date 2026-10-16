@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ArrowLeft, Building2, CheckCircle2, Mail, Sparkles, UserRound } from 'lucide-react';
 import { HovidaLogo, HovidaMark } from '../components/brand/Logo';
 import { Button, Callout, TextInput } from '../components/ui';
@@ -135,13 +135,14 @@ export function SignupPage() {
   const [loading, setLoading] = useState(false);
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: e.target.value });
 
-  const strength = (() => {
+  // Mirrors the server rule (≥ 8 characters, letters + digits): a password the
+  // server would refuse never looks "medium" here.
+  const { strength, strengthLabel } = (() => {
     const p = form.password;
-    let s = 0;
-    if (p.length >= 8) s++;
-    if (/[A-Za-z\u0600-\u06FF]/.test(p) && /[0-9۰-۹]/.test(p)) s++;
-    if (p.length >= 12 || /[^A-Za-z0-9\u0600-\u06FF]/.test(p)) s++;
-    return s;
+    const acceptable = p.length >= 8 && p.length <= 128 && /[A-Za-z\u0600-\u06FF]/.test(p) && /[0-9۰-۹]/.test(p);
+    if (!acceptable) return { strength: 1, strengthLabel: p.length < 8 ? 'کوتاه است' : 'حروف و عدد را ترکیب کنید' };
+    const strong = p.length >= 12 || /[^A-Za-z0-9\u0600-\u06FF]/.test(p);
+    return strong ? { strength: 3, strengthLabel: 'قوی' } : { strength: 2, strengthLabel: 'قابل قبول' };
   })();
 
   const submit = async (e: React.FormEvent) => {
@@ -224,10 +225,18 @@ export function SignupPage() {
             error={fieldError('password')}
           />
           {form.password && (
-            <div className="flex gap-1 mt-2" aria-label="قدرت رمز عبور">
-              {[1, 2, 3].map((i) => (
-                <span key={i} className={`h-1 flex-1 rounded-full ${i <= strength ? (strength >= 3 ? 'bg-brand' : strength === 2 ? 'bg-review' : 'bg-low') : 'bg-line'}`} />
-              ))}
+            <div className="flex items-center gap-2.5 mt-2">
+              <div className="flex gap-1 flex-1" aria-hidden>
+                {[1, 2, 3].map((i) => (
+                  <span key={i} className={`h-1 flex-1 rounded-full ${i <= strength ? (strength >= 3 ? 'bg-brand' : strength === 2 ? 'bg-review' : 'bg-low') : 'bg-line'}`} />
+                ))}
+              </div>
+              <span
+                className={`text-[11.5px] font-semibold shrink-0 ${strength >= 3 ? 'text-brand-ink' : strength === 2 ? 'text-review-ink' : 'text-low-ink'}`}
+                aria-live="polite"
+              >
+                قدرت رمز: {strengthLabel}
+              </span>
             </div>
           )}
         </div>

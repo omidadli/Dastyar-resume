@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import type { LucideIcon } from 'lucide-react';
 import type { AiPurpose, KeyHealth } from '../../types/admin';
 import { faDate, faRelative, toPersianDigits } from '../../lib/format';
@@ -146,12 +146,5 @@ export function Row({ label, children }: { label: string; children: React.ReactN
   );
 }
 
-/** The value, settled for `ms` (search boxes). */
-export function useDebounced<T>(value: T, ms = 300): T {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const t = setTimeout(() => setV(value), ms);
-    return () => clearTimeout(t);
-  }, [value, ms]);
-  return v;
-}
+/** The value, settled for `ms` (search boxes) — the app-wide hook. */
+export { useDebounced } from '../../lib/useAsync';

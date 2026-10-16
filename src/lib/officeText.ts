@@ -226,6 +226,15 @@ export async function xpsText(zip: ZipLike): Promise<string> {
   return tidyLines(out.join('\n\n'));
 }
 
+/** EPUB hrefs are URL-encoded, but a stray «%» must not abort reading the book. */
+function safeDecodeUri(v: string): string {
+  try {
+    return decodeURIComponent(v);
+  } catch {
+    return v;
+  }
+}
+
 export async function epubText(zip: ZipLike, maxChars = 60000): Promise<string> {
   const container = await entryText(zip, 'META-INF/container.xml');
   const opfPath = container.match(/full-path="([^"]+)"/)?.[1];
@@ -237,7 +246,7 @@ export async function epubText(zip: ZipLike, maxChars = 60000): Promise<string> 
     for (const m of opf.matchAll(/<item\b[^>]*>/g)) {
       const id = m[0].match(/\sid="([^"]+)"/)?.[1];
       const href = m[0].match(/\shref="([^"]+)"/)?.[1];
-      if (id && href) manifest.set(id, dir + decodeURIComponent(href));
+      if (id && href) manifest.set(id, dir + safeDecodeUri(href));
     }
     order = Array.from(opf.matchAll(/<itemref\b[^>]*idref="([^"]+)"/g))
       .map((m) => manifest.get(m[1]))

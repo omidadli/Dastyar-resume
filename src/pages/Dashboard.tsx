@@ -40,7 +40,7 @@ export default function Dashboard() {
   return (
     <div>
       <PageHeader
-        title={`${greeting()}، ${firstName}`}
+        title={firstName ? `${greeting()}، ${firstName}` : greeting()}
         subtitle={`نمای کلی جذب در ${org?.name || 'سازمان شما'}`}
         actions={
           <>
@@ -156,11 +156,27 @@ export default function Dashboard() {
                       همه فرصت‌ها
                     </ButtonLink>
                   </div>
-                  <div className="grid md:grid-cols-2 gap-3 sm:gap-4">
-                    {loading && !data
-                      ? Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-[210px] rounded-card" />)
-                      : data!.jobs.map((j) => <JobCard key={j.id} job={j} running={runs.some((r) => r.jobId === j.id && r.status === 'running')} />)}
-                  </div>
+                  {data && data.jobs.length === 0 ? (
+                    <div className="hv-card">
+                      <EmptyState
+                        icon={BriefcaseBusiness}
+                        title="فرصت شغلی فعالی ندارید"
+                        description="همه فرصت‌های شغلی بسته شده‌اند. یک فرصت تازه بسازید یا یکی از فرصت‌های بسته را دوباره باز کنید."
+                        action={
+                          <ButtonLink to="/app/jobs/new" icon={Plus} size="sm">
+                            فرصت شغلی تازه
+                          </ButtonLink>
+                        }
+                        compact
+                      />
+                    </div>
+                  ) : (
+                    <div className="grid md:grid-cols-2 gap-3 sm:gap-4">
+                      {loading && !data
+                        ? Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-[210px] rounded-card" />)
+                        : data!.jobs.map((j) => <JobCard key={j.id} job={j} running={runs.some((r) => r.jobId === j.id && r.status === 'running')} />)}
+                    </div>
+                  )}
                 </div>
               </div>
 

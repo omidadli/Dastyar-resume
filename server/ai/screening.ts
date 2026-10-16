@@ -188,12 +188,19 @@ export function repairUnderstanding(
     if (!Array.isArray(raw.questions) || raw.questions.length < minQuestions) return null;
 
     // Normalize criteria: ids, integer weights summing to 100, at least one mustHave
-    const criteria: Criterion[] = raw.criteria.slice(0, opts.userEdited ? 8 : 6).map((c: any, i: number) => ({
-      id: typeof c.id === 'string' && c.id ? c.id : `c${i + 1}`,
-      title: String(c.title || '').trim().slice(0, 140),
-      weight: Math.max(1, Math.round(Number(c.weight) || 0)),
-      mustHave: Boolean(c.mustHave),
-    }));
+    const criterionIds = new Set<string>();
+    const criteria: Criterion[] = raw.criteria.slice(0, opts.userEdited ? 8 : 6).map((c: any, i: number) => {
+      // Scores are matched to criteria by id: ids must be unique.
+      let id = typeof c?.id === 'string' && c.id.trim() ? c.id.trim().slice(0, 40) : `c${i + 1}`;
+      while (criterionIds.has(id)) id = `${id}-${i + 1}`;
+      criterionIds.add(id);
+      return {
+        id,
+        title: String(c?.title || '').trim().slice(0, 140),
+        weight: Math.max(1, Math.round(Number(c?.weight) || 0)),
+        mustHave: Boolean(c?.mustHave),
+      };
+    });
     if (criteria.some((c) => !c.title)) return null;
     if (!criteria.some((c) => c.mustHave)) criteria[0].mustHave = true;
     const totalW = criteria.reduce((s, c) => s + c.weight, 0);
@@ -1284,7 +1291,6 @@ export function evaluateResumeLocal(
 ): CandidateEvaluation {
   const text = normalizePersianText(resumeText || '');
   const digitsText = toEnglishDigits(text);
-  const lower = text.toLowerCase();
 
   // Name: top lines, "نام: ..." pattern
   let candidateName: string | null = null;
@@ -1519,8 +1525,9 @@ ${signature}
     const parsed = cleanAndParseJson<{ subject?: string; body?: string }>(raw, {});
     if (parsed.body && parsed.body.trim().length > 30) {
       let body = parsed.body.trim();
-      const firstSigLine = signature.split('\n').pop() || signature;
-      if (!body.includes(firstSigLine)) body = `${body}\n\n${signature}`;
+      // The model sometimes drops the signature: its last non-empty line tells.
+      const lastSigLine = signature.split('\n').map((l) => l.trim()).filter(Boolean).pop() || '';
+      if (lastSigLine && !body.includes(lastSigLine)) body = `${body}\n\n${signature.trim()}`;
       return { kind, subject: parsed.subject?.trim() || KIND_TITLES[kind], body, engine: 'ai' };
     }
     return fallback();

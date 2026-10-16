@@ -13,6 +13,54 @@ const TONE_PREVIEW: Record<BannerTone, string> = {
   success: 'bg-brand-tint text-brand-stronger border-brand/20',
 };
 
+/**
+ * Number input that can be cleared and retyped: the text is local while
+ * typing and is clamped/committed on blur or Enter (deriving it from the
+ * number would snap an emptied field straight back to the old value).
+ */
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  onCommit,
+  hint,
+  disabled,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onCommit: (v: number) => void;
+  hint?: string;
+  disabled?: boolean;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  const commit = () => {
+    const n = Math.round(Number(text));
+    if (text.trim() === '' || !Number.isFinite(n)) return setText(String(value));
+    const clamped = Math.max(min, Math.min(max, n));
+    setText(String(clamped));
+    if (clamped !== value) onCommit(clamped);
+  };
+  return (
+    <TextInput
+      label={label}
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      value={text}
+      onChange={(e) => setText(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === 'Enter' && commit()}
+      hint={hint}
+      disabled={disabled}
+    />
+  );
+}
+
 export default function SystemPage() {
   const { data, error, reload, setData } = useAsync(() => adminApi.system(), []);
   const [form, setForm] = useState<SystemSettings | null>(null);
@@ -21,12 +69,20 @@ export default function SystemPage() {
     if (data) setForm(data);
   }, [data]);
   const dirty = useMemo(() => Boolean(data && form && JSON.stringify(data) !== JSON.stringify(form)), [data, form]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty]);
 
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
   if (!form || !data) return <Skeleton className="h-[420px] rounded-card" />;
 
-  const set = <K extends keyof SystemSettings>(k: K, v: SystemSettings[K]) => setForm({ ...form, [k]: v });
-  const num = (v: string, fallback: number) => (Number.isFinite(Number(v)) && v !== '' ? Math.round(Number(v)) : fallback);
+  const set = <K extends keyof SystemSettings>(k: K, v: SystemSettings[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
 
   const save = async () => {
     setSaving(true);
@@ -53,14 +109,13 @@ export default function SystemPage() {
           <div className="grid gap-5 mt-4">
             <Switch checked={form.signupEnabled} onChange={(v) => set('signupEnabled', v)} label="ثبت‌نام سازمان‌های تازه باز باشد" description="اگر بسته باشد، صفحه ثبت‌نام پیام «ثبت‌نام فعلاً بسته است» و راه تماس را نشان می‌دهد." />
             <Switch checked={form.demoEnabled} onChange={(v) => set('demoEnabled', v)} label="دکمه «ورود به نسخه نمایشی» فعال باشد" description="هر بازدیدکننده یک فضای کاری نمونه با داده‌های ساختگی می‌گیرد." />
-            <TextInput
+            <NumberField
               label="عمر نسخه نمایشی (ساعت)"
-              type="number"
               min={1}
               max={336}
-              value={String(form.demoHours)}
-              onChange={(e) => set('demoHours', num(e.target.value, form.demoHours))}
-              hint="پس از این مدت، فضای کاری نمایشی و داده‌هایش خودکار پاک می‌شود."
+              value={form.demoHours}
+              onCommit={(v) => set('demoHours', v)}
+              hint="بین ۱ تا ۳۳۶ ساعت. پس از این مدت، فضای کاری نمایشی و داده‌هایش خودکار پاک می‌شود."
               disabled={!form.demoEnabled}
             />
           </div>
@@ -69,31 +124,29 @@ export default function SystemPage() {
         <Card>
           <CardHeader title="محدودیت‌ها" icon={Gauge} />
           <div className="grid gap-4 mt-4">
-            <TextInput
+            <NumberField
               label="حداکثر حجم هر رزومه (مگابایت)"
-              type="number"
               min={1}
               max={25}
-              value={String(form.maxFileMb)}
-              onChange={(e) => set('maxFileMb', num(e.target.value, form.maxFileMb))}
+              value={form.maxFileMb}
+              onCommit={(v) => set('maxFileMb', v)}
               hint="بین ۱ تا ۲۵ مگابایت. فایل‌های بزرگ‌تر در مرورگر کنار گذاشته می‌شوند."
             />
-            <TextInput
+            <NumberField
               label="حداکثر تعداد فایل در هر نوبت بارگذاری"
-              type="number"
               min={1}
               max={2000}
-              value={String(form.maxFilesPerBatch)}
-              onChange={(e) => set('maxFilesPerBatch', num(e.target.value, form.maxFilesPerBatch))}
+              value={form.maxFilesPerBatch}
+              onCommit={(v) => set('maxFilesPerBatch', v)}
+              hint="بین ۱ تا ۲۰۰۰ فایل."
             />
-            <TextInput
+            <NumberField
               label="ماندگاری نشست ورود (روز)"
-              type="number"
               min={1}
               max={365}
-              value={String(form.sessionDays)}
-              onChange={(e) => set('sessionDays', num(e.target.value, form.sessionDays))}
-              hint="پس از این مدت بی‌استفاده، کاربر باید دوباره وارد شود."
+              value={form.sessionDays}
+              onCommit={(v) => set('sessionDays', v)}
+              hint="بین ۱ تا ۳۶۵ روز. پس از این مدت بی‌استفاده، کاربر باید دوباره وارد شود."
             />
           </div>
         </Card>

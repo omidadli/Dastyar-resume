@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Building2,
   Copy,
@@ -49,8 +49,9 @@ function OrgTab() {
   const save = async () => {
     setSaving(true);
     try {
-      const { org: updated } = await api.org.update({ name });
+      const { org: updated } = await api.org.update({ name: name.trim() });
       setOrg(updated);
+      setName(updated.name);
       toast('نام سازمان ذخیره شد.');
     } catch (e: any) {
       toast(e?.message || 'ذخیره ممکن نشد.', 'error');
@@ -81,7 +82,7 @@ function OrgTab() {
       </div>
       {canEdit && (
         <div className="flex justify-end mt-5 pt-4 border-t border-line-2">
-          <Button icon={Save} onClick={save} loading={saving} disabled={name.trim().length < 2 || name === org.name}>
+          <Button icon={Save} onClick={save} loading={saving} disabled={name.trim().length < 2 || name.trim() === org.name}>
             ذخیره تغییرات
           </Button>
         </div>
@@ -90,24 +91,40 @@ function OrgTab() {
   );
 }
 
+/** A department row in the editor; `_k` keeps React keys stable for rows not saved yet. */
+type DeptRow = Department & { _k: string };
+let deptSeq = 0;
+const toRows = (list: Department[]): DeptRow[] => list.map((d) => ({ ...d, _k: d.id || `new-${++deptSeq}` }));
+
 function DepartmentsTab() {
   const { org, setOrg } = useAuth();
   const canEdit = useCan('admin');
-  const [list, setList] = useState<Department[]>(org?.departments || []);
+  const [list, setList] = useState<DeptRow[]>(() => toRows(org?.departments || []));
   const [saving, setSaving] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  const [dirty, setDirtyState] = useState(false);
+  const dirtyRef = useRef(false);
+  const setDirty = (v: boolean) => {
+    dirtyRef.current = v;
+    setDirtyState(v);
+  };
+  // Follow changes made elsewhere (another admin, another tab) — but never
+  // overwrite edits that haven't been saved yet.
+  const serverKey = JSON.stringify(org?.departments || []);
   useEffect(() => {
-    setList(org?.departments || []);
-    setDirty(false);
-  }, [org?.departments]);
+    if (dirtyRef.current) return;
+    setList(toRows(org?.departments || []));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverKey]);
   const patch = (i: number, p: Partial<Department>) => {
-    setList(list.map((d, k) => (k === i ? { ...d, ...p } : d)));
+    setList((prev) => prev.map((d, k) => (k === i ? { ...d, ...p } : d)));
     setDirty(true);
   };
   const save = async () => {
     setSaving(true);
     try {
-      const { org: updated } = await api.org.setDepartments(list.map((d) => ({ id: d.id || undefined, name: d.name, hint: d.hint })));
+      const { org: updated } = await api.org.setDepartments(list.map((d) => ({ id: d.id || undefined, name: d.name.trim(), hint: d.hint.trim() })));
+      setDirty(false);
+      setList(toRows(updated.departments));
       setOrg(updated);
       emitChange('org');
       toast('دپارتمان‌ها ذخیره شد.');
@@ -127,7 +144,7 @@ function DepartmentsTab() {
       {!canEdit && <ReadOnlyNote />}
       <div className="flex flex-col gap-2.5">
         {list.map((d, i) => (
-          <div key={d.id || `new-${i}`} className="grid sm:grid-cols-[220px_1fr_auto] gap-2 items-start rounded-[12px] border border-line p-3">
+          <div key={d._k} className="grid sm:grid-cols-[220px_1fr_auto] gap-2 items-start rounded-[12px] border border-line p-3">
             <TextInput aria-label="نام دپارتمان" value={d.name} onChange={(e) => patch(i, { name: e.target.value })} disabled={!canEdit} placeholder="نام دپارتمان" />
             <TextInput aria-label="حوزه کاری" value={d.hint} onChange={(e) => patch(i, { hint: e.target.value })} disabled={!canEdit} placeholder="حوزه کاری، مثلاً: فروش حضوری، مذاکره، پخش" />
             {canEdit && (
@@ -138,7 +155,7 @@ function DepartmentsTab() {
                 className="mt-0.5"
                 disabled={list.length <= 1}
                 onClick={() => {
-                  setList(list.filter((_, k) => k !== i));
+                  setList((prev) => prev.filter((_, k) => k !== i));
                   setDirty(true);
                 }}
               />
@@ -152,7 +169,7 @@ function DepartmentsTab() {
             variant="secondary"
             icon={Plus}
             onClick={() => {
-              setList([...list, { id: '', name: '', hint: '' }]);
+              setList((prev) => [...prev, { id: '', name: '', hint: '', _k: `new-${++deptSeq}` }]);
               setDirty(true);
             }}
             disabled={list.length >= 40}
@@ -198,9 +215,9 @@ function TeamTab() {
     setSaving(true);
     setError(null);
     try {
-      const res = await api.org.addMember(form);
+      const res = await api.org.addMember({ ...form, email: form.email.trim() });
       q.setData((d) => (d ? { ...d, members: res.members } : d));
-      setCreated({ email: form.email, password: form.password });
+      setCreated({ email: res.member.email, password: form.password });
       setAddOpen(false);
       setForm({ name: '', email: '', title: '', role: 'member', password: randomPassword() });
       emitChange('activity');
@@ -240,7 +257,14 @@ function TeamTab() {
           subtitle="مدیران تنظیمات و اعضا را مدیریت می‌کنند و تعیین مدیران با مالک است؛ اعضا به فرصت‌ها و کاندیداها دسترسی کامل دارند."
           action={
             canEdit && (
-              <Button icon={UserPlus} size="sm" onClick={() => setAddOpen(true)}>
+              <Button
+                icon={UserPlus}
+                size="sm"
+                onClick={() => {
+                  setError(null);
+                  setAddOpen(true);
+                }}
+              >
                 افزودن عضو
               </Button>
             )
@@ -362,7 +386,7 @@ function TeamTab() {
 }
 
 function MessagesTab() {
-  const { org, setOrg, user } = useAuth();
+  const { org, setOrg } = useAuth();
   const canEdit = useCan('admin');
   const [sig, setSig] = useState(org?.messageSignature || '');
   const [saving, setSaving] = useState(false);
@@ -372,6 +396,7 @@ function MessagesTab() {
     try {
       const { org: updated } = await api.org.update({ messageSignature: sig });
       setOrg(updated);
+      setSig(updated.messageSignature || '');
       toast('امضای پیام‌ها ذخیره شد.');
     } catch (e: any) {
       toast(e?.message || 'ذخیره ممکن نشد.', 'error');
@@ -387,7 +412,7 @@ function MessagesTab() {
         <TextArea value={sig} onChange={(e) => setSig(e.target.value)} rows={5} disabled={!canEdit} />
         {canEdit && (
           <div className="flex justify-end mt-4">
-            <Button icon={Save} onClick={save} loading={saving} disabled={sig === org.messageSignature}>
+            <Button icon={Save} onClick={save} loading={saving} disabled={sig.trim() === (org.messageSignature || '').trim()}>
               ذخیره امضا
             </Button>
           </div>
@@ -397,9 +422,10 @@ function MessagesTab() {
         <CardHeader title="پیش‌نمایش" subtitle="نمونه پیام دعوت به مصاحبه" />
         <div className="rounded-[12px] bg-canvas border border-line-2 p-4 text-[13.5px] text-ink-2 leading-[1.95] whitespace-pre-wrap">
           {`سلام [نام کاندید] عزیز،\n\nاز اینکه رزومه خود را برای موقعیت «[عنوان فرصت]» در ${org.name} ارسال کردید سپاسگزاریم. خوشحال می‌شویم برای یک گفت‌وگوی آشنایی هماهنگ کنیم.\n\nزمان پیشنهادی: [زمان]\n\n`}
-          <span className="font-semibold text-ink">{sig || `واحد منابع انسانی ${org.name}`}</span>
+          {/* Same default as the server's drafts when no signature is set. */}
+          <span className="font-semibold text-ink">{sig.trim() || `با احترام\nواحد منابع انسانی ${org.name}`}</span>
         </div>
-        <p className="text-[12px] text-ink-3 mt-3">پیام‌ها هرگز خودکار ارسال نمی‌شوند؛ {user?.name || 'شما'} متن را بررسی و از کانال دلخواه می‌فرستید.</p>
+        <p className="text-[12px] text-ink-3 mt-3">پیام‌ها هرگز خودکار ارسال نمی‌شوند؛ شما متن را بررسی می‌کنید و از کانال دلخواه می‌فرستید.</p>
       </Card>
     </div>
   );
@@ -465,7 +491,7 @@ function AiTab() {
             <ul className="text-[13px] text-ink-2 leading-[2] list-disc pr-5">
               <li>تا ۵ کلید Gemini یا سازگار با OpenAI با جابه‌جایی خودکار هنگام محدودیت</li>
               <li>سقف درخواست در دقیقه/روز برای هر کلید و آزمایش اتصال</li>
-              <li>دستورالعمل‌های تحلیل، سطح سخت‌گیری و راهنمای تخصصی ۲۷ صنعت</li>
+              <li>دستورالعمل‌های تحلیل، سطح سخت‌گیری و راهنمای تخصصی هر صنعت</li>
             </ul>
             <div className="flex flex-wrap gap-2 mt-4">
               <Button icon={KeyRound} onClick={() => navigate('/admin/ai')}>
@@ -507,8 +533,10 @@ function AccountTab() {
   const saveProfile = async () => {
     setSavingProfile(true);
     try {
-      const { user: u } = await api.auth.updateMe({ name, title });
-      setUser(u);
+      const { user: u } = await api.auth.updateMe({ name: name.trim(), title: title.trim() });
+      setUser({ ...user, ...u });
+      setName(u.name);
+      setTitle(u.title || '');
       toast('اطلاعات حساب ذخیره شد.');
     } catch (e: any) {
       toast(e?.message || 'ذخیره ممکن نشد.', 'error');
@@ -541,7 +569,12 @@ function AccountTab() {
           <Button variant="danger-soft" icon={LogOut} onClick={() => void signOut()}>
             خروج از حساب
           </Button>
-          <Button icon={Save} onClick={saveProfile} loading={savingProfile} disabled={name.trim().length < 2 || (name === user.name && title === user.title)}>
+          <Button
+            icon={Save}
+            onClick={saveProfile}
+            loading={savingProfile}
+            disabled={name.trim().length < 2 || (name.trim() === user.name && title.trim() === (user.title || ''))}
+          >
             ذخیره
           </Button>
         </div>

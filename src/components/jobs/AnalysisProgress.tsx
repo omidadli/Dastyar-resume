@@ -95,7 +95,9 @@ export function AnalysisProgress({ run, onCancel, onDismiss }: { run: AnalysisRu
                   ) : (
                     <span className="w-4 h-4 rounded-full border-2 border-line-strong shrink-0" />
                   )}
-                  <span className="flex-1 min-w-0 text-[12.5px] text-ink-2 truncate hv-latin text-right">{it.name}</span>
+                  <span className="flex-1 min-w-0 text-[12.5px] text-ink-2 truncate text-right" dir="auto" title={it.name}>
+                    {it.name}
+                  </span>
                   <span className="text-[11.5px] text-ink-4 shrink-0">
                     {it.status === 'success' && it.score !== undefined
                       ? `${toPersianDigits(it.score)}٪`

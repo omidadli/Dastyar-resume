@@ -25,6 +25,9 @@ const loginFailByIp = new RateLimiter(40, 15 * 60_000);
 const loginFailByAccount = new RateLimiter(30, 15 * 60_000);
 const signupByIp = new RateLimiter(10, 60 * 60_000);
 const demoByIp = new RateLimiter(15, 60 * 60_000);
+// Wrong «current password» on PATCH /me — a stolen session must not be able
+// to guess the real password at full speed.
+const passwordCheckFailByUser = new RateLimiter(10, 15 * 60_000);
 
 function tooMany(res: express.Response, retryAfterSec: number) {
   res.setHeader('Retry-After', String(retryAfterSec));
@@ -60,14 +63,17 @@ export function authRoutes(): express.Router {
       if (!isValidEmail(email)) return res.status(400).json({ error: 'ایمیل معتبر نیست.', field: 'email' });
       const weak = passwordProblem(password);
       if (weak) return res.status(400).json({ error: weak, field: 'password' });
-      if (db.findUserByEmail(email)) {
-        return res.status(409).json({ error: 'با این ایمیل قبلاً حساب ساخته شده است؛ وارد شوید.', field: 'email' });
-      }
+      const taken = () => res.status(409).json({ error: 'با این ایمیل قبلاً حساب ساخته شده است؛ وارد شوید.', field: 'email' });
+      if (db.findUserByEmail(email)) return taken();
+      const passwordHash = await hashPassword(password);
+      // Hashing yields the event loop: a parallel sign-up may have taken the
+      // address meanwhile. Check again right before creating anything.
+      if (db.findUserByEmail(email)) return taken();
       const org = db.createOrg({ name: orgName, ownerEmail: email });
-      const user = db.createUser({ orgId: org.id, name, email, passwordHash: await hashPassword(password), role: 'owner' });
+      const user = db.createUser({ orgId: org.id, name, email, passwordHash, role: 'owner' });
       db.updateUser(user.id, { lastLoginISO: new Date().toISOString() });
       db.logActivity(org.id, { id: user.id, name: user.name }, 'org.created', `فضای کاری «${org.name}» را ساخت`);
-      res.status(201).json({ token: issueSession(user.id), user: db.publicUser(user), org });
+      res.status(201).json({ token: issueSession(user.id), user: { ...db.publicUser(user), platformAdmin: isPlatformAdmin(user) }, org });
     })
   );
 
@@ -94,7 +100,7 @@ export function authRoutes(): express.Router {
       const blocked = accessBlock(user, org);
       if (blocked) return res.status(blocked.status).json({ error: blocked.error, code: blocked.code });
       db.updateUser(user.id, { lastLoginISO: new Date().toISOString() });
-      res.json({ token: issueSession(user.id), user: db.publicUser(user), org });
+      res.json({ token: issueSession(user.id), user: { ...db.publicUser(user), platformAdmin: isPlatformAdmin(user) }, org });
     })
   );
 
@@ -143,16 +149,20 @@ export function authRoutes(): express.Router {
       if (newPassword) {
         if (org.isDemo) return res.status(400).json({ error: 'در نسخه نمایشی امکان تغییر رمز عبور وجود ندارد.' });
         const current = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+        const budget = passwordCheckFailByUser.check(user.id);
+        if (!budget.ok) return tooMany(res, budget.retryAfterSec);
         if (!(await verifyPassword(current, user.passwordHash))) {
+          passwordCheckFailByUser.hit(user.id);
           return res.status(400).json({ error: 'رمز عبور فعلی درست نیست.', field: 'currentPassword' });
         }
+        passwordCheckFailByUser.reset(user.id);
         const weak = passwordProblem(newPassword);
         if (weak) return res.status(400).json({ error: weak, field: 'newPassword' });
         db.updateUser(user.id, { passwordHash: await hashPassword(newPassword) });
         db.deleteSessionsOfUser(user.id, tokenHash); // sign out other devices
       }
       db.updateUser(user.id, { ...(name ? { name } : {}), ...(title !== undefined ? { title } : {}) });
-      res.json({ user: db.publicUser(user) });
+      res.json({ user: { ...db.publicUser(user), platformAdmin: isPlatformAdmin(user) } });
     })
   );
 

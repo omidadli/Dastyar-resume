@@ -1,25 +1,23 @@
 // ================================================================
-// Shared domain types for the Seilaneh Sabz smart resume screener
+// HOVIDA («هویدا») — shared domain types for resume screening.
 // Used by both the React client and the Express server.
 // ================================================================
 
 export type Recommendation = 'INTERVIEW' | 'REVIEW' | 'REJECT';
+/**
+ * Internal AI category codes. They are never shown raw in the UI: the client
+ * maps them to match-level labels («تطابق بالا / نیازمند بررسی / تطابق پایین /
+ * اطلاعات ناکافی») — the AI describes the match, a human makes the decision.
+ */
 export type ResumeCategory = 'INTERVIEW' | 'REVIEW' | 'REJECT' | 'UNJUDGEABLE' | 'ERROR';
 export type Confidence = 'high' | 'medium' | 'low';
 export type AnalysisEngine = 'ai' | 'local';
 
-/**
- * Human decision on a resume (the «رزومه‌های تایید/رد شده» workspace).
- * `none` = the HR user has not decided yet.
- */
+/** Human decision on a candidate. `none` = nobody has decided yet. */
 export type DecisionStatus = 'none' | 'approved' | 'rejected' | 'review';
-/** Decisions that actually live in the approved/rejected/review lists. */
 export type DecidedStatus = Exclude<DecisionStatus, 'none'>;
 
-/**
- * `standard` = the fast screening pass, `deep` = «بازبینی» — a slower,
- * evidence-by-evidence re-read of the resume requested by the user.
- */
+/** `standard` = fast screening pass, `deep` = user-requested evidence-by-evidence review. */
 export type AnalysisMode = 'standard' | 'deep';
 
 export interface Criterion {
@@ -29,7 +27,7 @@ export interface Criterion {
   mustHave: boolean;
 }
 
-// ---------- Smart checkbox questionnaire (Pass 0) ----------
+// ---------- Screening questionnaire ----------
 
 export type QuestionKind = 'knockout' | 'bonus';
 
@@ -64,7 +62,7 @@ export interface MultiChoiceQuestion {
 
 export type ScreeningQuestion = BooleanQuestion | SingleChoiceQuestion | MultiChoiceQuestion;
 
-/** User answers keyed by question id: boolean → boolean, single → string, multi → string[] */
+/** Answers keyed by question id: boolean → boolean, single → string, multi → string[] */
 export type ScreeningAnswers = Record<string, boolean | string | string[]>;
 
 export interface Thresholds {
@@ -83,7 +81,10 @@ export interface JobUnderstanding {
   questions: ScreeningQuestion[];
 }
 
-// ---------- Resume evaluation (Pass 1) ----------
+/** Where a job's criteria came from — shown honestly in the UI. */
+export type CriteriaSource = 'ai' | 'template';
+
+// ---------- Resume evaluation ----------
 
 export interface CandidateContact {
   phone: string | null;
@@ -117,18 +118,33 @@ export interface EvaluationFlags {
   irrelevant: boolean;
   insufficientInfo: boolean;
   scannedNoText: boolean;
+  /** The file is not a resume (cover letter only, certificate, ID card, job ad…). */
+  notResume?: boolean;
+  /** The file holds more than one person's resume; the first/main one was evaluated. */
+  multipleCandidates?: boolean;
+  /** Parts of the document could not be read (blurry scan, cut pages…). */
+  partiallyReadable?: boolean;
+  /** Only the AI can read this file (scan, photo, audio…) and it was unavailable — re-run later. */
+  needsAi?: boolean;
 }
 
-/**
- * Extra output of a user-requested deep review («بازبینی»). Only filled by the
- * AI engine; absent on the fast screening pass and on local-engine fallbacks.
- */
+/** How a resume was read and judged — shown in the candidate panel and admin reports. */
+export interface EvaluationMeta {
+  /** Human label of the source format, e.g. «PDF اسکن‌شده», «پاورپوینت». */
+  format: string | null;
+  /** Industry guide applied by the behaviour system. */
+  industry: string | null;
+  behaviorVersion: number | null;
+  /** resume | cover_letter | certificate | … (AI-detected). */
+  documentType: string | null;
+  language: string | null;
+  warnings: string[];
+}
+
+/** Extra output of a user-requested deep review. Only filled by the AI engine. */
 export interface DeepFindings {
-  /** نکته‌های دقیق و متفاوتی که در بازخوانی موشکافانه پیدا شد. */
   focusPoints: string[];
-  /** سوال‌های پیشنهادی هوشا برای مصاحبه با این کاندید. */
   interviewQuestions: string[];
-  /** ریسک‌ها، تناقض‌ها و موارد مشکوک داخل رزومه. */
   risks: string[];
 }
 
@@ -150,57 +166,80 @@ export interface CandidateEvaluation {
   bankSuggested: boolean;
   flags: EvaluationFlags;
   deepFindings?: DeepFindings | null;
+  meta?: EvaluationMeta;
 }
 
-// ---------- Persisted server records ----------
+// ---------- Jobs («فرصت شغلی») ----------
 
-export type BatchStatus = 'processing' | 'done' | 'cancelled';
+export type JobStatus = 'open' | 'paused' | 'closed';
+export type AnalysisStatus = 'idle' | 'processing' | 'done' | 'cancelled';
+export type EmploymentType = 'full-time' | 'part-time' | 'contract' | 'remote' | 'hybrid' | 'internship';
 
-export interface BatchStats {
+export interface JobStats {
   total: number;
   interview: number;
   review: number;
   reject: number;
   unjudgeable: number;
   error: number;
+  /** Human decisions */
+  approved: number;
+  rejected: number;
+  reviewDecision: number;
+  /** Analysed candidates with no human decision yet (excludes errors). */
+  undecided: number;
+  avgScore: number;
 }
 
-export interface ScreeningBatch {
+export interface Job {
   id: string;
-  /** Owner user id (multi-user scoping). null/absent = legacy shared data. */
-  userId?: string | null;
+  orgId: string | null;
+  createdBy: string | null;
+  createdByName: string | null;
   departmentId: string;
   departmentName: string;
   roleTitle: string;
   extraNotes: string;
+  location: string;
+  employmentType: EmploymentType | null;
   understanding: JobUnderstanding;
   answers: ScreeningAnswers;
-  status: BatchStatus;
-  stats: BatchStats;
+  criteriaSource: CriteriaSource;
+  status: JobStatus;
+  analysisStatus: AnalysisStatus;
+  stats: JobStats;
   createdAtJalali: string;
   createdAtISO: string;
+  updatedAtISO: string;
 }
+
+export type JobSummary = Omit<Job, 'understanding' | 'answers'> & {
+  criteriaCount: number;
+  thresholds: Thresholds;
+};
+
+// ---------- Candidates ----------
 
 export interface AnalysisHistoryEntry {
   score: number;
   atJalali: string;
-  reason: 'initial' | 'rerun' | 'deep';
+  atISO?: string;
+  reason: 'initial' | 'rerun' | 'deep' | 'calibration';
   engine: AnalysisEngine;
-  /** 'deep' entries are the user-requested «بازبینی» passes. */
   mode?: AnalysisMode;
 }
 
 export interface ResumeRecord {
   id: string;
-  batchId: string;
-  /** Owner user id inherited from the batch (multi-user scoping). */
-  userId?: string | null;
+  jobId: string;
+  orgId: string | null;
+  uploadedBy: string | null;
   departmentId: string;
   departmentName: string;
-  /** Job position of the owning batch, denormalized so cross-batch lists (decisions) can filter by position. */
-  roleTitle?: string | null;
+  roleTitle: string | null;
   fileName: string;
   filePath: string | null;
+  fileSize: number | null;
   extractedText: string;
   unjudgeableReason: string | null;
   errorMessage: string | null;
@@ -221,89 +260,85 @@ export interface ResumeRecord {
   tags: string[];
   bankSuggested: boolean;
   flags: EvaluationFlags | null;
-  /** Present after a deep review («بازبینی») produced extra insights. */
-  deepFindings?: DeepFindings | null;
+  deepFindings: DeepFindings | null;
+  analysisMeta?: EvaluationMeta | null;
 
   category: ResumeCategory;
   rankInCategory: number | null;
   analysisHistory: AnalysisHistoryEntry[];
 
+  /** Talent pool («بانک استعداد») */
   inBank: boolean;
   bankDepartmentId: string | null;
   bankNote: string | null;
   bankTags: string[];
   addedToBankAtJalali: string | null;
+  addedToBankAtISO: string | null;
 
   messageStatus: 'none' | 'sent';
   lastMessagedAtJalali: string | null;
 
-  /** HR user's decision (approve / reject / needs-review) — see DecisionStatus. */
-  decisionStatus?: DecisionStatus;
-  decidedAtJalali?: string | null;
-  decidedAtISO?: string | null;
-  /** Optional reason captured when rejecting (shown on the card & analysis page). */
-  decisionNote?: string | null;
-  /** Jalali stamp of the last user-requested deep re-analysis («بازبینی»). */
-  deepAnalysisAtJalali?: string | null;
+  decisionStatus: DecisionStatus;
+  decidedAtJalali: string | null;
+  decidedAtISO: string | null;
+  decidedBy: string | null;
+  decidedByName: string | null;
+  decisionNote: string | null;
+  deepAnalysisAtJalali: string | null;
 
-  deleted: boolean;
   createdAtISO: string;
+  createdAtJalali: string;
+  updatedAtISO: string;
 }
 
-// ---------- Decisions workspace (رزومه‌های تایید/رد شده) ----------
+/** Lightweight list shape: the extracted resume text stays on the server. */
+export type ResumeListItem = Omit<ResumeRecord, 'extractedText'>;
 
-export interface DecisionFilters {
-  /** Restrict to resumes owned by this user. */
-  userId?: string;
-  /**
-   * Which list to read. 'review' also includes undecided resumes whose AI
-   * category is REVIEW — those are the ones waiting for a human decision.
-   */
-  status?: DecidedStatus;
-  departmentId?: string;
-  /** Exact job position (batch roleTitle) picked from the quick-access chips. */
-  roleTitle?: string;
-  /** Free-text search over name, file, role, skills, tags and the decision note. */
-  query?: string;
-  /** Jalali range (۱۴۰۴/۰۶/۰۱) applied to the decision date. */
-  fromJalali?: string;
-  toJalali?: string;
-  minScore?: number;
-  sort?: 'newest' | 'oldest' | 'score' | 'experience';
-  page?: number;
-  pageSize?: number;
-}
-
-export interface DecisionCounts {
-  approved: number;
-  rejected: number;
-  review: number;
-}
-
-export interface DecisionPositionOption {
-  departmentId: string;
-  departmentName: string;
-  roleTitle: string;
-  count: number;
-}
-
-export interface DecisionsMeta {
-  counts: DecisionCounts;
-  positions: DecisionPositionOption[];
-  departments: { id: string; name: string; count: number }[];
-}
-
-export interface DecisionsPage {
-  items: ResumeRecord[];
+export interface PagedResult<T> {
+  items: T[];
   page: number;
   pageSize: number;
   total: number;
   totalPages: number;
-  /** Counts matching every filter except `status`, so the tabs stay in sync. */
-  counts: DecisionCounts;
 }
 
-// ---------- Client-side upload item (screening wizard) ----------
+export type MatchFilter = 'all' | 'high' | 'review' | 'low' | 'insufficient';
+export type DecisionFilter = 'all' | 'undecided' | 'pending' | 'approved' | 'rejected' | 'review';
+export type ResumeSort = 'match' | 'newest' | 'oldest' | 'experience' | 'name' | 'decided';
+
+export interface ResumeQuery {
+  jobId?: string;
+  match?: MatchFilter;
+  decision?: DecisionFilter;
+  q?: string;
+  departmentId?: string;
+  minScore?: number;
+  minYears?: number;
+  fromJalali?: string;
+  toJalali?: string;
+  sort?: ResumeSort;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ResumeCounts {
+  all: number;
+  high: number;
+  review: number;
+  low: number;
+  insufficient: number;
+  undecided: number;
+  pending: number;
+  approved: number;
+  rejected: number;
+  reviewDecision: number;
+}
+
+export interface ResumePage extends PagedResult<ResumeListItem> {
+  counts: ResumeCounts;
+}
+
+// ---------- Client-side upload queue ----------
 
 export type FileProcessingStatus =
   | 'idle'
@@ -341,51 +376,16 @@ export interface ScreeningProgressUpdate {
   estimatedSecondsRemaining?: number;
   speedPerMinute?: number;
   overallPercent?: number;
-  /** Set when nothing has moved for a while — shown as a soft warning. */
   warningText?: string;
 }
 
-// ---------- Bank ----------
+// ---------- Messages ----------
 
-export interface BankDepartmentCount {
-  id: string;
-  name: string;
-  count: number;
-}
-
-export interface PagedResult<T> {
-  items: T[];
-  page: number;
-  pageSize: number;
-  total: number;
-  totalPages: number;
-}
-
-export interface BankBatchOption {
-  id: string;
-  roleTitle: string;
-  createdAtJalali: string;
-}
-
-export interface BankFilters {
-  /** Restrict results to resumes owned by this user (legacy null owner = shared). */
-  userId?: string;
-  query?: string;
-  minScore?: number;
-  minYears?: number;
-  tag?: string;
-  tags?: string[];
-  batchId?: string;
-  since?: 'all' | 'week' | 'month';
-  sort?: 'newest' | 'score' | 'experience';
-  page?: number;
-  pageSize?: number;
-}
-
-export type MessageKind = 'INTERVIEW_INVITE' | 'INFO_REQUEST' | 'BANK_NOTICE';
+export type MessageKind = 'INTERVIEW_INVITE' | 'INFO_REQUEST' | 'BANK_NOTICE' | 'REJECTION';
 
 export interface DraftMessage {
   kind: MessageKind;
   subject: string;
   body: string;
+  engine: AnalysisEngine;
 }

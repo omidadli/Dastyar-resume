@@ -22,15 +22,15 @@ import './index.css';
 
 declare global {
   interface Window {
-    __hooshaBoot?: { hide: () => void; fail: (message: string) => void };
+    __hovidaBoot?: { hide: () => void; fail: (message: string) => void };
   }
 }
 
 const container = document.getElementById('root');
 
 function bootFailed(message: string) {
-  if (window.__hooshaBoot?.fail) {
-    window.__hooshaBoot.fail(message);
+  if (window.__hovidaBoot?.fail) {
+    window.__hovidaBoot.fail(message);
   } else {
     // Fallback when the inline boot script itself is unavailable.
     console.error(message);
@@ -45,7 +45,7 @@ try {
     </StrictMode>
   );
   // Immediately inform boot watcher that React has initialized
-  window.__hooshaBoot?.hide();
+  window.__hovidaBoot?.hide();
 } catch (err: any) {
   bootFailed(err?.message || String(err));
 }

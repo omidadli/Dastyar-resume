@@ -1,8 +1,9 @@
 /**
- * Asia/Tehran wall-clock helper (audit fix LOC-03).
- * The server may run in any timezone (the sandbox runs UTC, 3.5h behind
- * Tehran); every attendance timestamp, Jalali "today" and legal deadline must
- * be based on Iranian local time, not the host clock.
+ * Asia/Tehran wall-clock helper.
+ * The server may run in any timezone (Render runs UTC, 3.5h behind Tehran);
+ * every Jalali stamp (resume received, message sent), Jalali "today" and the
+ * date filters of lists and reports must follow Iranian local time, not the
+ * host clock.
  */
 import { JalaliDate, formatJalaliDate, gregorianToJalali, toPersianDigits } from '../src/utils/jalali';
 
@@ -39,4 +40,24 @@ export function tehranNow(): TehranNow {
     minutes: hour * 60 + minute,
     date,
   };
+}
+
+const DAY_FMT = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'Asia/Tehran',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+
+/** Tehran calendar day of an instant, as a local-fields Date at midnight. */
+export function tehranWallDate(d: Date): Date {
+  const parts: Record<string, string> = {};
+  for (const p of DAY_FMT.formatToParts(d)) parts[p.type] = p.value;
+  return new Date(Number(parts.year), Number(parts.month) - 1, Number(parts.day));
+}
+
+/** Jalali date of an instant in Tehran (not in the host's timezone). */
+export function tehranJalaliOf(d: Date): JalaliDate {
+  const w = tehranWallDate(d);
+  return gregorianToJalali(w.getFullYear(), w.getMonth() + 1, w.getDate());
 }

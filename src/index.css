@@ -1,463 +1,214 @@
-/* Seilaneh Sabz Design System Tokens - Phase 1 */
 @import "tailwindcss";
 
+/* =====================================================================
+   HOVIDA («هویدا») design tokens — art direction «وضوح سازمانی»
+   Clarity · Intelligence · Trust. Persian-first, RTL, calm surfaces.
+   ===================================================================== */
+
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('/fonts/Vazirmatn-var.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* Inter only for Latin letters, digits and @ — names, emails, tech terms. */
+@font-face {
+  font-family: 'Inter Latin';
+  src: url('/fonts/Inter-var-latin.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0030-0039, U+0040-005A, U+0061-007A, U+00C0-00FF, U+0131, U+0152-0153;
+}
+
 @theme {
-  --color-surface-0: var(--surface-0);
-  --color-surface-1: var(--surface-1);
-  --color-surface-2: var(--surface-2);
-  --color-border-default: var(--border-default);
-  --color-border-strong: var(--border-strong);
-  --color-border-1: var(--border-default);
-  --color-border-2: var(--border-strong);
+  --font-sans: 'Inter Latin', 'Vazirmatn', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Tahoma, sans-serif;
+  --font-latin: 'Inter Latin', ui-sans-serif, system-ui, sans-serif;
 
-  --color-text-1: var(--text-1);
-  --color-text-2: var(--text-2);
-  --color-text-3: var(--text-3);
+  /* Brand green — marks, meters, accents (never as small-text color). */
+  --color-brand: #2DBA4E;
+  /* Action green — buttons with white text (4.71:1). */
+  --color-brand-strong: #1B8539;
+  /* Hover / text on soft-green surfaces (5.43:1 on #E8F1EA). */
+  --color-brand-stronger: #176F30;
+  /* Green text on white (5.08:1). */
+  --color-brand-ink: #1B7F36;
+  --color-brand-soft: #E8F1EA;
+  --color-brand-tint: #F3F8F4;
 
-  --color-brand-50: var(--brand-50);
-  --color-brand-100: var(--brand-100);
-  --color-brand-200: var(--brand-200);
-  --color-brand-300: var(--brand-300);
-  --color-brand-400: var(--brand-400);
-  --color-brand-500: var(--brand-500);
-  --color-brand-600: var(--brand-600);
-  --color-brand-700: var(--brand-700);
-  --color-brand-900: var(--brand-900);
-  --color-brand: var(--brand);
-  --color-brand-neon: var(--brand-neon);
-  --color-brand-hover: var(--brand-hover);
-  --color-brand-soft: var(--brand-soft);
+  /* Text greys. Every step stays readable (WCAG AA, ≥ 4.5:1) on white, the
+     canvas and the light tints (#EFF1F0 chips, #F3F8F4 rows, #E8F1EA): ink-3
+     ≥ 4.87:1 everywhere, ink-4 ≥ 4.5:1 — even 11px timestamps and counts. */
+  --color-ink: #252C28;
+  --color-ink-2: #4B5550;
+  --color-ink-3: #5C6560;
+  --color-ink-4: #666F6A;
 
-  --color-success: var(--success);
-  --color-success-soft: var(--success-soft);
-  --color-warning: var(--warning);
-  --color-warning-soft: var(--warning-soft);
-  --color-danger: var(--danger);
-  --color-danger-soft: var(--danger-soft);
-  --color-info: var(--info);
-  --color-info-soft: var(--info-soft);
+  --color-line: #E5E7EB;
+  --color-line-2: #EFF1F0;
+  --color-line-strong: #D1D5DB;
+  --color-canvas: #F7F8F7;
+  --color-surface: #FFFFFF;
 
-  --radius-control: 10px;
+  /* Match-level status colors (always paired with an icon + label). */
+  --color-high: #22C55E;
+  --color-high-ink: #15803D;
+  --color-high-soft: #EAF8EF;
+  --color-review: #F59E0B;
+  --color-review-ink: #B45309;
+  --color-review-soft: #FEF5E6;
+  --color-low: #EF4444;
+  --color-low-ink: #B91C1C;
+  --color-low-soft: #FDECEC;
+  --color-na: #94A3B8;
+  --color-na-ink: #475569;
+  --color-na-soft: #F1F4F8;
+
   --radius-card: 14px;
-  --radius-sheet: 20px;
-  --radius-modal: 20px;
-  --radius-pill: 9999px;
+  --radius-control: 10px;
 
-  --shadow-e1: 0 1px 2px rgba(16, 24, 20, 0.05);
-  --shadow-e2: 0 1px 2px rgba(16, 24, 20, 0.05), 0 4px 12px rgba(16, 24, 20, 0.05);
-  --shadow-e3: 0 8px 32px rgba(16, 24, 20, 0.14);
+  --shadow-card: 0 1px 2px rgba(20, 30, 24, 0.04);
+  --shadow-raise: 0 4px 14px -6px rgba(20, 30, 24, 0.12), 0 1px 2px rgba(20, 30, 24, 0.04);
+  --shadow-pop: 0 18px 40px -12px rgba(20, 30, 24, 0.22), 0 2px 6px rgba(20, 30, 24, 0.06);
+
+  --animate-fade-in: fade-in 160ms ease-out both;
+  --animate-pop-in: pop-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-sheet-up: sheet-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-slide-in: slide-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
 }
 
-@utility text-1 {
-  color: var(--text-1);
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-@utility text-2 {
-  color: var(--text-2);
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: none; }
 }
-@utility text-3 {
-  color: var(--text-3);
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: none; }
 }
-@utility border-default {
-  border-color: var(--border-default);
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(-14px); }
+  to { opacity: 1; transform: none; }
 }
-@utility border-strong {
-  border-color: var(--border-strong);
-}
-@utility bg-surface-0 {
-  background-color: var(--surface-0);
-}
-@utility bg-surface-1 {
-  background-color: var(--surface-1);
-}
-@utility bg-surface-2 {
-  background-color: var(--surface-2);
-}
-@utility bg-brand {
-  background-color: var(--brand);
-}
-@utility bg-brand-hover {
-  background-color: var(--brand-hover);
-}
-@utility bg-brand-soft {
-  background-color: var(--brand-soft);
-}
-@utility text-brand {
-  color: var(--brand-700);
-}
-@utility bg-brand-neon {
-  background-color: var(--brand-neon);
-}
-@utility shadow-neon {
-  box-shadow: 0 4px 20px -2px rgba(0, 200, 123, 0.45), 0 0 16px rgba(5, 229, 144, 0.3);
-}
-@utility bg-success-soft {
-  background-color: var(--success-soft);
-}
-@utility text-success {
-  color: var(--success);
-}
-@utility bg-warning-soft {
-  background-color: var(--warning-soft);
-}
-@utility text-warning {
-  color: var(--warning);
-}
-@utility bg-danger-soft {
-  background-color: var(--danger-soft);
-}
-@utility text-danger {
-  color: var(--danger);
-}
-@utility shadow-e1 {
-  box-shadow: var(--shadow-e1);
-}
-@utility shadow-e2 {
-  box-shadow: var(--shadow-e2);
-}
-@utility shadow-e3 {
-  box-shadow: var(--shadow-e3);
+@keyframes shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 
 @layer base {
-  :root {
-    font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif !important;
-
-    /* 4-1) Neutral (surface / text / border) */
-    --surface-0: #F6F8F6;   /* Main background with delicate 1/1000 green undertone */
-    --surface-1: #FFFFFF;   /* Cards, sheets, elevated surfaces */
-    --surface-2: #F0F3F1;   /* Sunken areas, inactive chips, skeletons */
-    --border-default: #E3E8E4; /* Hairline clean divider */
-    --border-strong: #CBD2CC;  /* Input borders, noticeable dividers */
-    --text-1: #121815;      /* High-contrast headings */
-    --text-2: #4A554F;      /* Primary body text */
-    --text-3: #73807A;      /* Subtle labels, captions (passes WCAG AA 4.5:1) */
-
-    /* Brand (Vibrant Modern Neon Emerald scale - bright, crisp & modern) */
-    --brand-50: #EDFCF6;   /* ultra light fresh luminous mint */
-    --brand-100: #D2F9E7;  /* soft clean mint */
-    --brand-200: #A5F3CF;  /* light neon mint */
-    --brand-300: #6EEAB6;  /* vibrant mint */
-    --brand-400: #2FE09B;  /* electric mint */
-    --brand-500: #00CF82;  /* luminous neon-emerald (matches logo) */
-    --brand-600: #00B873;  /* rich vibrant primary emerald */
-    --brand-700: #00995F;  /* deep accessible emerald for text on light bg */
-    --brand-800: #007A4B;  /* accessible high-contrast text on white */
-    --brand-900: #005A37;
-
-    --brand: #00C87B;          /* vibrant neon-emerald (bright & luminous) */
-    --brand-neon: #05E590;     /* electric bright neon */
-    --brand-hover: #00DC87;    /* hover glow */
-    --brand-active: #00B36E;
-    --brand-soft: #EDFCF6;
-
-    /* 4-1) Semantic (Only 3 categories + delete/error) */
-    /* Interview = Brand Vibrant Neon Green */
-    --success: #00C87B;
-    --success-soft: #EDFCF6;
-    --success-border: #A5F3CF;
-    --success-text: #008A56;
-    --success-solid: #00C87B;
-
-    /* Review = Monochromatic Amber */
-    --warning: #D89B25;
-    --warning-soft: #FDF6E9;
-    --warning-border: #F0DFB6;
-    --warning-text: #8A6116;
-    --warning-solid: #D89B25;
-
-    /* Reject & Delete/Error = Monochromatic Red/Rose */
-    --danger: #C2434B;
-    --danger-soft: #FDEDEE;
-    --danger-border: #F4C9CC;
-    --danger-text: #A2343B;
-    --danger-solid: #C2434B;
-
-    --info: var(--text-2);
-    --info-soft: var(--surface-2);
-
-    /* 4-3) Radii */
-    --radius-control: 10px;
-    --radius-card: 14px;
-    --radius-sheet: 20px;
-    --radius-modal: 20px;
-    --radius-pill: 9999px;
-
-    /* 4-3) Directed Soft Shadows */
-    --shadow-e1: 0 1px 2px rgba(16, 24, 20, 0.05);
-    --shadow-e2: 0 1px 2px rgba(16, 24, 20, 0.05), 0 4px 12px rgba(16, 24, 20, 0.05);
-    --shadow-e3: 0 8px 32px rgba(16, 24, 20, 0.14);
-
-    /* 4-3) Tokenized Z-Indices */
-    --z-sticky-tabs: 30;
-    --z-sticky-header: 40;
-    --z-drawer: 80;
-    --z-modal: 90;
-    --z-toast: 100;
-    --z-splash: 200;
-
-    color-scheme: light;
-  }
-
-  * {
-    font-family: 'Vazirmatn', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-  }
-
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
-    overflow-x: hidden;
+    background: var(--color-canvas);
+    /* Keep focused fields clear of the sticky header / fixed bottom nav. */
+    scroll-padding-top: 80px;
+    scroll-padding-bottom: 96px;
   }
-
+  @media (min-width: 1024px) {
+    html {
+      scroll-padding-bottom: 24px;
+    }
+  }
   body {
-    direction: rtl;
-    text-align: right;
-    font-feature-settings: "ss01", "ss02";
-    -webkit-tap-highlight-color: transparent;
-    user-select: none;
-    -webkit-touch-callout: none;
-    background-color: var(--surface-0);
-    color: var(--text-1);
-    line-height: 1.6;
-    overflow-x: hidden;
-    min-width: 0;
+    margin: 0;
+    min-height: 100vh;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    font-feature-settings: 'kern';
   }
-
-  /* Text selection inside content, inputs and tables */
-  input, textarea, [contenteditable="true"], p, span, h1, h2, h3, h4, h5, h6, td, th, label {
-    user-select: text;
+  ::selection {
+    background: var(--color-brand-soft);
+    color: var(--color-brand-stronger);
   }
-
-  /* Keyboard focus rings with brand accent (WCAG AA) */
   :focus-visible {
-    outline: 2px solid var(--brand);
+    outline: 2px solid var(--color-brand);
     outline-offset: 2px;
   }
+  button,
+  [role='button'] {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-ink-4);
+  }
+  /* Numbers inside Persian text keep their own direction. */
+  bdi {
+    unicode-bidi: isolate;
+  }
+  img,
+  svg {
+    max-width: none;
+  }
+}
 
-  /* Numbers tabular formatting */
-  .tabular-nums {
+@layer components {
+  .hv-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+  }
+  .hv-skeleton {
+    background: linear-gradient(90deg, #eef1ef 0%, #f6f8f7 50%, #eef1ef 100%);
+    background-size: 200% 100%;
+    animation: var(--animate-shimmer);
+    border-radius: 8px;
+  }
+  .hv-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: #d6dbd8 transparent;
+  }
+  .hv-scroll::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .hv-scroll::-webkit-scrollbar-thumb {
+    background: #d6dbd8;
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  .hv-latin {
+    font-family: var(--font-latin);
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+  .hv-num {
     font-variant-numeric: tabular-nums;
   }
-
-  /* Custom subtle scrollbar */
-  ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-  }
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  ::-webkit-scrollbar-thumb {
-    background: var(--border-strong);
-    border-radius: 9999px;
-  }
-  ::-webkit-scrollbar-thumb:hover {
-    background: var(--text-3);
+  .hv-safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 }
 
-/* 4-2) Typographic Scale Classes */
-.type-display {
-  font-size: 24px;
-  line-height: 1.4;
-  font-weight: 800;
-}
-@media (min-width: 640px) {
-  .type-display {
-    font-size: 30px;
-  }
-}
-.type-section {
-  font-size: 17px;
-  line-height: 1.55;
-  font-weight: 700;
-}
-.type-card {
-  font-size: 15px;
-  line-height: 1.5;
-  font-weight: 700;
-}
-.type-body {
-  font-size: 14px;
-  line-height: 1.7;
-  font-weight: 400;
-}
-.type-label {
-  font-size: 13px;
-  line-height: 1.5;
-  font-weight: 500;
-}
-.type-caption {
-  font-size: 12px;
-  line-height: 1.6;
-  font-weight: 400;
-}
-
-/* Microinteractions and animations */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-fadeIn {
-  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-/* Micro-interactions: Card subtle hover lift with shadow */
-.card-hover-lift {
-  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-@media (hover: hover) and (pointer: fine) {
-  .card-hover-lift:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-e2);
-  }
-}
-
-/* =========================================================
-   Modern Neon Glass Button & Element Styling
-   ========================================================= */
-button.bg-brand,
-.btn-brand,
-.btn-neon-glass {
-  background: linear-gradient(135deg, #05E590 0%, #00C87B 52%, #00AB6B 100%) !important;
-  color: #ffffff !important;
-  border: 1px solid rgba(255, 255, 255, 0.42) !important;
-  box-shadow: inset 0 1px 1.5px rgba(255, 255, 255, 0.7),
-              0 4px 18px -2px rgba(0, 200, 123, 0.45),
-              0 1px 3px rgba(0, 175, 107, 0.25) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
-  text-shadow: 0 1px 2px rgba(0, 60, 36, 0.28);
-  transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1) !important;
-  position: relative;
-}
-
-button.bg-brand:hover:not(:disabled),
-.btn-brand:hover:not(:disabled),
-.btn-neon-glass:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1DF5A6 0%, #05DC8B 52%, #00BF77 100%) !important;
-  box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.9),
-              0 6px 24px -2px rgba(0, 220, 135, 0.7),
-              0 0 20px rgba(5, 229, 144, 0.45) !important;
-  transform: translateY(-1.5px);
-}
-
-button.bg-brand:active:not(:disabled),
-.btn-brand:active:not(:disabled),
-.btn-neon-glass:active:not(:disabled) {
-  transform: translateY(0) scale(0.985) !important;
-  box-shadow: inset 0 1px 2px rgba(0, 40, 20, 0.18),
-              0 2px 8px rgba(0, 200, 123, 0.38) !important;
-}
-
-button.bg-brand:disabled,
-.btn-brand:disabled,
-.btn-neon-glass:disabled {
-  opacity: 0.55 !important;
-  cursor: not-allowed !important;
-  box-shadow: none !important;
-  transform: none !important;
-}
-
-/* Secondary frosted glass button */
-.btn-glass-subtle {
-  background: rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(0, 200, 123, 0.2);
-  color: var(--brand-700);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.btn-glass-subtle:hover {
-  background: rgba(237, 252, 246, 0.9);
-  border-color: rgba(0, 200, 123, 0.45);
-  box-shadow: 0 4px 14px -2px rgba(0, 200, 123, 0.2);
-}
-
-/* Respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
-    animation-duration: 0.01ms !important;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
     scroll-behavior: auto !important;
-  }
-}
-
-/* Hide scrollbar helpers */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-
-/* Touch momentum scroll for iOS */
-.touch-scroll {
-  -webkit-overflow-scrolling: touch;
-}
-
-/* Print Friendly Styles */
-@media print {
-  body {
-    background-color: #ffffff !important;
-    color: #000000 !important;
-  }
-  .no-print {
-    display: none !important;
-  }
-  .print-only {
-    display: block !important;
-  }
-  .print-break-inside-avoid {
-    break-inside: avoid !important;
-    page-break-inside: avoid !important;
-  }
-  .print-page-break {
-    break-after: page !important;
-    page-break-after: always !important;
-  }
-}
-
-/* Respect prefers-reduced-motion */
-@media (prefers-reduced-motion: reduce) {
-  *, ::before, ::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* Touch momentum scroll and iOS Safari optimization */
-.touch-scroll {
-  -webkit-overflow-scrolling: touch;
-}
-
-* {
-  -webkit-tap-highlight-color: transparent;
-}
-
-html, body {
-  min-height: 100%;
-  min-height: -webkit-fill-available;
-}
-
-@media screen and (max-width: 767px) {
-  /* Prevent iOS Safari from auto-zooming into inputs */
-  input[type="text"],
-  input[type="number"],
-  input[type="search"],
-  input[type="email"],
-  textarea,
-  select {
-    font-size: 16px !important;
   }
 }

@@ -1,7 +1,7 @@
 {
-  "name": "seilaneh-resume-screener",
+  "name": "hovida",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -10,10 +10,16 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/circuit.test.ts && tsx scripts/api-timeout.test.ts",
+    "test": "tsx scripts/unit.test.ts && tsx scripts/ingest.test.ts && tsx scripts/behavior.test.ts && tsx scripts/keypool.test.ts && tsx scripts/server.test.ts && tsx scripts/api-timeout.test.ts && tsx scripts/storage.test.ts",
     "test:api": "node scripts/smoke.mjs",
-    "test:decisions": "node scripts/decisions.test.mjs",
-    "test:mount": "vite build --config vite.mount.config.ts && node scripts/run-mount.mjs"
+    "test:mount": "vite build --config vite.mount.config.ts && node scripts/run-mount.mjs",
+    "brand": "python3 scripts/brand/make_logo.py",
+    "test:admin": "tsx scripts/admin-api.test.ts",
+    "build:cloudflare": "npm run build && node scripts/cloudflare/prepare-assets.mjs",
+    "test:backup": "tsx scripts/backup.test.ts",
+    "test:cloudflare": "tsx scripts/cloudflare.test.ts",
+    "cf:typecheck": "tsc -p cloudflare/tsconfig.json",
+    "cf:deploy": "wrangler deploy"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -22,19 +28,26 @@
     "core-js": "^3.50.0",
     "dotenv": "^17.2.3",
     "express": "^4.21.2",
+    "heic-decode": "^2.1.0",
+    "jpeg-js": "^0.4.4",
     "jszip": "^3.10.1",
     "lucide-react": "^0.546.0",
     "mammoth": "^1.12.2",
     "motion": "^12.23.24",
+    "omggif": "^1.0.10",
     "pdfjs-dist": "^6.3.289",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.10.1",
+    "utif2": "^4.1.0",
     "vazirmatn": "^33.0.3",
     "vite": "^6.2.3",
+    "word-extractor": "^1.0.4",
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@cloudflare/containers": "^0.3.7",
+    "@cloudflare/workers-types": "^5.20261016.1",
     "@types/express": "^4.17.21",
     "@types/jszip": "^3.4.1",
     "@types/node": "^22.14.0",
@@ -48,6 +61,8 @@
     "terser": "^5.51.2",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
-  }
+    "vite": "^6.2.3",
+    "wrangler": "^4.151.1"
+  },
+  "description": "هویدا — تحلیل هوشمند رزومه برای تیم‌های منابع انسانی (HOVIDA, AI resume screening SaaS)"
 }

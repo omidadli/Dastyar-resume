@@ -1,0 +1,59 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // HOVIDA (هویدا) on Cloudflare: Workers (edge + static pages) + Containers (the
+  // Node server, built from ./Dockerfile) + R2 (data and resume files).
+  // Step-by-step guide (Persian): docs/DEPLOY-CLOUDFLARE.md
+  "name": "hovida",
+  "main": "cloudflare/worker.ts",
+  "compatibility_date": "2026-10-01",
+
+  // Builds the web app into dist/ before `wrangler deploy` / `wrangler dev` on your machine.
+  // Workers Builds (Git integration) ignores this: set its Build command to `npm run build:cloudflare`.
+  "build": { "command": "npm run build:cloudflare" },
+
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // API calls (also file and backup downloads opened as a page) and the
+    // bundles go through the Worker; everything else is served as a static file.
+    "run_worker_first": ["/api/*", "/assets/*"]
+  },
+
+  "containers": [
+    {
+      "class_name": "HovidaServer",
+      "image": "./Dockerfile",
+      // basic = 1/4 vCPU, 1 GiB RAM, 4 GB disk. Heavier use: "standard-1" (1/2 vCPU, 4 GiB).
+      "instance_type": "basic",
+      // The app keeps its working data in one process: exactly one instance.
+      "max_instances": 1,
+      // Western Europe: close to Iran's international routes; the Gemini API is available there.
+      "constraints": { "regions": ["WEUR"] }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "HOVIDA_SERVER", "class_name": "HovidaServer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HovidaServer"] }],
+
+  // Create it once: Cloudflare dashboard › R2 › Create bucket › "hovida-data".
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "hovida-data" }],
+
+  // 01:00 Tehran time: daily copy of the data snapshot inside the bucket (backups/daily/).
+  "triggers": { "crons": ["30 21 * * *"] },
+
+  // Secrets (APP_SECRET, ADMIN_EMAILS, AI keys…) are set in the dashboard or with
+  // `npx wrangler secret put NAME` — never here. keep_vars: variables added in the
+  // dashboard survive the next deploy.
+  "vars": {
+    "AI_PROVIDER": "auto",
+    // How long the server stays up without any request before it sleeps (e.g. "30m", "2h").
+    "CONTAINER_SLEEP_AFTER": "30m"
+  },
+  "keep_vars": true,
+
+  "observability": { "enabled": true },
+  "workers_dev": true,
+  "preview_urls": false
+}

@@ -367,9 +367,9 @@ function PlatformBanners() {
             </span>
             <button
               onClick={async () => {
-                await signOut({ silent: true });
+                if (!(await signOut({ silent: true }))) return; // stayed with unsaved edits
                 window.close();
-                navigate('/admin', { replace: true });
+                navigate('/admin', { replace: true, force: true });
               }}
               className="font-bold text-[#FCD34D] hover:text-white underline-offset-4 hover:underline"
             >
@@ -429,8 +429,8 @@ function DemoBanner() {
         </span>
         <button
           onClick={async () => {
-            await signOut({ silent: true });
-            navigate('/signup');
+            if (!(await signOut({ silent: true }))) return; // stayed with unsaved edits
+            navigate('/signup', { force: true });
           }}
           className="font-bold text-[#7ee29a] hover:text-white underline-offset-4 hover:underline"
         >

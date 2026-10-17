@@ -190,6 +190,12 @@ async function main() {
     // ------------------------------------------------- job + intake ----
     const org = await call('GET', '/api/org', A);
     const dept = org.json.org.departments.find((d: any) => /فروش/.test(d.name)) || org.json.org.departments[0];
+    // A repeated department id (crafted request) must not produce duplicate ids.
+    const deps = org.json.org.departments.map((d: any) => ({ id: d.id, name: d.name, hint: d.hint }));
+    const dup = await call('PUT', '/api/org/departments', A, { departments: [...deps, { id: deps[0].id, name: 'دپارتمان تکراری', hint: '' }] });
+    const depIds = (dup.json.org?.departments || []).map((d: any) => d.id);
+    assert(dup.status === 200 && depIds.length === deps.length + 1 && new Set(depIds).size === depIds.length, 'a repeated department id gets a fresh one (ids stay unique)', depIds.join(','));
+    await call('PUT', '/api/org/departments', A, { departments: deps });
     const tpl = await call('POST', '/api/jobs/template', A, { departmentId: dept.id, roleTitle: 'سرپرست فروش' });
     const job = (await call('POST', '/api/jobs', A, { departmentId: dept.id, roleTitle: 'سرپرست فروش', understanding: tpl.json.understanding, criteriaSource: 'template' })).json.job;
     assert(Boolean(job?.id), 'job created');
@@ -203,6 +209,15 @@ async function main() {
     assert(seen[0]?.key === 'sk-limit-0001' && seen[1]?.key === 'sk-good-0002', 'first key 429 → same evaluation answered by key 2', seen.map((s) => s.key).join(','));
     assert(seen[1].prompt.includes('nima@example.com') && seen[1].system.includes('## انصاف و منع تبعیض'), 'prompt carries header text; system prompt carries the behaviour');
     assert(r1.analysisMeta?.industry === 'فروش، بازاریابی و توسعه بازار' && r1.analysisMeta?.behaviorVersion === 1, 'industry guide + behaviour version recorded', String(r1.analysisMeta?.industry));
+    // Talent bank tags: trimmed, non-empty, unique and at most 12, whatever is sent.
+    const manyTags = [' فروش ', 'فروش', '', '   ', ...Array.from({ length: 20 }, (_, i) => `برچسب ${i}`)];
+    const tal = await call('POST', `/api/resumes/${r1.id}/talent`, A, { departmentId: dept.id, note: '', tags: manyTags });
+    const bt: string[] = tal.json.record?.bankTags || [];
+    assert(
+      tal.status === 200 && bt.length === 12 && bt[0] === 'فروش' && new Set(bt).size === bt.length && bt.every((t) => t && t.trim() === t),
+      'talent tags are trimmed, unique, non-empty and capped at 12',
+      `${tal.status} ${JSON.stringify(bt.slice(0, 3))} (${bt.length})`
+    );
     const calls = await call('GET', '/api/admin/ai/calls?limit=10', A);
     assert(calls.json.items.some((c: any) => c.switchedFrom === 'محدود' && c.ok), 'AI call log shows the automatic switch');
     seen.length = 0;

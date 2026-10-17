@@ -241,9 +241,18 @@ export function resumeRoutes(): express.Router {
     const departmentId = str(req.body?.departmentId, 60);
     const dept = org.departments.find((d) => d.id === departmentId);
     if (!dept) return res.status(400).json({ error: 'دپارتمان مقصد را انتخاب کنید.' });
-    const tags = Array.isArray(req.body?.tags) ? req.body.tags.filter((t: unknown) => typeof t === 'string').map((t: string) => t.slice(0, 40)) : [];
+    // Trimmed, non-empty, unique, at most 12 (the form's limit) — whatever the client sends.
+    const rawTags: unknown[] = Array.isArray(req.body?.tags) ? req.body.tags : [];
+    const tags = Array.from(new Set(rawTags.filter((t): t is string => typeof t === 'string').map((t) => t.trim().slice(0, 40)).filter(Boolean))).slice(0, 12);
+    const wasInBank = rec.inBank;
     db.addToTalent(rec, dept.id, str(req.body?.note, 400), tags);
-    db.logActivity(org.id, actorOf(req), 'talent.added', `«${displayName(rec)}» را به بانک استعداد «${dept.name}» افزود`, { jobId: rec.jobId, resumeId: rec.id });
+    db.logActivity(
+      org.id,
+      actorOf(req),
+      'talent.added',
+      wasInBank ? `اطلاعات «${displayName(rec)}» را در بانک استعداد «${dept.name}» به‌روز کرد` : `«${displayName(rec)}» را به بانک استعداد «${dept.name}» افزود`,
+      { jobId: rec.jobId, resumeId: rec.id }
+    );
     res.json({ record: db.toListItem(rec) });
   });
 

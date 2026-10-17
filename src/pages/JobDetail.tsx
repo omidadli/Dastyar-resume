@@ -305,7 +305,7 @@ export default function JobDetail({ id }: { id: string }) {
       forgetCompareJob(job.id);
       emitChange('jobs');
       toast('فرصت شغلی و همه رزومه‌هایش حذف شد.');
-      navigate('/app/jobs', { replace: true });
+      navigate('/app/jobs', { replace: true, force: true });
     } catch (e: any) {
       toast(e?.message || 'حذف ممکن نشد.', 'error');
     }

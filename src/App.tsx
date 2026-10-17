@@ -10,6 +10,7 @@ import Landing from './pages/Landing';
 import { LoginPage, SignupPage } from './pages/Auth';
 import NotFound from './pages/NotFound';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
+import { LeaveGuardDialog } from './components/layout/LeaveGuardDialog';
 
 const CHUNK_RELOAD_KEY = 'hovida.chunk-reload';
 
@@ -60,7 +61,7 @@ const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
 function Redirect({ to }: { to: string }) {
   useEffect(() => {
-    navigate(to, { replace: true });
+    navigate(to, { replace: true, force: true }); // an address correction, not leaving a page
   }, [to]);
   return null;
 }
@@ -154,6 +155,7 @@ export default function App() {
           <AnalysisProvider>
             <Routes />
             <Toaster />
+            <LeaveGuardDialog />
           </AnalysisProvider>
         </AuthProvider>
       </ConfigProvider>

@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import type { AiStatus, AuthPayload, MeResponse, OrgPublic, UserPublic } from '../types/app';
 import { api, getToken, lastSessionWasDemo, setToken, TOKEN_KEY, UNAUTHORIZED_EVENT } from './api';
 import { clearCompare, setCompareScope } from './compare';
-import { navigate } from './router';
+import { navigate, requestLeave } from './router';
 
 /**
  * Work that must finish while the session is still valid (e.g. telling the
@@ -25,7 +25,7 @@ if (typeof window !== 'undefined') {
   const m = window.location.hash.match(/^#support=([A-Za-z0-9_-]{20,256})$/);
   if (m) {
     setToken(m[1], { persist: false });
-    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   }
 }
 
@@ -46,7 +46,8 @@ interface AuthValue {
   /** Set while a platform admin uses this tab as a support session. */
   support: MeResponse['support'];
   signIn: (payload: AuthPayload) => void;
-  signOut: (opts?: { silent?: boolean }) => Promise<void>;
+  /** False when the person chose to stay with unsaved edits (nothing happened). */
+  signOut: (opts?: { silent?: boolean }) => Promise<boolean>;
   refresh: () => Promise<void>;
   setOrg: (org: OrgPublic) => void;
   setUser: (user: UserPublic) => void;
@@ -130,7 +131,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Disabled account / suspended workspace: show the operator's explanation.
       if ((detail.code === 'ACCOUNT_DISABLED' || detail.code === 'ORG_SUSPENDED') && detail.message) setNotice(detail.message);
       else setNotice(wasDemo ? DEMO_EXPIRED_NOTICE : EXPIRED_NOTICE);
-      if (window.location.pathname.startsWith('/app')) navigate('/login', { replace: true });
+      // The session is gone: unsaved edits can't be saved anyway, so no question.
+      if (window.location.pathname.startsWith('/app')) navigate('/login', { replace: true, force: true });
     };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
@@ -146,7 +148,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (mine && !next && e.oldValue === mine) {
         reset();
         setNotice(SIGNED_OUT_ELSEWHERE);
-        if (window.location.pathname.startsWith('/app')) navigate('/login', { replace: true });
+        if (window.location.pathname.startsWith('/app')) navigate('/login', { replace: true, force: true });
       } else if (!mine && next) {
         setToken(next, { persist: false });
         setStatus('loading');
@@ -196,7 +198,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = useCallback(
-    async (opts: { silent?: boolean } = {}) => {
+    async (opts: { silent?: boolean } = {}): Promise<boolean> => {
+      // Unsaved edits on screen: ask before signing out throws them away.
+      if (!(await requestLeave())) return false;
       if (beforeSignOutHooks.size) {
         await Promise.race([
           Promise.allSettled(Array.from(beforeSignOutHooks, (fn) => Promise.resolve().then(fn))),
@@ -209,7 +213,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         /* already invalid */
       }
       reset();
-      if (!opts.silent) navigate('/', { replace: true });
+      if (!opts.silent) navigate('/', { replace: true, force: true });
+      return true;
     },
     [reset]
   );

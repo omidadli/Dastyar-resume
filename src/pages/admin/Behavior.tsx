@@ -18,6 +18,7 @@ import {
 import { Button, Callout, Card, CardHeader, Chip, ConfirmDialog, ErrorState, SearchInput, Segmented, Select, Skeleton, Switch, Tabs, TextArea, TextInput, toast } from '../../components/ui';
 import { adminApi, fileToBase64 } from '../../lib/api';
 import { normalizeImageFile } from '../../lib/extractText';
+import { useLeaveGuard } from '../../lib/router';
 import { useAsync } from '../../lib/useAsync';
 import { faNumber } from '../../lib/format';
 import { matchesSearch } from '../../lib/normalizeFa';
@@ -96,15 +97,8 @@ export default function Behavior() {
 
   const dirty = useMemo(() => Boolean(data && draft && JSON.stringify(draft) !== JSON.stringify(data.config)), [data, draft]);
 
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  // Unsaved behaviour edits: leaving the page (or the tab) asks first.
+  useLeaveGuard(dirty);
 
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
   if (!data || !draft) return <Skeleton className="h-[480px] rounded-card" />;
@@ -493,7 +487,7 @@ function LabTab({ draft, dirty }: { draft: BehaviorConfig; dirty: boolean }) {
             </div>
           )}
           <TextArea label="متن رزومه" optional={Boolean(file)} rows={7} value={resumeText} onChange={(e) => setResumeText(e.target.value)} placeholder="متن رزومه را اینجا بچسبانید، یا فایل انتخاب کنید." />
-          <label className="flex items-center gap-3 rounded-[12px] border border-dashed border-line-strong px-4 py-3 cursor-pointer hover:border-brand/50">
+          <label className="flex items-center gap-3 rounded-[12px] border border-dashed border-line-strong px-4 py-3 cursor-pointer hover:border-brand/50 focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/15">
             <FileUp className="w-5 h-5 text-brand-strong" />
             <span className="flex-1 min-w-0 text-[13px] text-ink-2 truncate">{file ? file.name : 'انتخاب فایل رزومه (هر قالبی)'}</span>
             {file && (
@@ -508,9 +502,10 @@ function LabTab({ draft, dirty }: { draft: BehaviorConfig; dirty: boolean }) {
                 حذف
               </button>
             )}
+            {/* sr-only, not hidden: the picker must be reachable with the keyboard. */}
             <input
               type="file"
-              className="hidden"
+              className="sr-only"
               onChange={(e) => {
                 setFile(e.target.files?.[0] || null);
                 e.target.value = ''; // picking the same file again still fires onChange

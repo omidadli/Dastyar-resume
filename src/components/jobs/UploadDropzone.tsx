@@ -98,12 +98,19 @@ export function UploadDropzone({
         tabIndex={0}
         aria-disabled={disabled}
         onClick={() => !disabled && inputRef.current?.click()}
-        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !disabled && inputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault(); // Space would also scroll the page
+          if (!disabled) inputRef.current?.click();
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           if (!disabled) setDragging(true);
         }}
-        onDragLeave={() => setDragging(false)}
+        onDragLeave={(e) => {
+          // Moving over the icon or text inside fires dragleave too: only leaving the zone counts.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+        }}
         onDrop={(e) => {
           e.preventDefault();
           setDragging(false);

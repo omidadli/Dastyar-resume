@@ -3,6 +3,7 @@ import { Gauge, LifeBuoy, Megaphone, Save, UserPlus, Wrench } from 'lucide-react
 import { Button, Callout, Card, CardHeader, ErrorState, Segmented, Skeleton, Switch, TextArea, TextInput, toast } from '../../components/ui';
 import { adminApi } from '../../lib/api';
 import { refreshPublicConfig } from '../../lib/config';
+import { useLeaveGuard } from '../../lib/router';
 import { useAsync } from '../../lib/useAsync';
 import type { BannerTone, SystemSettings } from '../../types/admin';
 import { AdminHeader } from './shared';
@@ -69,15 +70,8 @@ export default function SystemPage() {
     if (data) setForm(data);
   }, [data]);
   const dirty = useMemo(() => Boolean(data && form && JSON.stringify(data) !== JSON.stringify(form)), [data, form]);
-  useEffect(() => {
-    if (!dirty) return;
-    const warn = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = '';
-    };
-    window.addEventListener('beforeunload', warn);
-    return () => window.removeEventListener('beforeunload', warn);
-  }, [dirty]);
+  // Unsaved settings: leaving the page (or the tab) asks first.
+  useLeaveGuard(dirty);
 
   if (error && !data) return <ErrorState message={error} onRetry={reload} />;
   if (!form || !data) return <Skeleton className="h-[420px] rounded-card" />;

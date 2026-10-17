@@ -59,7 +59,8 @@ export default function AiKeys() {
   const [form, setForm] = useState<FormState | null>(null);
   const [formError, setFormError] = useState<{ message: string; field?: string } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState<string | null>(null);
+  // Several keys can be under test at once (the one just added + a manual click).
+  const [testing, setTesting] = useState<ReadonlySet<string>>(() => new Set());
   const [results, setResults] = useState<Record<string, KeyTestResult>>({});
   const [removing, setRemoving] = useState<AiKeyPublic | null>(null);
   const [, tick] = useState(0);
@@ -95,7 +96,7 @@ export default function AiKeys() {
   };
 
   const test = async (id: string) => {
-    setTesting(id);
+    setTesting((s) => new Set(s).add(id));
     try {
       const { result, ai } = await adminApi.testKey(id);
       setResults((r) => ({ ...r, [id]: result }));
@@ -105,7 +106,11 @@ export default function AiKeys() {
     } catch (err: any) {
       toast(err?.message || 'آزمایش انجام نشد.', 'error');
     } finally {
-      setTesting(null);
+      setTesting((s) => {
+        const next = new Set(s);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -246,7 +251,7 @@ export default function AiKeys() {
             total={adminKeys.length}
             runtime={runtimeOf(k.id)}
             result={results[k.id]}
-            testing={testing === k.id}
+            testing={testing.has(k.id)}
             onTest={() => void test(k.id)}
             onEdit={() => openForm(k)}
             onToggle={(v) => void apply(() => adminApi.updateKey(k.id, { enabled: v }), v ? 'کلید فعال شد.' : 'کلید غیرفعال شد.')}
@@ -285,7 +290,7 @@ export default function AiKeys() {
                   </span>
                   {rt && <HealthBadge health={data.useEnvKeys ? rt.health : 'disabled'} />}
                   <div className="flex-1" />
-                  <Button size="sm" variant="secondary" icon={Zap} loading={testing === k.id} onClick={() => void test(k.id)}>
+                  <Button size="sm" variant="secondary" icon={Zap} loading={testing.has(k.id)} onClick={() => void test(k.id)}>
                     آزمایش
                   </Button>
                 </li>

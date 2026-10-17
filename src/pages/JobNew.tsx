@@ -11,7 +11,7 @@ import { emitChange } from '../lib/events';
 import { departmentIcon } from '../lib/departmentIcons';
 import { EMPLOYMENT_LABELS } from '../lib/match';
 import { toPersianDigits } from '../lib/format';
-import { navigate } from '../lib/router';
+import { navigate, useLeaveGuard } from '../lib/router';
 import { useTitle } from '../lib/useTitle';
 import type { CriteriaSource, EmploymentType, JobUnderstanding, ScreeningAnswers } from '../types/screening';
 
@@ -64,6 +64,9 @@ export default function JobNew() {
   const [touched, setTouched] = useState(false);
   const lastKey = useRef('');
   const abortRef = useRef<AbortController | null>(null);
+
+  // Typed details, chosen files or a later step would be lost by leaving: ask first.
+  useLeaveGuard(step > 1 || files.length > 0 || [form.roleTitle, form.extraNotes, form.location].some((v) => (v || '').trim() !== ''));
 
   const departments = org?.departments || [];
   const step1Valid = Boolean(form.departmentId && form.roleTitle.trim().length >= 2);
@@ -151,7 +154,7 @@ export default function JobNew() {
       emitChange('activity');
       if (files.length) analysis.start(job, files);
       toast(files.length ? `«${job.roleTitle}» ساخته شد و تحلیل ${toPersianDigits(files.length)} رزومه آغاز شد.` : `«${job.roleTitle}» ساخته شد.`);
-      navigate(`/app/jobs/${job.id}`, { replace: true });
+      navigate(`/app/jobs/${job.id}`, { replace: true, force: true }); // created: nothing is lost
     } catch (e: any) {
       toast(e?.message || 'ساخت فرصت شغلی ممکن نشد.', 'error');
     } finally {

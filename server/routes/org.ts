@@ -40,7 +40,9 @@ export function orgRoutes(): express.Router {
       const name = str(raw?.name, 60);
       if (name.length < 2) return res.status(400).json({ error: 'نام هر دپارتمان باید دست‌کم ۲ حرف باشد.' });
       if (next.some((d) => d.name === name)) return res.status(400).json({ error: `نام «${name}» تکراری است.` });
-      const existingId = typeof raw?.id === 'string' && org.departments.some((d) => d.id === raw.id) ? raw.id : null;
+      // An existing id keeps its department — once: a repeated id gets a fresh one (ids must stay unique).
+      const existingId =
+        typeof raw?.id === 'string' && org.departments.some((d) => d.id === raw.id) && !next.some((d) => d.id === raw.id) ? raw.id : null;
       next.push({ id: existingId || makeDepartmentId(name, [...org.departments, ...next]), name, hint: str(raw?.hint, 300) });
     }
     res.json({ org: db.updateOrg(org.id, { departments: next }) });

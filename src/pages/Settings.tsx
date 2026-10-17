@@ -24,7 +24,7 @@ import { copyText } from '../lib/clipboard';
 import { useAuth, useCan } from '../lib/auth';
 import { emitChange } from '../lib/events';
 import { faDate, faRelative, toPersianDigits } from '../lib/format';
-import { navigate } from '../lib/router';
+import { navigate, useLeaveGuard } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { Department, Role, TeamMember } from '../types/app';
@@ -45,6 +45,7 @@ function OrgTab() {
   const canEdit = useCan('admin');
   const [name, setName] = useState(org?.name || '');
   const [saving, setSaving] = useState(false);
+  useLeaveGuard(canEdit && Boolean(org) && name.trim() !== org?.name);
   if (!org) return null;
   const save = async () => {
     setSaving(true);
@@ -119,6 +120,9 @@ function DepartmentsTab() {
     setList((prev) => prev.map((d, k) => (k === i ? { ...d, ...p } : d)));
     setDirty(true);
   };
+  const [justAdded, setJustAdded] = useState<string | null>(null);
+  // Leaving with unsaved departments (another tab, page, or closing the tab) asks first.
+  useLeaveGuard(dirty);
   const save = async () => {
     setSaving(true);
     try {
@@ -145,12 +149,19 @@ function DepartmentsTab() {
       <div className="flex flex-col gap-2.5">
         {list.map((d, i) => (
           <div key={d._k} className="grid sm:grid-cols-[220px_1fr_auto] gap-2 items-start rounded-[12px] border border-line p-3">
-            <TextInput aria-label="نام دپارتمان" value={d.name} onChange={(e) => patch(i, { name: e.target.value })} disabled={!canEdit} placeholder="نام دپارتمان" />
+            <TextInput
+              aria-label="نام دپارتمان"
+              value={d.name}
+              onChange={(e) => patch(i, { name: e.target.value })}
+              disabled={!canEdit}
+              placeholder="نام دپارتمان"
+              autoFocus={d._k === justAdded}
+            />
             <TextInput aria-label="حوزه کاری" value={d.hint} onChange={(e) => patch(i, { hint: e.target.value })} disabled={!canEdit} placeholder="حوزه کاری، مثلاً: فروش حضوری، مذاکره، پخش" />
             {canEdit && (
               <IconButton
                 icon={Trash2}
-                label="حذف دپارتمان"
+                label={d.name.trim() ? `حذف دپارتمان «${d.name.trim()}»` : 'حذف دپارتمان'}
                 tone="danger"
                 className="mt-0.5"
                 disabled={list.length <= 1}
@@ -169,7 +180,9 @@ function DepartmentsTab() {
             variant="secondary"
             icon={Plus}
             onClick={() => {
-              setList((prev) => [...prev, { id: '', name: '', hint: '', _k: `new-${++deptSeq}` }]);
+              const key = `new-${++deptSeq}`;
+              setList((prev) => [...prev, { id: '', name: '', hint: '', _k: key }]);
+              setJustAdded(key); // the new row's name field takes focus
               setDirty(true);
             }}
             disabled={list.length >= 40}
@@ -394,6 +407,7 @@ function MessagesTab() {
   const canEdit = useCan('admin');
   const [sig, setSig] = useState(org?.messageSignature || '');
   const [saving, setSaving] = useState(false);
+  useLeaveGuard(canEdit && sig.trim() !== (org?.messageSignature || '').trim());
   if (!org) return null;
   const save = async () => {
     setSaving(true);
@@ -533,6 +547,8 @@ function AccountTab() {
   const [pw, setPw] = useState({ current: '', next: '' });
   const [pwError, setPwError] = useState<{ message: string; field?: string } | null>(null);
   const [savingPw, setSavingPw] = useState(false);
+  // A typed new password counts; the current-password box alone may be the browser's autofill.
+  useLeaveGuard(Boolean(user) && (name.trim() !== user?.name || title.trim() !== (user?.title || '') || pw.next !== ''));
   if (!user) return null;
   const saveProfile = async () => {
     setSavingProfile(true);
@@ -614,9 +630,23 @@ function AccountTab() {
   );
 }
 
+const TAB_LABELS: Record<SettingsTab, string> = {
+  org: 'سازمان',
+  departments: 'دپارتمان‌ها',
+  team: 'تیم',
+  messages: 'پیام‌ها',
+  ai: 'هوش مصنوعی',
+  account: 'حساب کاربری',
+};
+
 export default function Settings({ tab }: { tab: string }) {
-  useTitle('تنظیمات');
-  const current = (['org', 'departments', 'team', 'messages', 'ai', 'account'].includes(tab) ? tab : 'org') as SettingsTab;
+  const known = Object.prototype.hasOwnProperty.call(TAB_LABELS, tab);
+  const current = (known ? tab : 'org') as SettingsTab;
+  useTitle(`تنظیمات · ${TAB_LABELS[current]}`);
+  // An unknown tab in the address: show «سازمان» under its own address.
+  useEffect(() => {
+    if (tab && !known) navigate('/app/settings/org', { replace: true, force: true });
+  }, [tab, known]);
   return (
     <div>
       <PageHeader title="تنظیمات" subtitle="سازمان، دپارتمان‌ها، تیم، پیام‌ها و هوش مصنوعی" />
@@ -625,12 +655,12 @@ export default function Settings({ tab }: { tab: string }) {
         value={current}
         onChange={(t) => navigate(`/app/settings/${t}`, { keepScroll: true })}
         items={[
-          { id: 'org', label: 'سازمان', icon: Building2 },
-          { id: 'departments', label: 'دپارتمان‌ها', icon: LayoutGrid },
-          { id: 'team', label: 'تیم', icon: Users },
-          { id: 'messages', label: 'پیام‌ها', icon: MessageSquareText },
-          { id: 'ai', label: 'هوش مصنوعی', icon: Sparkles },
-          { id: 'account', label: 'حساب کاربری', icon: UserRound },
+          { id: 'org', label: TAB_LABELS.org, icon: Building2 },
+          { id: 'departments', label: TAB_LABELS.departments, icon: LayoutGrid },
+          { id: 'team', label: TAB_LABELS.team, icon: Users },
+          { id: 'messages', label: TAB_LABELS.messages, icon: MessageSquareText },
+          { id: 'ai', label: TAB_LABELS.ai, icon: Sparkles },
+          { id: 'account', label: TAB_LABELS.account, icon: UserRound },
         ]}
       />
       {current === 'org' && <OrgTab />}

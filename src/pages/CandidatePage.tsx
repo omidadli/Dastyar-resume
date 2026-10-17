@@ -44,7 +44,7 @@ export default function CandidatePage({ id }: { id: string }) {
             criteria={job?.understanding.criteria}
             variant="page"
             onChange={(r) => q.setData((d) => (d ? { ...d, record: { ...d.record, ...r } } : d))}
-            onDeleted={() => navigate(job ? `/app/jobs/${job.id}` : '/app/candidates', { replace: true })}
+            onDeleted={() => navigate(job ? `/app/jobs/${job.id}` : '/app/candidates', { replace: true, force: true })}
           />
         </div>
         <ResumePreview record={rec} className="min-h-[70vh] xl:h-[calc(100vh-108px)]" />

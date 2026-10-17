@@ -193,9 +193,12 @@ export function TalentModal({
   }, [record?.id]);
 
   if (!record || !org) return null;
+  const TAG_LIMIT = 12; // the server keeps at most 12
+  const atLimit = tags.length >= TAG_LIMIT;
   const addTag = () => {
-    const t = tagInput.trim();
-    if (t && !tags.includes(t)) setTags([...tags, t].slice(0, 12));
+    const t = tagInput.trim().slice(0, 40);
+    if (!t || atLimit) return;
+    if (!tags.includes(t)) setTags([...tags, t]);
     setTagInput('');
   };
   const save = async () => {
@@ -243,7 +246,7 @@ export function TalentModal({
           <span className="text-[13px] font-semibold text-ink-2">برچسب‌ها</span>
           <div className="flex flex-wrap gap-1.5">
             {tags.map((t) => (
-              <button key={t} onClick={() => setTags(tags.filter((x) => x !== t))} title="حذف برچسب" className="group">
+              <button key={t} onClick={() => setTags(tags.filter((x) => x !== t))} title="حذف برچسب" aria-label={`حذف برچسب «${t}»`} className="group">
                 <Chip tone="brand" className="group-hover:bg-low-soft group-hover:text-low-ink">
                   {t} ×
                 </Chip>
@@ -260,10 +263,13 @@ export function TalentModal({
                   addTag();
                 }
               }}
-              placeholder="برچسب تازه و Enter"
-              className="flex-1 h-10 px-3 rounded-control border border-line bg-surface text-sm focus:outline-none focus:border-brand focus:ring-[3px] focus:ring-brand/15"
+              placeholder={atLimit ? 'حداکثر ۱۲ برچسب' : 'برچسب تازه و Enter'}
+              aria-label="برچسب تازه"
+              maxLength={40}
+              disabled={atLimit}
+              className="flex-1 h-10 px-3 rounded-control border border-line bg-surface text-sm focus:outline-none focus:border-brand focus:ring-[3px] focus:ring-brand/15 disabled:bg-canvas disabled:cursor-not-allowed"
             />
-            <Button variant="secondary" onClick={addTag}>
+            <Button variant="secondary" onClick={addTag} disabled={atLimit || !tagInput.trim()}>
               افزودن
             </Button>
           </div>

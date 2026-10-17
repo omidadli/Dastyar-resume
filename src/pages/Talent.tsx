@@ -51,7 +51,7 @@ export default function Talent({ dept }: { dept?: string }) {
 
   // An address with a department this workspace does not have.
   useEffect(() => {
-    if (dept && overview.data && !overview.data.departments.some((d) => d.id === dept)) navigate('/app/talent', { replace: true });
+    if (dept && overview.data && !overview.data.departments.some((d) => d.id === dept)) navigate('/app/talent', { replace: true, force: true });
   }, [dept, overview.data]);
 
   const [selected, setSelected] = useState<ResumeListItem | null>(null);

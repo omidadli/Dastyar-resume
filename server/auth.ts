@@ -230,6 +230,26 @@ export function verifyFileSignature(resumeId: string, exp: number, inline: boole
   return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
 
+/** Full-backup downloads (/admin): a short-lived link bound to the admin who asked for it. */
+const BACKUP_URL_TTL_MS = 10 * 60_000;
+
+function backupSignature(userId: string, exp: number): string {
+  return crypto.createHmac('sha256', appSecret()).update(`backup.${userId}.${exp}`).digest('base64url');
+}
+
+export function signedBackupUrl(userId: string): { url: string; expiresAt: number } {
+  const exp = Date.now() + BACKUP_URL_TTL_MS;
+  const qs = new URLSearchParams({ uid: userId, exp: String(exp), sig: backupSignature(userId, exp) });
+  return { url: `/api/backup/download?${qs.toString()}`, expiresAt: exp };
+}
+
+export function verifyBackupSignature(userId: string, exp: number, sig: string): boolean {
+  if (!userId || !Number.isFinite(exp) || exp < Date.now() || exp > Date.now() + BACKUP_URL_TTL_MS + 60_000) return false;
+  const expected = Buffer.from(backupSignature(userId, exp));
+  const given = Buffer.from(String(sig || ''));
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+}
+
 // ------------------------------------------------------------ rate limits ----
 
 export class RateLimiter {

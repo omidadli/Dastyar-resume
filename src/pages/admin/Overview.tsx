@@ -140,8 +140,8 @@ export default function Overview() {
             <span className="hv-latin">{data.server.node}</span>
           </Row>
           <Row label="آغاز به کار">{faDateTime(data.server.startedAtISO)}</Row>
-          <Row label="پوشه داده‌ها">
-            <span className="hv-latin text-[12px]">{data.server.dataDir}</span>
+          <Row label={data.server.storage?.driver === 'remote' ? 'محل نگهداری داده‌ها' : 'پوشه داده‌ها'}>
+            <span className="hv-latin text-[12px]">{data.server.storage?.driver === 'remote' ? data.server.storage.location : data.server.dataDir}</span>
           </Row>
           <Row label="مدیران سامانه">{faNumber(data.users.admins)}</Row>
           <Row label="کاربران غیرفعال">{faNumber(data.users.disabled)}</Row>

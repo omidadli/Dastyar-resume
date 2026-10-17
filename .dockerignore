@@ -1,0 +1,15 @@
+# Built inside the image.
+node_modules
+dist
+dist-mount
+# Never bake data, secrets or local state into the image.
+data
+.env*
+!.env.example
+.wrangler
+.git
+# Not needed to build the server.
+docs
+scripts
+*.log
+coverage

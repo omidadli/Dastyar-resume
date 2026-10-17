@@ -43,11 +43,13 @@ interface AuthValue {
   unread: number;
   /** Persian notice shown on the login page (e.g. expired session). */
   notice: string | null;
+  /** How the login page shows `notice`: a warning (default) or good news (a finished restore). */
+  noticeTone: 'warning' | 'success';
   /** Set while a platform admin uses this tab as a support session. */
   support: MeResponse['support'];
   signIn: (payload: AuthPayload) => void;
   /** False when the person chose to stay with unsaved edits (nothing happened). */
-  signOut: (opts?: { silent?: boolean }) => Promise<boolean>;
+  signOut: (opts?: { silent?: boolean; notice?: string; noticeTone?: 'warning' | 'success' }) => Promise<boolean>;
   refresh: () => Promise<void>;
   setOrg: (org: OrgPublic) => void;
   setUser: (user: UserPublic) => void;
@@ -72,7 +74,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [org, setOrg] = useState<OrgPublic | null>(null);
   const [ai, setAi] = useState<AiStatus | null>(null);
   const [unread, setUnread] = useState(0);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNoticeText] = useState<string | null>(null);
+  const [noticeTone, setNoticeTone] = useState<'warning' | 'success'>('warning');
+  const setNotice = useCallback((text: string | null, tone: 'warning' | 'success' = 'warning') => {
+    setNoticeText(text);
+    setNoticeTone(tone);
+  }, []);
   const [support, setSupport] = useState<MeResponse['support']>(null);
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -116,7 +123,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setNotice('ارتباط با سرور برقرار نشد؛ لطفاً اتصال را بررسی و صفحه را تازه کنید.');
       }
     }
-  }, [reset]);
+  }, [reset, setNotice]);
 
   useEffect(() => {
     void refresh();
@@ -136,7 +143,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
-  }, [reset]);
+  }, [reset, setNotice]);
 
   // Other tabs: follow a sign-out of this same session, and pick up a sign-in
   // while this tab is signed out. A tab never silently switches accounts.
@@ -157,7 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     window.addEventListener('storage', onStorage);
     return () => window.removeEventListener('storage', onStorage);
-  }, [reset, refresh]);
+  }, [reset, refresh, setNotice]);
 
   // The comparison tray belongs to the workspace this tab is signed in to.
   useEffect(() => {
@@ -195,10 +202,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setSupport(me.support ?? null);
       })
       .catch(() => {});
-  }, []);
+  }, [setNotice]);
 
   const signOut = useCallback(
-    async (opts: { silent?: boolean } = {}): Promise<boolean> => {
+    async (opts: { silent?: boolean; notice?: string; noticeTone?: 'warning' | 'success' } = {}): Promise<boolean> => {
       // Unsaved edits on screen: ask before signing out throws them away.
       if (!(await requestLeave())) return false;
       if (beforeSignOutHooks.size) {
@@ -213,10 +220,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         /* already invalid */
       }
       reset();
+      if (opts.notice) setNotice(opts.notice, opts.noticeTone);
       if (!opts.silent) navigate('/', { replace: true, force: true });
       return true;
     },
-    [reset]
+    [reset, setNotice]
   );
 
   const value = useMemo<AuthValue>(
@@ -227,6 +235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       ai,
       unread,
       notice,
+      noticeTone,
       support,
       signIn,
       signOut,
@@ -236,7 +245,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUnread,
       clearNotice: () => setNotice(null),
     }),
-    [status, user, org, ai, unread, notice, support, signIn, signOut, refresh]
+    [status, user, org, ai, unread, notice, noticeTone, support, signIn, signOut, refresh, setNotice]
   );
 
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;

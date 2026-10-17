@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ArchiveRestore,
   ArrowRight,
   BrainCircuit,
   Building2,
@@ -29,6 +30,7 @@ import AiKeys from './AiKeys';
 import Behavior from './Behavior';
 import SystemPage from './System';
 import Logs from './Logs';
+import BackupPage from './Backup';
 import { SkipToMain } from '../../components/layout/SkipToMain';
 
 interface NavItem {
@@ -45,6 +47,7 @@ const NAV: NavItem[] = [
   { to: '/admin/ai', label: 'کلیدهای هوش مصنوعی', icon: KeyRound, render: () => <AiKeys /> },
   { to: '/admin/behavior', label: 'رفتار هوش مصنوعی', icon: BrainCircuit, render: () => <Behavior /> },
   { to: '/admin/system', label: 'تنظیمات سامانه', icon: Settings2, render: () => <SystemPage /> },
+  { to: '/admin/backup', label: 'پشتیبان‌گیری و انتقال', icon: ArchiveRestore, render: () => <BackupPage /> },
   { to: '/admin/logs', label: 'گزارش رویدادها', icon: ScrollText, render: () => <Logs /> },
 ];
 
@@ -76,7 +79,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 
 function AdminLogin() {
   useTitle('ورود به پنل مدیریت');
-  const { signIn, notice, clearNotice } = useAuth();
+  const { signIn, notice, noticeTone, clearNotice } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +114,7 @@ function AdminLogin() {
       <h1 className="text-[20px] font-extrabold text-ink">ورود مدیر سامانه</h1>
       <p className="text-[13px] text-ink-3 mt-1.5 leading-relaxed">با همان حساب هویدا وارد شوید؛ دسترسی پنل فقط برای مدیران سامانه باز است.</p>
       {(error || notice) && (
-        <Callout tone="danger" className="mt-4">
+        <Callout tone={error ? 'danger' : noticeTone === 'success' ? 'brand' : 'warning'} className="mt-4">
           {error || notice}
         </Callout>
       )}

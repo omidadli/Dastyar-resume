@@ -40,11 +40,14 @@ import type {
   AiKeyInput,
   AiSettingsPublic,
   AuditItem,
+  BackupInfo,
+  BackupSummary,
   BehaviorConfig,
   BehaviorPayload,
   KeyStrategy,
   LabResult,
   PublicConfig,
+  RestoreStatus,
   SystemSettings,
 } from '../types/admin';
 
@@ -135,6 +138,8 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Public endpoints (login, signup, demo): never attach the session token. */
   anonymous?: boolean;
+  /** Binary upload (backup restore) instead of a JSON body. */
+  rawBody?: Blob;
 }
 
 async function request<T>(method: string, url: string, body?: unknown, opts: RequestOptions = {}): Promise<T> {
@@ -150,10 +155,10 @@ async function request<T>(method: string, url: string, body?: unknown, opts: Req
     res = await fetch(url, {
       method,
       headers: {
-        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(opts.rawBody ? { 'Content-Type': 'application/octet-stream' } : body !== undefined ? { 'Content-Type': 'application/json' } : {}),
         ...(token ? { [SESSION_HEADER]: token } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: opts.rawBody ?? (body !== undefined ? JSON.stringify(body) : undefined),
       signal: controller.signal,
     });
   } catch (err: any) {
@@ -388,6 +393,17 @@ export const adminApi = {
   system: () => get<SystemSettings>('/api/admin/system'),
   updateSystem: (b: Partial<SystemSettings>) => patch<SystemSettings>('/api/admin/system', b),
   audit: (p: { q?: string; limit?: number } = {}) => get<{ items: AuditItem[] }>(`/api/admin/audit${qs(p)}`),
+  backupInfo: () => get<BackupInfo>('/api/admin/backup'),
+  /** A 10-minute link: the browser downloads the ZIP itself (no size limit in memory). */
+  backupLink: () => post<{ url: string; expiresAt: number }>('/api/admin/backup/link'),
+  restoreStart: (fileName: string, size: number) => post<{ id: string; chunkBytes: number }>('/api/admin/restore', { fileName, size }),
+  restoreChunk: (id: string, offset: number, chunk: Blob, signal?: AbortSignal) =>
+    request<{ received: number }>('PUT', `/api/admin/restore/${encodeURIComponent(id)}/chunk?offset=${offset}`, undefined, { rawBody: chunk, timeoutMs: 180_000, signal }),
+  restoreInspect: (id: string) => post<BackupSummary>(`/api/admin/restore/${encodeURIComponent(id)}/inspect`, {}, { timeoutMs: 180_000 }),
+  restoreApply: (id: string, confirm: string) => post<{ state: string }>(`/api/admin/restore/${encodeURIComponent(id)}/apply`, { confirm }),
+  restoreCancel: (id: string) => del<{ ok: boolean }>(`/api/admin/restore/${encodeURIComponent(id)}`),
+  /** Public on purpose: a finished restore ends every session, this tab's too. */
+  restoreStatus: (id: string) => get<RestoreStatus>(`/api/restore-status/${encodeURIComponent(id)}`, { anonymous: true, timeoutMs: 20_000 }),
 };
 
 export function fileToBase64(file: File | Blob): Promise<string> {

@@ -213,7 +213,7 @@ export interface AdminOverview {
   ai: { enabled: boolean; keys: number; ready: number; cooling: number; invalid: number; callsToday: number; failuresToday: number };
   formats: Array<{ format: string; count: number }>;
   daily: Array<{ day: string; resumes: number; signups: number }>;
-  server: { startedAtISO: string; node: string; dataDir: string; version: string };
+  server: { startedAtISO: string; node: string; dataDir: string; version: string; storage: StorageDriverInfo };
 }
 
 export interface AdminOrgRow {
@@ -252,4 +252,62 @@ export interface AdminMe {
   isAdmin: boolean;
   /** True while no platform admin exists — a setup code (printed in the server log) can claim the role. */
   setupPending: boolean;
+}
+
+// ---------------------------------------------------------------- backups ----
+
+export interface StorageDriverInfo {
+  /** fs: the server's disk (DATA_DIR); remote: an object store (Cloudflare R2). */
+  driver: 'fs' | 'remote';
+  location: string;
+}
+
+export interface BackupInfo {
+  storage: StorageDriverInfo;
+  lastSavedAtISO: string | null;
+  counts: { orgs: number; users: number; jobs: number; resumes: number; files: number };
+  storageBytes: number;
+  lastBackup: { atISO: string; actorName: string } | null;
+  limits: { maxBytes: number; chunkBytes: number };
+  appVersion: string;
+}
+
+export interface BackupCounts {
+  orgs: number;
+  demoOrgs: number;
+  users: number;
+  jobs: number;
+  resumes: number;
+  files: number;
+  missingFiles: number;
+}
+
+/** What an uploaded backup contains — shown before anything is replaced. */
+export interface BackupSummary {
+  fileName: string;
+  bytes: number;
+  createdAtISO: string;
+  createdAtJalali: string;
+  createdBy: string;
+  appVersion: string;
+  counts: BackupCounts;
+  /** Accounts that will be platform admins after the restore. */
+  admins: number;
+  aiKeys: { total: number; readable: number };
+}
+
+export interface RestoreResult {
+  counts: BackupCounts;
+  filesRestored: number;
+  filesMissing: number;
+  aiKeys: { restored: number; unreadable: number; keptFromThisServer: number };
+  admins: number;
+  saved: boolean;
+}
+
+export interface RestoreStatus {
+  state: 'applying' | 'done' | 'failed';
+  progress: { done: number; total: number };
+  result: RestoreResult | null;
+  error: string | null;
 }

@@ -1,0 +1,7 @@
+{
+  // Test harness only — `npm run test:cloudflare`. Never deployed.
+  "name": "hovida-storage-dev",
+  "main": "storage-dev.worker.ts",
+  "compatibility_date": "2026-10-01",
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "hovida-data-dev" }]
+}

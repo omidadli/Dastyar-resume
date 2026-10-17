@@ -1,5 +1,4 @@
 import express from 'express';
-import fs from 'fs';
 import * as db from '../db';
 import { actorOf, ctxOf, signedFileUrl, verifyFileSignature } from '../auth';
 import { draftMessage, evaluateResume, KIND_TITLES } from '../ai/screening';
@@ -325,40 +324,45 @@ export function resumeRoutes(): express.Router {
 /** Mounted WITHOUT requireAuth: access is granted by the HMAC signature. */
 export function fileRoutes(): express.Router {
   const r = express.Router();
-  r.get('/files/:id', (req, res) => {
-    const id = req.params.id;
-    const exp = Number(req.query.exp);
-    const inline = str(req.query.inline, 2) === '1';
-    if (!verifyFileSignature(id, exp, inline, str(req.query.sig, 200))) {
-      return res.status(403).json({ error: 'پیوند فایل منقضی شده یا نامعتبر است؛ صفحه را تازه کنید.' });
-    }
-    const rec = db.getResumeUnsafe(id);
-    if (!rec || !rec.filePath) return res.status(404).json({ error: 'فایل در دسترس نیست.' });
-    const full = db.resolveFilePath(rec.filePath);
-    if (!full || !fs.existsSync(full)) return res.status(404).json({ error: 'فایل روی سرور موجود نیست.' });
-    const ext = fileExt(rec);
-    const asInline = inline && PREVIEWABLE.includes(ext);
-    res.setHeader('Content-Type', FILE_MIME[ext] || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `${asInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(rec.fileName)}`);
-    // Images and text can't script anyway; the sandbox is defence in depth.
-    // (Not for PDFs: Chrome refuses to render a sandboxed PDF.)
-    if (ext !== 'pdf') res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
-    res.setHeader('X-Content-Type-Options', 'nosniff');
-    res.setHeader('Cache-Control', 'private, max-age=300');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    const stream = fs.createReadStream(full);
-    // The file can vanish between the check above and the read (deleted
-    // resume, cleanup): answer 404 instead of crashing the process.
-    stream.on('error', () => {
-      if (!res.headersSent) {
-        res.removeHeader('Content-Disposition');
-        res.removeHeader('Content-Security-Policy');
-        res.status(404).type('application/json').send(JSON.stringify({ error: 'فایل روی سرور موجود نیست.' }));
-      } else {
-        res.destroy();
+  r.get(
+    '/files/:id',
+    h(async (req, res) => {
+      const id = req.params.id;
+      const exp = Number(req.query.exp);
+      const inline = str(req.query.inline, 2) === '1';
+      if (!verifyFileSignature(id, exp, inline, str(req.query.sig, 200))) {
+        return res.status(403).json({ error: 'پیوند فایل منقضی شده یا نامعتبر است؛ صفحه را تازه کنید.' });
       }
-    });
-    stream.pipe(res);
-  });
+      const rec = db.getResumeUnsafe(id);
+      if (!rec || !rec.filePath) return res.status(404).json({ error: 'فایل در دسترس نیست.' });
+      const file = await db.openResumeFile(rec);
+      if (!file) return res.status(404).json({ error: 'فایل روی سرور موجود نیست.' });
+      const ext = fileExt(rec);
+      const asInline = inline && PREVIEWABLE.includes(ext);
+      res.setHeader('Content-Type', FILE_MIME[ext] || 'application/octet-stream');
+      if (file.size) res.setHeader('Content-Length', String(file.size));
+      res.setHeader('Content-Disposition', `${asInline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(rec.fileName)}`);
+      // Images and text can't script anyway; the sandbox is defence in depth.
+      // (Not for PDFs: Chrome refuses to render a sandboxed PDF.)
+      if (ext !== 'pdf') res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox");
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      // The file can vanish between the check above and the read (deleted
+      // resume, cleanup): answer 404 instead of crashing the process.
+      file.stream.on('error', () => {
+        if (!res.headersSent) {
+          res.removeHeader('Content-Disposition');
+          res.removeHeader('Content-Security-Policy');
+          res.removeHeader('Content-Length');
+          res.status(404).type('application/json').send(JSON.stringify({ error: 'فایل روی سرور موجود نیست.' }));
+        } else {
+          res.destroy();
+        }
+      });
+      res.on('close', () => file.stream.destroy());
+      file.stream.pipe(res);
+    })
+  );
   return r;
 }

@@ -6,25 +6,78 @@
  * that platform admins store in /admin (AES-256-GCM). Keep APP_SECRET stable:
  * changing it invalidates signed links and makes stored AI keys unreadable
  * (the admin panel then asks for them again).
+ *
+ * The persisted secret lives in the storage driver (`.app-secret`): a file in
+ * DATA_DIR, or an object in R2 on Cloudflare — where the container disk is
+ * wiped on every restart, so a file next to the app would not survive.
  */
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { DATA_DIR } from './db';
+import { DATA_DIR, PreconditionFailedError, storage } from './storage';
 
+const SECRET_KEY = '.app-secret';
 let cachedSecret: Buffer | null = null;
+
+function fromEnv(): Buffer | null {
+  const env = process.env.APP_SECRET?.trim();
+  return env && env.length >= 16 ? Buffer.from(env, 'utf-8') : null;
+}
+
+function parseStored(raw: string | Buffer | undefined | null): Buffer | null {
+  if (!raw) return null;
+  const buf = Buffer.from(String(raw).trim(), 'hex');
+  return buf.length >= 32 ? buf : null;
+}
+
+/**
+ * Loads (or creates) the secret before the server takes requests. Needed for
+ * the remote store, which cannot be read synchronously.
+ */
+export async function initAppSecret(): Promise<void> {
+  if (cachedSecret) return;
+  const env = fromEnv();
+  if (env) {
+    cachedSecret = env;
+    return;
+  }
+  const st = storage();
+  const existing = await st.get(SECRET_KEY, { patienceMs: Number(process.env.STORAGE_PATIENCE_MS) || 60_000 });
+  const stored = parseStored(existing?.body.toString('utf-8'));
+  if (stored) {
+    cachedSecret = stored;
+    return;
+  }
+  const fresh = crypto.randomBytes(32);
+  try {
+    await st.put(SECRET_KEY, fresh.toString('hex'), existing ? {} : { ifNoneMatch: '*' });
+    cachedSecret = fresh;
+  } catch (err) {
+    if (err instanceof PreconditionFailedError) {
+      // Another instance created it a moment ago: use that one.
+      cachedSecret = parseStored((await st.get(SECRET_KEY, { patienceMs: Number(process.env.STORAGE_PATIENCE_MS) || 30_000 }))?.body.toString('utf-8'));
+      if (cachedSecret) return;
+    }
+    console.warn('[secret] could not persist app secret; signed links reset on restart.', (err as any)?.message || err);
+    cachedSecret = fresh;
+  }
+}
 
 export function appSecret(): Buffer {
   if (cachedSecret) return cachedSecret;
-  const env = process.env.APP_SECRET?.trim();
-  if (env && env.length >= 16) {
-    cachedSecret = Buffer.from(env, 'utf-8');
+  const env = fromEnv();
+  if (env) {
+    cachedSecret = env;
     return cachedSecret;
   }
-  const file = path.join(DATA_DIR, '.app-secret');
+  if (storage().driver !== 'fs') throw new Error('APP_SECRET is not loaded yet — call initAppSecret() at start-up.');
+  const file = path.join(DATA_DIR, SECRET_KEY);
   try {
-    cachedSecret = Buffer.from(fs.readFileSync(file, 'utf-8').trim(), 'hex');
-    if (cachedSecret.length >= 32) return cachedSecret;
+    const stored = parseStored(fs.readFileSync(file, 'utf-8'));
+    if (stored) {
+      cachedSecret = stored;
+      return cachedSecret;
+    }
   } catch {
     /* create below */
   }

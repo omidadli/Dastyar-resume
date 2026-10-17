@@ -77,7 +77,7 @@ function DemoButton() {
 
 export function LoginPage() {
   useTitle('ورود');
-  const { signIn, notice, clearNotice } = useAuth();
+  const { signIn, notice, noticeTone, clearNotice } = useAuth();
   const { query } = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -127,7 +127,7 @@ export function LoginPage() {
       }
     >
       {notice && !error && (
-        <Callout tone="warning" className="mb-5">
+        <Callout tone={noticeTone === 'success' ? 'brand' : 'warning'} className="mb-5">
           {notice}
         </Callout>
       )}

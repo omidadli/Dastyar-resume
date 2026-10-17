@@ -93,16 +93,23 @@ function PageFallback() {
   );
 }
 
+/**
+ * Record ids are letters, digits, «_» and «-». Anything else (a «%» left by a
+ * host that re-encodes malformed escapes, e.g. Cloudflare's static assets
+ * turning «%E0» into «%25E0») is an address that cannot exist.
+ */
+const RECORD_ID = /^[A-Za-z0-9_-]{1,100}$/;
+
 function appPage(pathname: string): React.ReactNode {
   if (pathname === '/app' || pathname === '/app/') return <Dashboard />;
   if (pathname === '/app/jobs') return <Jobs />;
   if (pathname === '/app/jobs/new') return <JobNew />;
   let m = matchPath('/app/jobs/:id', pathname);
   // Keyed: moving between two openings (notification, search) starts with fresh filters and panels.
-  if (m) return <JobDetail key={m.id} id={m.id} />;
+  if (m) return RECORD_ID.test(m.id) ? <JobDetail key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/candidates') return <Candidates />;
   m = matchPath('/app/candidates/:id', pathname);
-  if (m) return <CandidatePage key={m.id} id={m.id} />;
+  if (m) return RECORD_ID.test(m.id) ? <CandidatePage key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/compare') return <Compare />;
   if (pathname === '/app/talent') return <Talent />;
   m = matchPath('/app/talent/:dept', pathname);

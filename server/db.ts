@@ -2,8 +2,11 @@
  * HOVIDA persistence layer (multi-tenant).
  *
  * No external database: state lives in memory and is snapshotted to
- * data/hovida-store.json (debounced, atomic rename). Original resume files are
- * stored under data/resumes/<orgId>/<jobId>/<resumeId>.<ext>.
+ * `hovida-store.json` (debounced). Original resume files are stored under
+ * `resumes/<orgId>/<jobId>/<resumeId>.<ext>`. Both go through ./storage: the
+ * local disk (DATA_DIR, atomic renames) or a remote object store (Cloudflare
+ * R2), where every snapshot write is conditional on the version this process
+ * last saw — a second instance can never silently overwrite newer data.
  *
  * Every read/write helper that takes an `orgId` enforces tenant isolation — a
  * record that belongs to another organization behaves exactly like a missing one.
@@ -13,9 +16,9 @@
  * purged for real, and the first organization that signs up adopts that legacy
  * data (or the one whose owner email matches LEGACY_OWNER_EMAIL).
  */
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
+import type { Readable } from 'stream';
+import { DATA_DIR as STORAGE_DATA_DIR, FsStorage, PreconditionFailedError, isSafeKey, storage } from './storage';
 import type { AuditItem } from '../src/types/admin';
 import type {
   AnalysisHistoryEntry,
@@ -59,10 +62,10 @@ import {
 } from '../src/utils/jalali';
 import { matchesSearch } from '../src/lib/normalizeFa';
 
-export const DATA_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(process.cwd(), 'data');
-const STORE_FILE = path.join(DATA_DIR, 'hovida-store.json');
-const LEGACY_FILE = path.join(DATA_DIR, 'screening-store.json');
-export const RESUMES_DIR = path.join(DATA_DIR, 'resumes');
+export const DATA_DIR = STORAGE_DATA_DIR;
+const STORE_KEY = 'hovida-store.json';
+const LEGACY_KEY = 'screening-store.json';
+const RESUMES_PREFIX = 'resumes/';
 
 /** Minutes a recruiter typically spends on a first manual read — shown as an assumption. */
 export const MANUAL_MINUTES_PER_RESUME = 6;
@@ -88,7 +91,7 @@ export interface SessionRecord {
   support?: { adminId: string; adminName: string } | null;
 }
 
-interface Snapshot {
+export interface StoreSnapshot {
   version: 2;
   orgs: OrgRecord[];
   users: UserRecord[];
@@ -126,54 +129,63 @@ function nowStamp(at?: Date) {
 
 // ------------------------------------------------------------ persistence ----
 
+/** How long start-up waits for an unreachable remote store before giving up (it never starts empty). */
+export function startupPatienceMs(): number {
+  return Number(process.env.STORAGE_PATIENCE_MS) || 90_000;
+}
+
+/** Puts a parsed snapshot into memory (initStore, backup restore). */
+function loadSnapshotIntoMemory(snap: StoreSnapshot) {
+  snap.orgs?.forEach((o) => orgs.set(o.id, normalizeOrg(o)));
+  snap.users?.forEach((u) => users.set(u.id, u));
+  snap.sessions?.forEach((s) => sessions.set(s.tokenHash, s));
+  snap.jobs?.forEach((j) => jobs.set(j.id, normalizeJob(j)));
+  snap.resumes?.forEach((r) => resumes.set(r.id, normalizeResume(r)));
+  activity = Array.isArray(snap.activity) ? snap.activity : [];
+  platformBlob = snap.platform ?? null;
+  auditLog = Array.isArray(snap.audit) ? snap.audit : [];
+  aiStatsBlob = snap.aiStats ?? null;
+  for (const j of jobs.values()) {
+    // A server restart interrupts any analysis that was in flight.
+    if (j.analysisStatus === 'processing') j.analysisStatus = 'done';
+    recomputeJob(j.id, false);
+  }
+}
+
+function clearMemory() {
+  orgs.clear();
+  users.clear();
+  sessions.clear();
+  jobs.clear();
+  resumes.clear();
+  activity = [];
+  platformBlob = null;
+  auditLog = [];
+  aiStatsBlob = null;
+}
+
 export async function initStore() {
   if (initialized) return;
   initialized = true;
-  await fs.promises.mkdir(RESUMES_DIR, { recursive: true });
-  // Temp files left by a crash mid-save (the real snapshot is renamed atomically).
-  for (const f of await fs.promises.readdir(DATA_DIR).catch(() => [] as string[])) {
-    if (f.startsWith(path.basename(STORE_FILE) + '.') && f.endsWith('.tmp')) await fs.promises.unlink(path.join(DATA_DIR, f)).catch(() => {});
-  }
-  let raw: string | null = null;
-  try {
-    raw = await fs.promises.readFile(STORE_FILE, 'utf-8');
-  } catch {
-    raw = null;
-  }
-  if (raw) {
+  const st = storage();
+  await st.init();
+  // A remote store that cannot be reached must stop the start-up: starting
+  // empty and saving would overwrite every workspace.
+  const obj = await st.get(STORE_KEY, { patienceMs: startupPatienceMs() });
+  if (obj) {
+    storeEtag = obj.etag;
+    storeExists = true;
     try {
-      const snap = JSON.parse(raw) as Snapshot;
-      snap.orgs?.forEach((o) => orgs.set(o.id, normalizeOrg(o)));
-      snap.users?.forEach((u) => users.set(u.id, u));
-      snap.sessions?.forEach((s) => sessions.set(s.tokenHash, s));
-      snap.jobs?.forEach((j) => jobs.set(j.id, normalizeJob(j)));
-      snap.resumes?.forEach((r) => resumes.set(r.id, normalizeResume(r)));
-      activity = Array.isArray(snap.activity) ? snap.activity : [];
-      platformBlob = snap.platform ?? null;
-      auditLog = Array.isArray(snap.audit) ? snap.audit : [];
-      aiStatsBlob = snap.aiStats ?? null;
-      for (const j of jobs.values()) {
-        // A server restart interrupts any analysis that was in flight.
-        if (j.analysisStatus === 'processing') j.analysisStatus = 'done';
-        recomputeJob(j.id, false);
-      }
-      console.log(`[store] loaded ${orgs.size} orgs, ${users.size} users, ${jobs.size} jobs, ${resumes.size} resumes.`);
+      loadSnapshotIntoMemory(JSON.parse(obj.body.toString('utf-8')) as StoreSnapshot);
+      console.log(`[store] loaded ${orgs.size} orgs, ${users.size} users, ${jobs.size} jobs, ${resumes.size} resumes (${st.driver === 'fs' ? 'disk' : st.location}).`);
       claimLegacyDataOnStartup();
       return;
     } catch (err) {
       console.error('[store] snapshot unreadable — starting empty (file kept as .corrupt):', err);
-      await fs.promises.copyFile(STORE_FILE, STORE_FILE + '.corrupt').catch(() => {});
+      await st.put(STORE_KEY + '.corrupt', obj.body).catch(() => {});
       // Whatever was loaded before the failure is a half-snapshot: never keep
       // (and later save) an inconsistent mix of orgs without users, etc.
-      orgs.clear();
-      users.clear();
-      sessions.clear();
-      jobs.clear();
-      resumes.clear();
-      activity = [];
-      platformBlob = null;
-      auditLog = [];
-      aiStatsBlob = null;
+      clearMemory();
     }
   }
   await migrateLegacySnapshot();
@@ -183,9 +195,13 @@ export async function initStore() {
 async function migrateLegacySnapshot() {
   let raw: string;
   try {
-    raw = await fs.promises.readFile(LEGACY_FILE, 'utf-8');
-  } catch {
-    return; // fresh install
+    const obj = await storage().get(LEGACY_KEY, { patienceMs: startupPatienceMs() });
+    if (!obj) return; // fresh install
+    raw = obj.body.toString('utf-8');
+  } catch (err) {
+    // An unreachable remote store must stop the start-up (never start empty).
+    if (storage().driver === 'remote') throw err;
+    return;
   }
   try {
     const snap = JSON.parse(raw) as { batches?: any[]; resumes?: any[] };
@@ -235,7 +251,7 @@ async function migrateLegacySnapshot() {
   }
 }
 
-function snapshot(): Snapshot {
+function snapshot(): StoreSnapshot {
   return {
     version: 2,
     orgs: Array.from(orgs.values()),
@@ -250,64 +266,136 @@ function snapshot(): Snapshot {
   };
 }
 
-let saving = false;
+// The remote store (R2) accepts one write per key per second, and each write
+// uploads the whole snapshot — so it is debounced a little longer there.
+const REMOTE = () => storage().driver === 'remote';
+/** Debounce, but never postpone a save by more than this while changes keep coming. */
+const SAVE_DEBOUNCE_MS = () => (REMOTE() ? 1000 : 400);
+const SAVE_MAX_WAIT_MS = () => (REMOTE() ? 5000 : 3000);
+const MIN_SAVE_INTERVAL_MS = () => (REMOTE() ? 1100 : 0);
+
+let saving: Promise<void> | null = null;
 let dirty = false;
 let firstDirtyAt = 0;
-let tmpCounter = 0;
-/** Debounce, but never postpone a save by more than this while changes keep coming. */
-const SAVE_DEBOUNCE_MS = 400;
-const SAVE_MAX_WAIT_MS = 3000;
+let lastSaveAt = 0;
+let lastSavedAtISO: string | null = null;
+let failedSaves = 0;
+/** Version of the stored snapshot this process last read or wrote (remote store). */
+let storeEtag: string | null = null;
+let storeExists = false;
+/** Set when another instance wrote newer data: this one must not save again. */
+let fenced = false;
 
-function tmpPath() {
-  tmpCounter = (tmpCounter + 1) % 1_000_000;
-  return `${STORE_FILE}.${process.pid}.${tmpCounter}.tmp`;
+let fenceHandler: (err: Error) => void = () => {
+  console.error(
+    '[store] another server instance saved newer data — this instance stops now so it never overwrites it; the platform restarts it with the newer data.'
+  );
+  setTimeout(() => process.exit(75), 50);
+};
+
+/** Tests only: what happens when a conditional snapshot write loses. */
+export function onStoreFenced(handler: (err: Error) => void) {
+  fenceHandler = handler;
+}
+
+export function storeStatus() {
+  const st = storage();
+  return { driver: st.driver, location: st.location, lastSavedAtISO, pending: dirty || Boolean(saving), fenced };
 }
 
 /**
- * Debounced snapshot save. Writes are serialized (one at a time) and every
- * write uses its own temp file, so a slow disk can never interleave two
- * snapshots into one corrupt file before the atomic rename.
+ * Debounced snapshot save. Writes are serialized (one at a time); the disk
+ * driver writes a temp file per snapshot and renames it atomically.
  */
 export function scheduleSave() {
+  if (fenced) return;
   if (!dirty) firstDirtyAt = Date.now();
   dirty = true;
   if (saving) return; // the running save re-schedules itself when it finishes
   if (saveTimer) clearTimeout(saveTimer);
-  const wait = Math.max(0, Math.min(SAVE_DEBOUNCE_MS, firstDirtyAt + SAVE_MAX_WAIT_MS - Date.now()));
+  const backoff = failedSaves ? Math.min(30_000, 1000 * 2 ** (failedSaves - 1)) : 0;
+  const wait = Math.max(
+    backoff,
+    lastSaveAt + MIN_SAVE_INTERVAL_MS() - Date.now(),
+    Math.min(SAVE_DEBOUNCE_MS(), firstDirtyAt + SAVE_MAX_WAIT_MS() - Date.now()),
+    0
+  );
   saveTimer = setTimeout(() => void runSave(), wait);
 }
 
-async function runSave() {
+function runSave(): Promise<void> {
   saveTimer = null;
-  if (saving || !dirty) return;
-  saving = true;
+  if (saving) return saving;
+  if (!dirty || fenced) return Promise.resolve();
   dirty = false;
-  const tmp = tmpPath();
-  try {
-    await fs.promises.mkdir(DATA_DIR, { recursive: true });
-    await fs.promises.writeFile(tmp, JSON.stringify(snapshot()), 'utf-8');
-    await fs.promises.rename(tmp, STORE_FILE);
-  } catch (err) {
-    console.error('[store] snapshot save failed:', err);
-    fs.promises.unlink(tmp).catch(() => {});
-    dirty = true; // try again with the next change or the retry below
-  } finally {
-    saving = false;
-    if (dirty) scheduleSave();
-  }
+  saving = (async () => {
+    const st = storage();
+    const json = JSON.stringify(snapshot());
+    try {
+      const opts = st.driver === 'remote' ? (storeExists && storeEtag ? { ifMatch: storeEtag } : storeExists ? {} : { ifNoneMatch: '*' as const }) : {};
+      const res = await st.put(STORE_KEY, json, opts);
+      storeEtag = res.etag;
+      storeExists = true;
+      failedSaves = 0;
+      lastSavedAtISO = new Date().toISOString();
+    } catch (err) {
+      if (err instanceof PreconditionFailedError) {
+        fenced = true;
+        fenceHandler(err);
+        return;
+      }
+      failedSaves++;
+      console.error('[store] snapshot save failed:', (err as any)?.message || err);
+      dirty = true; // try again with the next change or the retry below
+    } finally {
+      lastSaveAt = Date.now();
+    }
+  })().finally(() => {
+    saving = null;
+    if (dirty && !fenced) scheduleSave();
+  });
+  return saving;
 }
 
-/** Synchronous flush for graceful shutdown (SIGTERM on deploys). */
+/**
+ * Waits until everything changed so far is stored (graceful shutdown, before a
+ * backup). Resolves false when that did not happen within `timeoutMs`.
+ */
+export async function flushSave(timeoutMs = 30_000): Promise<boolean> {
+  if (!initialized) return true;
+  const deadline = Date.now() + timeoutMs;
+  while (!fenced && Date.now() < deadline) {
+    if (saving) {
+      await saving;
+      continue;
+    }
+    if (!dirty) return true;
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+    }
+    const wait = lastSaveAt + MIN_SAVE_INTERVAL_MS() - Date.now();
+    if (wait > 0) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, Math.min(wait, Math.max(0, deadline - Date.now())));
+      });
+    }
+    await runSave();
+  }
+  return !dirty && !saving && !fenced;
+}
+
+/** Synchronous flush for an exiting process (disk driver; the remote store needs flushSave). */
 export function flushSaveSync() {
   if (!initialized) return;
+  const st = storage();
+  if (!(st instanceof FsStorage)) return;
   if (saveTimer) clearTimeout(saveTimer);
   saveTimer = null;
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const tmp = tmpPath();
-    fs.writeFileSync(tmp, JSON.stringify(snapshot()), 'utf-8');
-    fs.renameSync(tmp, STORE_FILE);
+    st.putSync(STORE_KEY, JSON.stringify(snapshot()));
     dirty = false;
+    lastSavedAtISO = new Date().toISOString();
   } catch (err) {
     console.error('[store] final flush failed:', err);
   }
@@ -410,17 +498,23 @@ export function safeExt(fileName: string): string {
   return SAFE_EXTENSIONS.includes(ext) ? ext : 'bin';
 }
 
-export function resolveFilePath(relPath: string): string | null {
-  const full = path.resolve(RESUMES_DIR, relPath);
-  if (!full.startsWith(path.resolve(RESUMES_DIR) + path.sep)) return null; // traversal guard
-  return full;
+/** Storage key of a resume file path as recorded on the resume (relative to resumes/). */
+function resumeKey(relPath: string | null | undefined): string | null {
+  if (!relPath || typeof relPath !== 'string') return null;
+  const key = RESUMES_PREFIX + relPath.replace(/\\/g, '/');
+  return isSafeKey(key) ? key : null; // traversal guard
 }
 
 export function deleteFileQuietly(relPath: string | null | undefined) {
-  if (!relPath) return;
-  const full = resolveFilePath(relPath);
-  if (!full) return;
-  fs.promises.unlink(full).catch(() => {});
+  const key = resumeKey(relPath);
+  if (key) storage().delete(key).catch(() => {});
+}
+
+function deletePrefixQuietly(prefix: string) {
+  if (!isSafeKey(prefix.replace(/\/$/, ''))) return;
+  storage()
+    .deletePrefix(prefix)
+    .catch((err) => console.warn(`[store] could not remove ${prefix}:`, err?.message || err));
 }
 
 async function writeResumeFile(
@@ -432,36 +526,40 @@ async function writeResumeFile(
 ): Promise<{ relPath: string; size: number } | null> {
   if (!base64) return null;
   try {
-    const dir = path.join(RESUMES_DIR, orgKey, jobId);
-    await fs.promises.mkdir(dir, { recursive: true });
-    const full = path.join(dir, `${recordId}.${safeExt(fileName)}`);
+    const relPath = `${orgKey}/${jobId}/${recordId}.${safeExt(fileName)}`;
+    const key = resumeKey(relPath);
+    if (!key) return null;
     const buf = Buffer.from(base64, 'base64');
-    await fs.promises.writeFile(full, buf);
-    return { relPath: path.relative(RESUMES_DIR, full), size: buf.length };
+    await storage().put(key, buf);
+    return { relPath, size: buf.length };
   } catch (err) {
-    console.error('[store] file save failed:', err);
+    console.error('[store] file save failed:', (err as any)?.message || err);
     return null;
   }
 }
 
 export async function readResumeFileBuffer(rec: ResumeRecord): Promise<Buffer | null> {
-  if (!rec.filePath) return null;
-  const full = resolveFilePath(rec.filePath);
-  if (!full) return null;
+  const key = resumeKey(rec.filePath);
+  if (!key) return null;
   try {
-    return await fs.promises.readFile(full);
+    return (await storage().get(key))?.body ?? null;
   } catch {
     return null;
   }
 }
 
 export async function readResumeFileBase64(rec: ResumeRecord): Promise<string | null> {
-  if (!rec.filePath) return null;
-  const full = resolveFilePath(rec.filePath);
-  if (!full) return null;
+  return (await readResumeFileBuffer(rec))?.toString('base64') ?? null;
+}
+
+/** The original file as a stream (signed downloads); null when it is gone. */
+export async function openResumeFile(rec: ResumeRecord): Promise<{ stream: Readable; size: number } | null> {
+  const key = resumeKey(rec.filePath);
+  if (!key) return null;
   try {
-    return (await fs.promises.readFile(full)).toString('base64');
-  } catch {
+    return await storage().openStream(key);
+  } catch (err) {
+    console.error('[store] file read failed:', (err as any)?.message || err);
     return null;
   }
 }
@@ -549,7 +647,7 @@ export function deleteOrg(id: string) {
   for (const u of Array.from(users.values())) if (u.orgId === id) deleteUserRecord(u.id);
   activity = activity.filter((a) => a.orgId !== id);
   orgs.delete(id);
-  fs.promises.rm(path.join(RESUMES_DIR, id), { recursive: true, force: true }).catch(() => {});
+  deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`);
   scheduleSave();
 }
 
@@ -824,8 +922,8 @@ function deleteJobRecord(id: string) {
       resumes.delete(rid);
     }
   }
-  if (j?.orgId) fs.promises.rm(path.join(RESUMES_DIR, j.orgId, id), { recursive: true, force: true }).catch(() => {});
-  fs.promises.rm(path.join(RESUMES_DIR, id), { recursive: true, force: true }).catch(() => {}); // legacy layout
+  if (j?.orgId) deletePrefixQuietly(`${RESUMES_PREFIX}${j.orgId}/${id}/`);
+  deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`); // legacy layout
   jobs.delete(id);
 }
 
@@ -1704,23 +1802,17 @@ export function platformDaily(days = 14): Array<{ day: string; resumes: number; 
 
 let storageCache: { at: number; bytes: number } | null = null;
 
-/** Bytes used by stored resume files (cached for a minute). */
+/** Bytes used by stored resume files and the snapshot (cached for a minute). */
 export async function storageBytes(): Promise<number> {
   if (storageCache && Date.now() - storageCache.at < 60_000) return storageCache.bytes;
+  const st = storage();
   let total = 0;
-  async function walk(dir: string) {
-    const entries = await fs.promises.readdir(dir, { withFileTypes: true }).catch(() => [] as fs.Dirent[]);
-    for (const e of entries) {
-      const full = path.join(dir, e.name);
-      if (e.isDirectory()) await walk(full);
-      else total += (await fs.promises.stat(full).catch(() => null))?.size || 0;
-    }
-  }
-  await walk(RESUMES_DIR);
   try {
-    total += (await fs.promises.stat(STORE_FILE)).size;
-  } catch {
-    /* no snapshot yet */
+    total += (await st.usage(RESUMES_PREFIX)).bytes;
+    total += (await st.head(STORE_KEY))?.size || 0;
+  } catch (err) {
+    console.warn('[store] storage usage unavailable:', (err as any)?.message || err);
+    return storageCache?.bytes ?? 0;
   }
   storageCache = { at: Date.now(), bytes: total };
   return total;
@@ -1742,4 +1834,71 @@ export function allJobsBrief(limit = 300): Array<{ id: string; orgId: string | n
 
 export function getJobUnsafe(id: string): Job | null {
   return jobs.get(id) || null;
+}
+
+// ---------------------------------------------------------------- backups ----
+
+/** What a full backup carries: everything except sign-in sessions and runtime AI counters. */
+export function exportSnapshotForBackup(): StoreSnapshot {
+  return { ...snapshot(), sessions: [], aiStats: undefined };
+}
+
+/** The current state as JSON (safety copy before a restore). */
+export function currentSnapshotJson(): string {
+  return JSON.stringify(snapshot());
+}
+
+/** Storage key of a resume's original file, or null (no file / unsafe path). */
+export function resumeFileKey(relPath: string | null | undefined): string | null {
+  return resumeKey(relPath);
+}
+
+/** Every stored original file referenced by a resume. */
+export function resumeFileEntries(): Array<{ resumeId: string; key: string }> {
+  const out: Array<{ resumeId: string; key: string }> = [];
+  for (const r of resumes.values()) {
+    const key = resumeKey(r.filePath);
+    if (key) out.push({ resumeId: r.id, key });
+  }
+  return out;
+}
+
+const isStr = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+
+/**
+ * Checks that a parsed object is a HOVIDA snapshot and drops records that
+ * could not be served (missing ids). Throws with a Persian message otherwise.
+ */
+export function validateSnapshot(raw: any): StoreSnapshot {
+  if (!raw || typeof raw !== 'object' || raw.version !== 2) throw new Error('داده‌های داخل فایل پشتیبان قالب شناخته‌شده‌ای ندارند.');
+  for (const k of ['orgs', 'users', 'jobs', 'resumes'] as const) {
+    if (!Array.isArray(raw[k])) throw new Error('داده‌های داخل فایل پشتیبان ناقص است.');
+  }
+  return {
+    version: 2,
+    orgs: raw.orgs.filter((o: any) => o && isStr(o.id) && typeof o.name === 'string'),
+    users: raw.users.filter((u: any) => u && isStr(u.id) && isStr(u.email) && isStr(u.orgId) && typeof u.passwordHash === 'string'),
+    sessions: [],
+    jobs: raw.jobs.filter((j: any) => j && isStr(j.id)),
+    resumes: raw.resumes.filter((r: any) => r && isStr(r.id) && isStr(r.jobId)),
+    activity: Array.isArray(raw.activity) ? raw.activity.filter((a: any) => a && typeof a === 'object') : [],
+    platform: raw.platform && typeof raw.platform === 'object' ? raw.platform : undefined,
+    audit: Array.isArray(raw.audit) ? raw.audit.filter((a: any) => a && typeof a === 'object') : [],
+    aiStats: undefined,
+  };
+}
+
+/**
+ * Replaces every workspace, user and setting with a restored snapshot.
+ * Sign-in sessions are dropped (everyone signs in again); this server's
+ * runtime AI counters are kept.
+ */
+export function replaceAllData(snap: StoreSnapshot) {
+  const keepAiStats = aiStatsBlob;
+  clearMemory();
+  loadSnapshotIntoMemory({ ...snap, sessions: [] });
+  aiStatsBlob = keepAiStats;
+  storageCache = null;
+  claimLegacyDataOnStartup();
+  scheduleSave();
 }

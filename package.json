@@ -10,11 +10,16 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/unit.test.ts && tsx scripts/ingest.test.ts && tsx scripts/behavior.test.ts && tsx scripts/keypool.test.ts && tsx scripts/server.test.ts && tsx scripts/api-timeout.test.ts",
+    "test": "tsx scripts/unit.test.ts && tsx scripts/ingest.test.ts && tsx scripts/behavior.test.ts && tsx scripts/keypool.test.ts && tsx scripts/server.test.ts && tsx scripts/api-timeout.test.ts && tsx scripts/storage.test.ts",
     "test:api": "node scripts/smoke.mjs",
     "test:mount": "vite build --config vite.mount.config.ts && node scripts/run-mount.mjs",
     "brand": "python3 scripts/brand/make_logo.py",
-    "test:admin": "tsx scripts/admin-api.test.ts"
+    "test:admin": "tsx scripts/admin-api.test.ts",
+    "build:cloudflare": "npm run build && node scripts/cloudflare/prepare-assets.mjs",
+    "test:backup": "tsx scripts/backup.test.ts",
+    "test:cloudflare": "tsx scripts/cloudflare.test.ts",
+    "cf:typecheck": "tsc -p cloudflare/tsconfig.json",
+    "cf:deploy": "wrangler deploy"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -41,6 +46,8 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@cloudflare/containers": "^0.3.7",
+    "@cloudflare/workers-types": "^5.20261016.1",
     "@types/express": "^4.17.21",
     "@types/jszip": "^3.4.1",
     "@types/node": "^22.14.0",
@@ -54,7 +61,8 @@
     "terser": "^5.51.2",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "vite": "^6.2.3",
+    "wrangler": "^4.151.1"
   },
   "description": "هویدا — تحلیل هوشمند رزومه برای تیم‌های منابع انسانی (HOVIDA, AI resume screening SaaS)"
 }

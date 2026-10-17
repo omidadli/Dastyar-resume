@@ -6,6 +6,8 @@ import express from 'express';
 import path from 'path';
 import dotenv from 'dotenv';
 import * as db from './server/db';
+import { initAppSecret } from './server/secret';
+import { storage } from './server/storage';
 import { maintenanceGate, requireAuth } from './server/auth';
 import { initPlatform, systemSettings } from './server/platform';
 import { adminRoutes } from './server/routes/admin';
@@ -15,16 +17,38 @@ import { orgRoutes } from './server/routes/org';
 import { jobRoutes } from './server/routes/jobs';
 import { fileRoutes, resumeRoutes } from './server/routes/resumes';
 import { insightRoutes } from './server/routes/insights';
+import { backupPublicRoutes } from './server/routes/backup';
 
 dotenv.config({ override: true });
 
+/** Set on SIGTERM: new API calls get «restarting», running ones may finish. */
+let shuttingDown = false;
+let inflight = 0;
+
 async function startServer() {
   await db.initStore();
+  await initAppSecret();
   db.purgeExpired();
   initPlatform();
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', true);
+
+  app.use((req, res, next) => {
+    if (shuttingDown && req.path.startsWith('/api/') && req.path !== '/api/health') {
+      res.setHeader('Retry-After', '5');
+      return res.status(503).json({ error: 'هویدا در حال به‌روزرسانی است؛ چند ثانیه دیگر دوباره تلاش کنید.', code: 'RESTARTING' });
+    }
+    inflight++;
+    let done = false;
+    res.on('close', () => {
+      if (!done) {
+        done = true;
+        inflight--;
+      }
+    });
+    next();
+  });
 
   // 40mb fits the largest allowed resume (25mb, /admin › تنظیمات سامانه) as base64.
   app.use(express.json({ limit: '40mb' }));
@@ -48,10 +72,11 @@ async function startServer() {
 
   // ---------------- Public API ----------------
   app.get('/api/health', (_req, res) => {
-    res.json({ status: 'ok', app: 'HOVIDA', ai: aiStatus().available });
+    res.json({ status: shuttingDown ? 'stopping' : 'ok', app: 'HOVIDA', ai: aiStatus().available, storage: storage().driver });
   });
   app.use('/api/auth', authRoutes());
   app.use('/api', fileRoutes()); // HMAC-signed, no bearer token needed
+  app.use('/api', backupPublicRoutes()); // signed backup download + restore progress
 
   // ---------------- Authenticated API ----------------
   app.use('/api', requireAuth);
@@ -70,6 +95,13 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    // The server bundle and its source map are built into dist/ as well: never
+    // publish the server's code (nor any source map, nor the Cloudflare-only
+    // _headers rules) as a static file.
+    app.use((req, res, next) => {
+      if (/^\/(server\.cjs|_headers$)/i.test(req.path) || /\.map$/i.test(req.path)) return res.status(404).type('text/plain').send('Not found');
+      next();
+    });
     // Long-lived cached assets, but never the HTML shell (a stale shell after a
     // deploy would keep loading old bundles).
     app.use(
@@ -122,24 +154,41 @@ async function startServer() {
     console.log(`هویدا روی پورت ${PORT} آماده است — هوش مصنوعی: ${ai.available ? ai.label : 'غیرفعال (موتور محلی)'}`);
   });
 
-  const shutdown = (signal: string) => {
-    console.log(`[server] ${signal} received — flushing data and closing.`);
+  const remote = storage().driver === 'remote';
+  const shutdown = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[server] ${signal} received — finishing open requests, saving data and closing.`);
+    // Cloudflare waits up to 15 minutes after SIGTERM, Render about 30 seconds.
+    const graceMs = Number(process.env.SHUTDOWN_GRACE_MS) || (remote ? 120_000 : 5_000);
+    const until = Date.now() + graceMs;
+    // `inflight` drops as responses finish (see the middleware above).
+    for (;;) {
+      if (inflight <= 0 || Date.now() >= until) break;
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 200);
+      });
+    }
     try {
       flushAiState();
     } catch {
       /* never block shutdown */
     }
-    db.flushSaveSync();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 3000).unref();
+    const saved = await db.flushSave(remote ? 90_000 : 10_000).catch(() => false);
+    if (!saved) {
+      db.flushSaveSync();
+      console.error('[server] the last changes could not be confirmed as saved.');
+    }
+    server.close();
+    process.exit(0);
   };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 
 // Last-resort guards: a stray rejection is logged instead of killing the
 // process mid-request; a truly unexpected exception still exits (the platform
-// restarts the service) — but only after the data on disk is up to date.
+// restarts the service) — but only after the data is saved.
 process.on('unhandledRejection', (reason) => {
   console.error('[server] unhandled promise rejection:', reason);
 });
@@ -150,7 +199,11 @@ process.on('uncaughtException', (err) => {
   } catch {
     /* nothing more we can do */
   }
-  process.exit(1);
+  if (storage().driver === 'fs') process.exit(1);
+  setTimeout(() => process.exit(1), 30_000).unref();
+  db.flushSave(25_000)
+    .catch(() => false)
+    .finally(() => process.exit(1));
 });
 
 startServer().catch((err) => {

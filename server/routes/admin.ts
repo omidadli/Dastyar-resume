@@ -6,11 +6,9 @@
  * the audit log. Support sessions opened from here can never reach /admin.
  */
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
 import express from 'express';
 import * as db from '../db';
-import { RateLimiter, clientIp, ctxOf, hashPassword } from '../auth';
+import { RateLimiter, clientIp, ctxOf, hashPassword, signedBackupUrl } from '../auth';
 import {
   MAX_AI_KEYS,
   PlatformInputError,
@@ -52,6 +50,7 @@ import type {
   AdminUserRow,
   AiKeyPublic,
   AiSettingsPublic,
+  BackupInfo,
   BehaviorPayload,
   KeyStrategy,
   LabResult,
@@ -61,6 +60,17 @@ import type { Role } from '../../src/types/app';
 import type { Job } from '../../src/types/screening';
 import { matchesSearch } from '../../src/lib/normalizeFa';
 import { h, int, oneOf, str } from './util';
+import { appVersion } from '../version';
+import {
+  BackupError,
+  MAX_BACKUP_BYTES,
+  RESTORE_CHUNK_BYTES,
+  appendChunk,
+  applyUpload,
+  cancelUpload,
+  inspectUpload,
+  startUpload,
+} from '../backup';
 
 /** Integer within [lo, hi]. */
 const num = (v: unknown, fallback: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, int(v, fallback)));
@@ -68,17 +78,6 @@ const num = (v: unknown, fallback: number, lo: number, hi: number) => Math.max(l
 const STARTED_AT = new Date().toISOString();
 const claimLimiter = new RateLimiter(8, 15 * 60_000);
 const SUPPORT_TTL_MS = 2 * 3600_000;
-
-let appVersion = '';
-function version(): string {
-  if (appVersion) return appVersion;
-  try {
-    appVersion = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8')).version || '—';
-  } catch {
-    appVersion = '—';
-  }
-  return appVersion;
-}
 
 function requirePlatformAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
   const ctx = ctxOf(req);
@@ -238,7 +237,13 @@ export function adminRoutes(): express.Router {
         },
         formats: totals.formats,
         daily: db.platformDaily(14),
-        server: { startedAtISO: STARTED_AT, node: process.version, dataDir: db.DATA_DIR, version: version() },
+        server: {
+          startedAtISO: STARTED_AT,
+          node: process.version,
+          dataDir: db.storeStatus().driver === 'fs' ? db.DATA_DIR : db.storeStatus().location,
+          version: appVersion(),
+          storage: { driver: db.storeStatus().driver, location: db.storeStatus().location },
+        },
       };
       res.json(body);
     })
@@ -623,6 +628,100 @@ export function adminRoutes(): express.Router {
 
   r.get('/audit', (req, res) => {
     res.json({ items: db.listAudit(num(req.query.limit, 300, 1, 1000), str(req.query.q, 80)) });
+  });
+
+  // ------------------------------------------------------ backup & restore ----
+
+  const backupFail = (res: express.Response, err: unknown) => {
+    if (err instanceof BackupError) return res.status(err.status).json({ error: err.message });
+    throw err;
+  };
+
+  r.get(
+    '/backup',
+    h(async (_req, res) => {
+      const status = db.storeStatus();
+      const totals = db.platformTotals();
+      const last = db.listAudit(1000).find((a) => a.action === 'backup.download') || null;
+      const body: BackupInfo = {
+        storage: { driver: status.driver, location: status.location },
+        lastSavedAtISO: status.lastSavedAtISO,
+        counts: { orgs: totals.orgs.total, users: totals.users.total, jobs: totals.jobs.total, resumes: totals.resumes.total, files: db.resumeFileEntries().length },
+        storageBytes: await db.storageBytes(),
+        lastBackup: last ? { atISO: last.atISO, actorName: last.actorName } : null,
+        limits: { maxBytes: MAX_BACKUP_BYTES, chunkBytes: RESTORE_CHUNK_BYTES },
+        appVersion: appVersion(),
+      };
+      res.json(body);
+    })
+  );
+
+  /** A 10-minute download link (a plain link, so big backups stream straight to disk). */
+  r.post('/backup/link', (req, res) => {
+    res.json(signedBackupUrl(ctxOf(req).user.id));
+  });
+
+  r.post(
+    '/restore',
+    h(async (req, res) => {
+      try {
+        res.json(await startUpload(ctxOf(req).user.id, str(req.body?.fileName, 200), Number(req.body?.size)));
+      } catch (err) {
+        backupFail(res, err);
+      }
+    })
+  );
+
+  r.put(
+    '/restore/:id/chunk',
+    express.raw({ type: () => true, limit: RESTORE_CHUNK_BYTES + 64 * 1024 }),
+    h(async (req, res) => {
+      const data = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
+      if (!data.length) return res.status(400).json({ error: 'بخش خالی رسید؛ دوباره تلاش کنید.' });
+      try {
+        res.json({ received: await appendChunk(str(req.params.id, 64), ctxOf(req).user.id, Number(req.query.offset), data) });
+      } catch (err) {
+        backupFail(res, err);
+      }
+    })
+  );
+
+  r.post(
+    '/restore/:id/inspect',
+    h(async (req, res) => {
+      try {
+        res.json(await inspectUpload(str(req.params.id, 64), ctxOf(req).user.id));
+      } catch (err) {
+        backupFail(res, err);
+      }
+    })
+  );
+
+  r.post('/restore/:id/apply', (req, res) => {
+    if (str(req.body?.confirm, 40) !== 'بازیابی') {
+      return res.status(400).json({ error: 'برای تأیید، کلمه «بازیابی» را بنویسید.', field: 'confirm' });
+    }
+    const who = actor(req);
+    const ip = clientIp(req);
+    try {
+      res.json(
+        applyUpload(str(req.params.id, 64), ctxOf(req).user.id, (result) => {
+          // Written into the restored audit log, so the history shows the restore.
+          audit(who, ip, 'backup.restore', `${result.counts.orgs} فضای کاری، ${result.counts.resumes} رزومه`, `${result.filesRestored} فایل بازیابی شد`);
+        })
+      );
+    } catch (err) {
+      backupFail(res, err);
+    }
+  });
+
+  r.delete('/restore/:id', (req, res) => {
+    try {
+      cancelUpload(str(req.params.id, 64), ctxOf(req).user.id);
+      res.json({ ok: true });
+    } catch (err) {
+      backupFail(res, err);
+    }
   });
 
   return r;

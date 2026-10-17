@@ -1,0 +1,13 @@
+{
+  // Test harness only — `npm run test:cloudflare`. Same assets settings as ../../wrangler.jsonc.
+  "name": "hovida-edge-dev",
+  "main": "edge-dev.worker.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "../../dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/assets/*"]
+  },
+  "vars": { "BACKEND_URL": "http://127.0.0.1:3000" }
+}

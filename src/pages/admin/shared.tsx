@@ -132,6 +132,8 @@ export const AUDIT_LABEL: Record<string, string> = {
   'behavior.reset': 'بازگردانی رفتار پیش‌فرض',
   'behavior.restore': 'بازگردانی نسخه رفتار',
   'system.update': 'تنظیمات سامانه',
+  'backup.download': 'دریافت پشتیبان کامل',
+  'backup.restore': 'بازیابی از پشتیبان',
 };
 
 export const ROLE_LABEL: Record<string, string> = { owner: 'مالک', admin: 'مدیر', member: 'عضو' };

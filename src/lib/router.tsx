@@ -65,8 +65,9 @@ export function useLeaveGuard(active: boolean) {
     return () => {
       guards.delete(id);
       window.removeEventListener('beforeunload', onBeforeUnload);
-      // Saved, or the page went away (session ended): an open question is moot.
-      if (!guards.size) answerLeave(false);
+      // Nothing left to lose while the question was open: let the waiting move go
+      // ahead. (A forced move — session ended — has already withdrawn the question.)
+      if (!guards.size) answerLeave(true);
     };
   }, [active]);
 }
@@ -103,6 +104,15 @@ function onPopState(e: PopStateEvent) {
   }
   const redo = ownStep === 'redo';
   ownStep = null;
+  if (typeof (e.state as { hvIdx?: unknown } | null)?.hvIdx !== 'number') {
+    // An entry the router didn't make (a same-page «#section» link on the
+    // landing page): number it, so later steps across it are measured right.
+    shownIdx += 1;
+    window.history.replaceState({ ...((e.state as object | null) ?? {}), hvIdx: shownIdx }, '');
+    shownUrl = url;
+    notify();
+    return;
+  }
   const delta = idx - shownIdx;
   if (!redo && guards.size && delta !== 0 && pathOf(url) !== pathOf(shownUrl)) {
     ownStep = 'undo';
@@ -120,6 +130,9 @@ function onPopState(e: PopStateEvent) {
 }
 
 if (typeof window !== 'undefined') {
+  const initial = window.history.state as { hvIdx?: unknown } | null;
+  // Number the entry the app was opened on (a reload keeps its number); no URL argument keeps any #hash.
+  if (typeof initial?.hvIdx !== 'number') window.history.replaceState({ ...(initial ?? {}), hvIdx: 0 }, '');
   shownIdx = idxOf(window.history.state);
   shownUrl = snapshot();
   window.addEventListener('popstate', onPopState);
@@ -152,7 +165,9 @@ export interface NavigateOptions {
 
 function go(to: string, opts: NavigateOptions) {
   const prevPath = window.location.pathname;
-  if (opts.replace) window.history.replaceState({ hvIdx: shownIdx }, '', to);
+  const target = new URL(to, window.location.href);
+  // The page already on screen (e.g. its own sidebar link): no duplicate history entry.
+  if (opts.replace || target.pathname + target.search === snapshot()) window.history.replaceState({ hvIdx: shownIdx }, '', to);
   else window.history.pushState({ hvIdx: ++shownIdx }, '', to);
   shownUrl = snapshot();
   notify();

@@ -29,6 +29,7 @@ import AiKeys from './AiKeys';
 import Behavior from './Behavior';
 import SystemPage from './System';
 import Logs from './Logs';
+import { SkipToMain } from '../../components/layout/SkipToMain';
 
 interface NavItem {
   to: string;
@@ -253,6 +254,7 @@ function AdminShell({ pathname }: { pathname: string }) {
   );
   return (
     <div dir="rtl" className="min-h-screen bg-canvas">
+      <SkipToMain />
       <aside className="hidden lg:flex fixed inset-y-0 right-0 w-[252px] flex-col bg-[#1E2521] px-4 py-5 z-30">
         <div className="px-1 mb-6">{brand}</div>
         <div className="flex-1 overflow-y-auto hv-scroll">
@@ -301,7 +303,7 @@ function AdminShell({ pathname }: { pathname: string }) {
         </div>
       )}
 
-      <main className="lg:pr-[252px]">
+      <main id="main" tabIndex={-1} className="lg:pr-[252px] focus:outline-none">
         <div className="max-w-[1280px] mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-8">{section.render()}</div>
       </main>
     </div>

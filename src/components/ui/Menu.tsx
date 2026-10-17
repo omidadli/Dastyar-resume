@@ -202,7 +202,12 @@ export function Menu({
                 >
                   {it.icon && <it.icon className="w-4 h-4 shrink-0" strokeWidth={1.8} />}
                   <span className="flex-1 truncate">{it.label}</span>
-                  {it.hint && <span className="text-[11px] text-ink-4">{it.hint}</span>}
+                  {it.hint && (
+                    <span className="text-[11px] text-ink-4">
+                      <span className="sr-only">، </span>
+                      {it.hint}
+                    </span>
+                  )}
                 </button>
               )
             )}

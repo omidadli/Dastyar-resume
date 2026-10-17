@@ -33,6 +33,7 @@ import { Button, IconButton, Menu, Monogram, trapTabKey, useEscapeLayer, useLock
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationsPanel } from './NotificationsPanel';
 import { CompareTray, useCompareTrayVisible } from './CompareTray';
+import { SkipToMain } from './SkipToMain';
 import { toPersianDigits } from '../../lib/format';
 import { useMediaQuery } from '../../lib/useAsync';
 
@@ -484,12 +485,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="min-h-screen bg-canvas" dir="rtl">
+      <SkipToMain />
       <Sidebar />
       <div className="lg:pr-[256px] min-h-screen flex flex-col">
         <PlatformBanners />
         <DemoBanner />
         <Topbar onSearch={() => setSearchOpen(true)} onBell={() => setBellOpen(true)} />
-        <main className={`flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-1 pb-28 ${trayVisible ? 'lg:pb-28' : 'lg:pb-12'}`}>{children}</main>
+        <main id="main" tabIndex={-1} className={`focus:outline-none flex-1 w-full max-w-[1440px] mx-auto px-4 sm:px-6 lg:px-8 pt-4 lg:pt-1 pb-28 ${trayVisible ? 'lg:pb-28' : 'lg:pb-12'}`}>{children}</main>
       </div>
       <MobileNav onMore={() => setMoreOpen(true)} moreOpen={moreOpen} />
       <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} />

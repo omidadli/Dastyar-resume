@@ -222,7 +222,7 @@ export function SignupPage() {
       }
     >
       <form onSubmit={submit} className="flex flex-col gap-4" noValidate>
-        <TextInput label="نام سازمان" icon={Building2} value={form.orgName} onChange={set('orgName')} required placeholder="مثلاً شرکت آریا صنعت" error={fieldError('orgName')} />
+        <TextInput label="نام سازمان" icon={Building2} value={form.orgName} onChange={set('orgName')} required autoComplete="organization" placeholder="مثلاً شرکت آریا صنعت" error={fieldError('orgName')} />
         <TextInput label="نام و نام خانوادگی" icon={UserRound} value={form.name} onChange={set('name')} required autoComplete="name" error={fieldError('name')} />
         <TextInput label="ایمیل کاری" type="email" icon={Mail} latin autoComplete="email" value={form.email} onChange={set('email')} required placeholder="name@company.ir" error={fieldError('email')} />
         <div>

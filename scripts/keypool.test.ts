@@ -165,7 +165,7 @@ async function main() {
   await run();
   assert(!hits.includes('sk-limited-0001') && hits[0] === 'sk-good-000001', 'next request skips the benched key entirely', hits.join(','));
   const st = provider.aiStatus();
-  assert(st.available && st.keys === 2 && st.readyKeys === 1 && /۱ از ۲/.test(st.label), 'status: «۱ از ۲ کلید آماده»', st.label);
+  assert(st.available && st.keys === 2 && st.readyKeys === 1 && /۱ از ۲/.test(st.label), 'status: «کلیدهای آماده: ۱ از ۲»', st.label);
 
   // --- everything benched → callers fall back to the local engine
   platform.updateKey(k2.id, { apiKey: 'sk-limited-0001' });

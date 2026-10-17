@@ -126,7 +126,7 @@ export function GlobalSearch({ open, onClose }: { open: boolean; onClose: () => 
             <div className="min-w-0 flex-1">
               <p className="text-[13.5px] font-bold text-ink truncate">{j.roleTitle}</p>
               <p className="text-[12px] text-ink-3 truncate">
-                {j.departmentName} · {faNumber(j.total)} رزومه
+                <bdi>{j.departmentName}</bdi>، {faNumber(j.total)} رزومه
               </p>
             </div>
             <ArrowLeft className="w-4 h-4 text-ink-4" />

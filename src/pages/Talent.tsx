@@ -183,8 +183,8 @@ export default function Talent({ dept }: { dept?: string }) {
                       {candidateName(r)}
                     </p>
                     <p className="text-[12px] text-ink-3 truncate">
-                      {r.facts?.lastRole || '—'}
-                      {r.facts?.yearsExperience != null && ` · ${toPersianDigits(r.facts.yearsExperience)} سال`}
+                      <bdi>{r.facts?.lastRole || '—'}</bdi>
+                      {r.facts?.yearsExperience != null && `، ${toPersianDigits(r.facts.yearsExperience)} سال`}
                     </p>
                   </div>
                   <ScoreBadge score={r.score} category={r.category} size={44} />

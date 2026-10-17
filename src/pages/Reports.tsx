@@ -41,17 +41,11 @@ function HBar({ label, value, max, sub, color = 'bg-brand' }: { label: React.Rea
     <div>
       <div className="flex items-center justify-between gap-3 text-[13px]">
         <span className="font-semibold text-ink-2 truncate">{label}</span>
-        {/* Separate flex items: the bidi algorithm would otherwise merge «۲۳» and «۷۷٪» into one number. */}
+        {/* Separate flex items: the bidi algorithm would otherwise merge «۲۳» and «۷۷٪» into one number.
+          * The sub-value goes in parentheses — a «·» between them reads as a Persian zero («۸ · ۲ بالا» → «۲۰»). */}
         <span className="inline-flex items-center gap-1.5 shrink-0">
           <bdi className="hv-num font-bold text-ink">{faNumber(value)}</bdi>
-          {sub && (
-            <>
-              <span className="text-ink-4" aria-hidden>
-                ·
-              </span>
-              <bdi className="hv-num text-ink-3 font-medium text-[12px]">{sub}</bdi>
-            </>
-          )}
+          {sub && <bdi className="hv-num text-ink-3 font-medium text-[12px]">({sub})</bdi>}
         </span>
       </div>
       <div className="mt-1.5 h-2 rounded-full bg-line-2 overflow-hidden">
@@ -167,7 +161,7 @@ export default function Reports() {
               icon={Scale}
               label="تصمیم‌های ثبت‌شده"
               value={faNumber(data.totals.decided)}
-              note={`${faNumber(data.totals.approved)} تأیید · ${faNumber(data.totals.rejected)} رد`}
+              note={`${faNumber(data.totals.approved)} تأیید، ${faNumber(data.totals.rejected)} رد`}
               tone="review"
             />
           </div>
@@ -361,7 +355,7 @@ export default function Reports() {
                   />
                 </div>
                 <p className="text-[12px] text-ink-3 mt-3">
-                  {faNumber(data.totals.deepReviews)} بازبینی دقیق · {faNumber(data.totals.talentAdded)} افزوده به بانک استعداد
+                  {faNumber(data.totals.deepReviews)} بازبینی دقیق، {faNumber(data.totals.talentAdded)} افزوده به بانک استعداد
                 </p>
               </Card>
             </div>

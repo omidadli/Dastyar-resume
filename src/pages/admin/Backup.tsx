@@ -65,7 +65,7 @@ function DownloadCard({ info, onStarted }: { info: BackupInfo; onStarted: () => 
         <Row label="محل نگهداری داده‌ها">{storageLabel(info)}</Row>
         <Row label="حجم داده‌ها">{faBytes(info.storageBytes)}</Row>
         <Row label="محتوا">
-          {faNumber(info.counts.orgs)} فضای کاری · {faNumber(info.counts.users)} کاربر · {faNumber(info.counts.resumes)} رزومه · {faNumber(info.counts.files)} فایل
+          {faNumber(info.counts.orgs)} فضای کاری، {faNumber(info.counts.users)} کاربر، {faNumber(info.counts.resumes)} رزومه، {faNumber(info.counts.files)} فایل
         </Row>
         <Row label="آخرین پشتیبان">{info.lastBackup ? `${faDateTime(info.lastBackup.atISO)} — ${info.lastBackup.actorName}` : 'هنوز پشتیبانی گرفته نشده است'}</Row>
       </div>
@@ -93,11 +93,11 @@ function Summary({ s, current }: { s: BackupSummary; current: BackupInfo }) {
       {s.createdBy && <Row label="گرفته‌شده توسط">{s.createdBy}</Row>}
       <Row label="نسخه هویدا">{s.appVersion}</Row>
       <Row label="محتوا">
-        {faNumber(s.counts.orgs)} فضای کاری{s.counts.demoOrgs ? ` (${faNumber(s.counts.demoOrgs)} نمایشی)` : ''} · {faNumber(s.counts.users)} کاربر · {faNumber(s.counts.jobs)} فرصت شغلی ·{' '}
-        {faNumber(s.counts.resumes)} رزومه · {faNumber(s.counts.files)} فایل
+        {faNumber(s.counts.orgs)} فضای کاری{s.counts.demoOrgs ? ` (${faNumber(s.counts.demoOrgs)} نمایشی)` : ''}، {faNumber(s.counts.users)} کاربر، {faNumber(s.counts.jobs)} فرصت شغلی،{' '}
+        {faNumber(s.counts.resumes)} رزومه، {faNumber(s.counts.files)} فایل
       </Row>
       <Row label="جایگزین می‌شود با">
-        داده‌های فعلی این سامانه: {faNumber(current.counts.orgs)} فضای کاری · {faNumber(current.counts.resumes)} رزومه
+        داده‌های فعلی این سامانه: {faNumber(current.counts.orgs)} فضای کاری، {faNumber(current.counts.resumes)} رزومه
       </Row>
     </div>
   );

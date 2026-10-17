@@ -194,7 +194,9 @@ export function aiStatus(): AiStatus {
     available: true,
     provider: lead.provider,
     model: modelOf(lead),
-    label: `${providerLabel(lead)} · ${modelOf(lead)}${n > 1 ? ` · ${ready.toLocaleString('fa-IR')} از ${n.toLocaleString('fa-IR')} کلید آماده` : ''}`,
+    // The count must follow a Persian word: right after the Latin model name the
+    // bidi algorithm would pull «۲» into the Latin run, away from «از ۵».
+    label: `${providerLabel(lead)} · ${modelOf(lead)}${n > 1 ? `، کلیدهای آماده: ${ready.toLocaleString('fa-IR')} از ${n.toLocaleString('fa-IR')}` : ''}`,
     reason: cooling
       ? `همه کلیدهای هوش مصنوعی موقتاً به محدودیت خورده‌اند${next ? `؛ حدود ${timeFa(next - Date.now())} دیگر خودکار برمی‌گردند` : ''}. تا آن زمان موتور محلی کار می‌کند.`
       : null,

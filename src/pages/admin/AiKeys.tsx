@@ -518,7 +518,7 @@ function KeyCard({
             {(k.rpm > 0 || k.dailyLimit > 0) && (
               <span>
                 سقف: {k.rpm > 0 ? `${faNumber(k.rpm)}/دقیقه` : ''}
-                {k.rpm > 0 && k.dailyLimit > 0 ? ' · ' : ''}
+                {k.rpm > 0 && k.dailyLimit > 0 ? '، ' : ''}
                 {k.dailyLimit > 0 ? `${faNumber(k.dailyLimit)}/روز` : ''}
               </span>
             )}

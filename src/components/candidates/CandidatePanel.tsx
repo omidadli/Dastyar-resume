@@ -224,7 +224,12 @@ export function DecisionBar({ record, onChange, compact, short }: { record: Resu
         <span className="text-[12.5px] font-bold text-ink-2">تصمیم شما</span>
         {current !== 'none' && record.decidedAtISO && (
           <span className="text-[11.5px] text-ink-3">
-            {record.decidedByName ? `${record.decidedByName} · ` : ''}
+            {record.decidedByName && (
+              <>
+                <bdi>{record.decidedByName}</bdi>
+                {'، '}
+              </>
+            )}
             {faRelative(record.decidedAtISO)}
           </span>
         )}
@@ -364,8 +369,8 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
               {name}
             </h2>
             <p className="text-[12.5px] text-ink-3 mt-0.5 leading-relaxed">
-              {facts?.lastRole || 'سمت ذکر نشده'}
-              {facts?.yearsExperience != null && ` · ${toPersianDigits(facts.yearsExperience)} سال سابقه`}
+              <bdi>{facts?.lastRole || 'سمت ذکر نشده'}</bdi>
+              {facts?.yearsExperience != null && `، ${toPersianDigits(facts.yearsExperience)} سال سابقه`}
             </p>
             {!record.candidateName && <p className="text-[11.5px] text-ink-4 mt-0.5">نام در رزومه پیدا نشد؛ نام فایل نمایش داده می‌شود.</p>}
           </div>
@@ -600,7 +605,7 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
                           <span className="hv-num text-ink-2 font-bold mr-2">{toPersianDigits(h.score)}٪</span>
                         </p>
                         <p className="text-[11.5px] text-ink-3">
-                          {h.atISO ? faDate(h.atISO) : h.atJalali} · {h.engine === 'local' ? 'موتور محلی' : 'هوش مصنوعی'}
+                          {h.atISO ? faDate(h.atISO) : h.atJalali}، {h.engine === 'local' ? 'موتور محلی' : 'هوش مصنوعی'}
                         </p>
                       </li>
                     ))}
@@ -648,9 +653,15 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
                   {record.analysisMeta.format && <p>قالب: {record.analysisMeta.format}</p>}
                   {record.analysisMeta.industry && <p>راهنمای تخصصی به‌کاررفته: {record.analysisMeta.industry}</p>}
                   {record.analysisMeta.behaviorVersion && <p className="text-ink-3">نسخه دستورالعمل هوش مصنوعی: {faNumber(record.analysisMeta.behaviorVersion)}</p>}
-                  {record.analysisMeta.warnings.map((w, i) => (
-                    <p key={i} className="text-ink-3">• {w}</p>
-                  ))}
+                  {/* A real list: an inline «•» before a warning that starts with a number
+                      («• ۳ فایل…») reads as «۳۰» in RTL. */}
+                  {record.analysisMeta.warnings.length > 0 && (
+                    <ul className="list-disc pr-5 text-ink-3">
+                      {record.analysisMeta.warnings.map((w, i) => (
+                        <li key={i}>{w}</li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </section>

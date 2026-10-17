@@ -676,7 +676,7 @@ function HistoryTab({ payload, onRestore, onResetAll }: { payload: BehaviorPaylo
                 <div className="flex-1 min-w-0">
                   <p className="text-[13.5px] font-bold text-ink">{h.note || 'بدون یادداشت'}</p>
                   <p className="text-[12px] text-ink-3">
-                    {faDateTime(h.savedAtISO)} · {h.savedBy || '—'}
+                    {faDateTime(h.savedAtISO)}، <bdi>{h.savedBy || '—'}</bdi>
                   </p>
                 </div>
                 {h.version === payload.config.version ? (

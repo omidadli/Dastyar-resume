@@ -73,7 +73,7 @@ export default function Overview() {
       )}
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <MiniStat icon={Building2} label="فضاهای کاری" value={faNumber(data.orgs.total)} note={`${faNumber(data.orgs.newThisWeek)} تازه در هفته اخیر · ${faNumber(data.orgs.demo)} نمایشی`} tone="brand" />
+        <MiniStat icon={Building2} label="فضاهای کاری" value={faNumber(data.orgs.total)} note={`${faNumber(data.orgs.newThisWeek)} تازه در هفته اخیر، ${faNumber(data.orgs.demo)} نمایشی`} tone="brand" />
         <MiniStat icon={Users} label="کاربران" value={faNumber(data.users.total)} note={`${faNumber(data.users.activeThisWeek)} ورود در هفته اخیر`} />
         <MiniStat icon={FileStack} label="رزومه‌های تحلیل‌شده" value={faNumber(data.resumes.total)} note={`${faNumber(data.resumes.thisWeek)} در هفته اخیر`} tone="brand" />
         <MiniStat icon={Activity} label="فرصت‌های شغلی" value={faNumber(data.jobs.total)} note={`${faNumber(data.jobs.open)} فرصت باز`} />

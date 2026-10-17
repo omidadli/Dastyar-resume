@@ -124,8 +124,8 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                               <Signals r={r} />
                             </p>
                             <p className="text-[12px] text-ink-3 truncate max-w-[260px]">
-                              {r.facts?.lastRole || '—'}
-                              {r.facts?.yearsExperience != null && ` · ${toPersianDigits(r.facts.yearsExperience)} سال`}
+                              <bdi>{r.facts?.lastRole || '—'}</bdi>
+                              {r.facts?.yearsExperience != null && `، ${toPersianDigits(r.facts.yearsExperience)} سال`}
                             </p>
                           </div>
                         </div>

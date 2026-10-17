@@ -332,7 +332,7 @@ export default function JobDetail({ id }: { id: string }) {
     if (!job) return null;
     const parts = [job.departmentName, job.location, job.employmentType ? EMPLOYMENT_LABELS[job.employmentType] : null, `ایجاد ${faDate(job.createdAtISO)}`];
     if (job.createdByName) parts.push(`توسط ${job.createdByName}`);
-    return parts.filter(Boolean).join(' · ');
+    return parts.filter(Boolean).join('، ');
   }, [job]);
 
   // A hiccup while the opening is already on screen (after an action, say)

@@ -302,7 +302,7 @@ export default function Landing() {
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <p className="text-[15px] font-extrabold">فاطمه نجفی</p>
-                  <p className="text-[12px] text-ink-3">حسابدار ارشد · ۹ سال سابقه</p>
+                  <p className="text-[12px] text-ink-3">حسابدار ارشد، ۹ سال سابقه</p>
                 </div>
                 <ScoreBadge score={91} category="INTERVIEW" />
               </div>

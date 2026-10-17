@@ -262,5 +262,48 @@ const u: JobUnderstanding = {
   delete (globalThis as any).localStorage;
 }
 
+// ---- «·» never touches a number on screen ----
+// In Vazirmatn the Persian zero «۰» is a dot: in RTL «… · ۱ کاربر» reads «۱۰ کاربر»
+// and «۱۴۰۵ · …» reads «۰۱۴۰۵». Lists with numbers use the Persian comma «،».
+{
+  const NUM = String.raw`(?:faNumber|toPersianDigits|faPercent|faRelative|faDate|faDateTime|faDuration|faBytes)\(|[A-Za-z_$][\w$.]*\.toLocaleString\(`;
+  const dotThenNumber = new RegExp(String.raw`·\s*(?:\{|\$\{)[^{}\n]*?(?:${NUM})|·\s*[۰-۹]`);
+  const numberThenDot = new RegExp(String.raw`(?:${NUM})[^{}\n]*\}\s*·|[۰-۹]\s*·`);
+  const flags = (line: string) => dotThenNumber.test(line) || numberThenDot.test(line);
+  // The detector itself: known-bad lines are caught, word separators are not.
+  assert(
+    flags('{faNumber(a)} فضای کاری · {faNumber(b)} کاربر') &&
+      flags('` · ${toPersianDigits(y)} سال`') &&
+      flags('{h.atISO ? faDate(h.atISO) : h.atJalali} · {engine}') &&
+      flags('حسابدار ارشد · ۹ سال سابقه') &&
+      flags('`${m} · ${n.toLocaleString("fa-IR")} از`') &&
+      !flags('{user.title} · {org.name}') &&
+      !flags('`${faNumber(kb)} کیلوبایت · `') &&
+      !flags('وزن {toPersianDigits(w)}٪ · الزامی'),
+    'number-dot guard: detects «·» next to a number, ignores word separators'
+  );
+  const files: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (/\.tsx?$/.test(e.name)) files.push(p);
+    }
+  };
+  ['src', 'server'].forEach((d) => walk(path.join(process.cwd(), d)));
+  const offenders: string[] = [];
+  for (const f of files) {
+    fs.readFileSync(f, 'utf8')
+      .split('\n')
+      .forEach((line, i) => {
+        const t = line.trim();
+        if (t.startsWith('*') || t.startsWith('/*') || t.startsWith('//')) return;
+        // A lone «·» text node between two elements: its neighbours (numbers?) are unknown here.
+        if (flags(line) || t === '·') offenders.push(`${path.relative(process.cwd(), f)}:${i + 1}`);
+      });
+  }
+  assert(files.length > 50 && offenders.length === 0, 'no «·» next to a number in src/ or server/ (use «،»)', offenders.join(', ') || `${files.length} files`);
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

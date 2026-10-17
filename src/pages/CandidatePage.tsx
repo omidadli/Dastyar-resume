@@ -2,7 +2,8 @@ import React from 'react';
 import { PageHeader } from '../components/layout/AppShell';
 import { CandidatePanel } from '../components/candidates/CandidatePanel';
 import { ResumePreview } from '../components/candidates/ResumePreview';
-import { ErrorState, Skeleton } from '../components/ui';
+import { SearchX } from 'lucide-react';
+import { ButtonLink, EmptyState, ErrorState, Skeleton } from '../components/ui';
 import { api } from '../lib/api';
 import { candidateName } from '../lib/format';
 import { navigate } from '../lib/router';
@@ -15,7 +16,30 @@ export default function CandidatePage({ id }: { id: string }) {
   const job = q.data?.job;
   useTitle(rec ? candidateName(rec) : 'کاندید');
 
-  if (q.error) return <ErrorState message={q.error} onRetry={q.reload} />;
+  if (q.error) {
+    // Deleted or never existed: «try again» cannot help — offer the way back instead.
+    if (q.errorStatus === 404) {
+      return (
+        <div className="hv-card mt-6">
+          <EmptyState
+            icon={SearchX}
+            titleAs="h1"
+            title="این رزومه پیدا نشد"
+            description="ممکن است حذف شده باشد یا پیوند اشتباه باشد."
+            action={<ButtonLink to="/app/candidates">بازگشت به رزومه‌ها</ButtonLink>}
+          />
+        </div>
+      );
+    }
+    return (
+      <div>
+        <PageHeader breadcrumb={[{ label: 'رزومه‌ها', to: '/app/candidates' }]} title="کاندید" />
+        <div className="hv-card">
+          <ErrorState message={q.error} onRetry={q.reload} />
+        </div>
+      </div>
+    );
+  }
   if (!rec) {
     return (
       <div className="grid xl:grid-cols-[460px_1fr] gap-5">

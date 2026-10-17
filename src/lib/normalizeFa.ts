@@ -72,7 +72,8 @@ export function normalizeForSearch(raw: string | null | undefined): string {
   return toEnglishDigits(String(raw).normalize('NFKC'))
     .replace(/[\u064A\u0649\u06CC]/g, 'ی')
     .replace(/\u0643/g, 'ک')
-    .replace(/\u0629/g, 'ه')
+    // ة and the other heh letters (ۀ, ہ, ە) search as ه, so «برنامۀ» finds «برنامه»
+    .replace(/[\u0629\u06C0\u06C1\u06D5]/g, 'ه')
     .replace(/[\u0622\u0623\u0625\u0671]/g, 'ا')
     .replace(/\u0624/g, 'و')
     .replace(/[\u064B-\u065F\u0670\u0640]/g, '')

@@ -99,7 +99,16 @@ export default function Compare() {
     );
   }
 
-  if (q.error) return <ErrorState message={q.error} onRetry={q.reload} />;
+  if (q.error) {
+    return (
+      <div>
+        <PageHeader breadcrumb={[{ label: 'فرصت‌های شغلی', to: '/app/jobs' }, { label: 'مقایسه' }]} title="مقایسه کاندیداها" />
+        <div className="hv-card">
+          <ErrorState message={q.error} onRetry={q.reload} />
+        </div>
+      </div>
+    );
+  }
   if (!job) {
     return (
       <div className="flex flex-col gap-4">
@@ -150,7 +159,9 @@ export default function Compare() {
         <table className="w-full border-separate border-spacing-0">
           <thead>
             <tr>
-              <th className="sticky right-0 z-[2] bg-surface border-b border-line w-[150px]" />
+              <th className="sticky right-0 z-[2] bg-surface border-b border-line w-[150px]">
+                <span className="sr-only">معیار</span>
+              </th>
               {items.map((r) => (
                 <th key={r.id} className="p-4 border-b border-line text-right align-top min-w-[220px]">
                   <div className="flex items-start gap-3">

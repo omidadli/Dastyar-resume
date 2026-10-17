@@ -13,19 +13,23 @@ function AuthLayout({ children, title, subtitle }: { children: React.ReactNode; 
   return (
     <div className="min-h-screen grid lg:grid-cols-[1fr_1.05fr] bg-surface" dir="rtl">
       <div className="flex flex-col px-5 sm:px-10 py-8">
-        <Link to="/" aria-label="بازگشت به صفحه اصلی هویدا" className="self-start">
-          <HovidaLogo height={32} />
-        </Link>
-        <div className="flex-1 flex items-center justify-center py-10">
+        <header className="self-start">
+          <Link to="/" aria-label="بازگشت به صفحه اصلی هویدا" className="inline-flex">
+            <HovidaLogo height={32} />
+          </Link>
+        </header>
+        <main className="flex-1 flex items-center justify-center py-10">
           <div className="w-full max-w-[400px]">
             <h1 className="text-[26px] font-extrabold text-ink leading-snug">{title}</h1>
             <p className="text-[14px] text-ink-3 mt-2 leading-relaxed">{subtitle}</p>
             <div className="mt-8">{children}</div>
           </div>
-        </div>
-        <p className="text-[12px] text-ink-4 text-center">هویدا • تحلیل دقیق‌تر، تصمیم بهتر</p>
+        </main>
+        <footer>
+          <p className="text-[12px] text-ink-4 text-center">هویدا • تحلیل دقیق‌تر، تصمیم بهتر</p>
+        </footer>
       </div>
-      <div className="hidden lg:flex relative overflow-hidden bg-brand-soft items-center justify-center p-12">
+      <aside aria-label="درباره هویدا" className="hidden lg:flex relative overflow-hidden bg-brand-soft items-center justify-center p-12">
         <div className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full bg-white/50" />
         <div className="absolute -bottom-32 -right-20 w-[360px] h-[360px] rounded-full bg-[#dcebe0]" />
         <div className="relative max-w-[440px]">
@@ -45,7 +49,7 @@ function AuthLayout({ children, title, subtitle }: { children: React.ReactNode; 
             ))}
           </ul>
         </div>
-      </div>
+      </aside>
     </div>
   );
 }

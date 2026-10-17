@@ -29,7 +29,7 @@ import { useAuth } from '../../lib/auth';
 import { usePublicConfig } from '../../lib/config';
 import { useAnalysis } from '../../lib/analysis';
 import { useCompare } from '../../lib/compare';
-import { Button, IconButton, Menu, Monogram, trapTabKey, useEscapeLayer, useLockScroll, useRestoreFocus } from '../ui';
+import { ButtonLink, IconButton, Menu, Monogram, trapTabKey, useEscapeLayer, useLockScroll, useRestoreFocus } from '../ui';
 import { GlobalSearch } from './GlobalSearch';
 import { NotificationsPanel } from './NotificationsPanel';
 import { CompareTray, useCompareTrayVisible } from './CompareTray';
@@ -117,7 +117,7 @@ function UserCard() {
 function Sidebar() {
   const { pathname } = useLocation();
   return (
-    <aside className="hidden lg:flex fixed inset-y-0 right-0 z-30 w-[256px] flex-col bg-surface border-l border-line">
+    <aside aria-label="نوار کناری" className="hidden lg:flex fixed inset-y-0 right-0 z-30 w-[256px] flex-col bg-surface border-l border-line">
       <div className="h-[72px] flex items-center px-6 border-b border-line-2">
         <Link to="/app" aria-label="هویدا — داشبورد" className="inline-flex">
           <HovidaLogo height={34} />
@@ -200,9 +200,9 @@ function Topbar({ onSearch, onBell }: { onSearch: () => void; onBell: () => void
           <AnalysisPill />
           <IconButton icon={Search} label="جست‌وجو" className="lg:hidden" onClick={onSearch} />
           <IconButton icon={Bell} label={unread ? `اعلان‌ها (${toPersianDigits(unread)} خوانده‌نشده)` : 'اعلان‌ها'} badge={unread > 0} onClick={onBell} />
-          <Button icon={Plus} className="max-sm:hidden" onClick={() => navigate('/app/jobs/new')}>
+          <ButtonLink to="/app/jobs/new" icon={Plus} className="max-sm:hidden">
             ایجاد فرصت شغلی
-          </Button>
+          </ButtonLink>
         </div>
       </div>
     </header>
@@ -522,13 +522,19 @@ export function PageHeader({
         <nav className="flex items-center gap-1.5 text-[12.5px] text-ink-3 mb-2" aria-label="مسیر">
           {breadcrumb.map((b, i) => (
             <React.Fragment key={i}>
-              {i > 0 && <span className="text-ink-4">/</span>}
+              {i > 0 && (
+                <span className="text-ink-4" aria-hidden>
+                  /
+                </span>
+              )}
               {b.to ? (
                 <Link to={b.to} className="hover:text-ink-2 font-medium">
                   {b.label}
                 </Link>
               ) : (
-                <span className="text-ink-2 font-semibold truncate max-w-[240px]">{b.label}</span>
+                <span className="text-ink-2 font-semibold truncate max-w-[240px]" aria-current="page">
+                  {b.label}
+                </span>
               )}
             </React.Fragment>
           ))}

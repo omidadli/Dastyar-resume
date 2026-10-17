@@ -2,6 +2,7 @@ import React from 'react';
 import { Archive, ChevronLeft, Cpu, MailCheck } from 'lucide-react';
 import type { ResumeListItem } from '../../types/screening';
 import { candidateName, faRelative, toPersianDigits } from '../../lib/format';
+import { matchMeta } from '../../lib/match';
 import { Checkbox, Chip, DecisionPill, MatchMeter, MatchPill, Monogram, ScoreBadge, Skeleton } from '../ui';
 
 export interface CandidateTableProps {
@@ -44,14 +45,21 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
             <tr className="text-[12px] text-ink-3">
               {selectable && (
                 <th className="w-11 pr-4 pb-2.5 font-semibold border-b border-line">
-                  <Checkbox checked={Boolean(allSelected)} indeterminate={!allSelected && someSelected} onChange={() => onToggleAll?.()} />
+                  <Checkbox
+                    checked={Boolean(allSelected)}
+                    indeterminate={!allSelected && someSelected}
+                    onChange={() => onToggleAll?.()}
+                    ariaLabel="انتخاب همه کاندیداهای این فهرست"
+                  />
                 </th>
               )}
-              <th className="pb-2.5 pr-2 font-semibold border-b border-line">کاندید</th>
-              <th className="pb-2.5 px-2 font-semibold border-b border-line whitespace-nowrap">وضعیت تطابق</th>
-              <th className={`pb-2.5 px-2 font-semibold border-b border-line ${compact ? 'w-[104px]' : 'w-[150px]'}`}>درصد تطابق</th>
+              {/* The name column takes the room that is left and truncates, so the other columns never get pushed out of view. */}
+              <th className="pb-2.5 pr-2 font-semibold border-b border-line w-full">کاندید</th>
+              <th className="pb-2.5 px-2 font-semibold border-b border-line whitespace-nowrap">{compact ? 'تطابق' : 'وضعیت تطابق'}</th>
+              {!compact && <th className="pb-2.5 px-2 font-semibold border-b border-line w-[150px]">درصد تطابق</th>}
               {!compact && <th className="pb-2.5 px-2 font-semibold border-b border-line hidden xl:table-cell">مهارت‌های کلیدی</th>}
-              {showJob && !compact && <th className="pb-2.5 px-2 font-semibold border-b border-line hidden lg:table-cell">فرصت شغلی</th>}
+              {/* From 1100px: at 1024 the job column pushed «تصمیم» out of view. */}
+              {showJob && !compact && <th className="pb-2.5 px-2 font-semibold border-b border-line hidden min-[1100px]:table-cell">فرصت شغلی</th>}
               <th className="pb-2.5 px-2 font-semibold border-b border-line whitespace-nowrap">تصمیم</th>
               {!compact && <th className="pb-2.5 pl-4 w-8 border-b border-line" aria-hidden />}
             </tr>
@@ -71,9 +79,9 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                       </div>
                     </td>
                     <td className="px-2 border-b border-line-2"><Skeleton className="h-6 w-24 rounded-full" /></td>
-                    <td className="px-2 border-b border-line-2"><Skeleton className="h-2 w-28" /></td>
+                    {!compact && <td className="px-2 border-b border-line-2"><Skeleton className="h-2 w-28" /></td>}
                     {!compact && <td className="px-2 border-b border-line-2 hidden xl:table-cell"><Skeleton className="h-5 w-40" /></td>}
-                    {showJob && !compact && <td className="px-2 border-b border-line-2 hidden lg:table-cell"><Skeleton className="h-4 w-28" /></td>}
+                    {showJob && !compact && <td className="px-2 border-b border-line-2 hidden min-[1100px]:table-cell"><Skeleton className="h-4 w-28" /></td>}
                     <td className="px-2 border-b border-line-2"><Skeleton className="h-6 w-20 rounded-full" /></td>
                     {!compact && <td className="border-b border-line-2" />}
                   </tr>
@@ -104,11 +112,11 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                       {selectable && (
                         <td className="pr-4 py-3 border-b border-line-2 relative" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                           {active && <span className="absolute right-0 top-2 bottom-2 w-[3px] rounded-l-full bg-brand" />}
-                          <Checkbox checked={Boolean(isSel)} onChange={() => onToggle?.(r.id)} />
+                          <Checkbox checked={Boolean(isSel)} onChange={() => onToggle?.(r.id)} ariaLabel={`انتخاب ${name}`} />
                         </td>
                       )}
-                      <td className="py-3 pr-2 border-b border-line-2">
-                        <div className={`flex items-center gap-3 ${compact ? 'min-w-[160px]' : 'min-w-[200px]'}`}>
+                      <td className={`py-3 pr-2 border-b border-line-2 max-w-0 ${compact ? 'min-w-[150px]' : 'min-w-[200px]'}`}>
+                        <div className="flex items-center gap-3 min-w-0">
                           <Monogram name={name} size={compact ? 34 : 38} />
                           <div className="min-w-0">
                             <p className="text-[13.5px] font-bold text-ink truncate max-w-[240px] flex items-center gap-1.5" dir="auto">
@@ -123,11 +131,23 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                         </div>
                       </td>
                       <td className="px-2 py-3 border-b border-line-2">
-                        <MatchPill category={r.category} size="sm" />
+                        {compact ? (
+                          // Beside the open panel: label and percentage share one column.
+                          <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                            <MatchPill category={r.category} size="sm" />
+                            {matchMeta(r.category).level !== 'insufficient' && (
+                              <span className="text-[13px] font-bold text-ink hv-num">{toPersianDigits(Math.round(r.score))}٪</span>
+                            )}
+                          </span>
+                        ) : (
+                          <MatchPill category={r.category} size="sm" />
+                        )}
                       </td>
-                      <td className="px-2 py-3 border-b border-line-2">
-                        <MatchMeter score={r.score} category={r.category} className={compact ? 'w-[92px]' : 'w-[140px]'} />
-                      </td>
+                      {!compact && (
+                        <td className="px-2 py-3 border-b border-line-2">
+                          <MatchMeter score={r.score} category={r.category} className="w-[140px]" />
+                        </td>
+                      )}
                       {!compact && (
                         <td className="px-2 py-3 border-b border-line-2 hidden xl:table-cell">
                           <div className="flex items-center gap-1 max-w-[280px] overflow-hidden">
@@ -142,7 +162,7 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                         </td>
                       )}
                       {showJob && !compact && (
-                        <td className="px-2 py-3 border-b border-line-2 hidden lg:table-cell">
+                        <td className="px-2 py-3 border-b border-line-2 hidden min-[1100px]:table-cell">
                           <p className="text-[12.5px] text-ink-2 truncate max-w-[180px]">{r.roleTitle || r.departmentName}</p>
                           <p className="text-[11.5px] text-ink-4">{faRelative(r.createdAtISO)}</p>
                         </td>
@@ -178,25 +198,26 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
               const name = candidateName(r);
               const isSel = selected?.has(r.id);
               return (
-                <li key={r.id}>
+                <li key={r.id} className={`hv-card flex items-stretch overflow-hidden ${isSel ? 'ring-2 ring-brand/40' : ''}`}>
+                  {/* The checkbox is a sibling of the card button, never inside it (nested controls are unreachable for screen readers). */}
+                  {selectable && (
+                    <span className="flex items-center pr-3.5 pl-0.5">
+                      <Checkbox checked={Boolean(isSel)} onChange={() => onToggle?.(r.id)} ariaLabel={`انتخاب ${name}`} />
+                    </span>
+                  )}
                   <div
                     role="button"
                     tabIndex={0}
                     onClick={() => onOpen(r)}
                     onKeyDown={(e) => {
-                      if (e.target !== e.currentTarget) return; // keys on the checkbox stay with the checkbox
+                      if (e.target !== e.currentTarget) return;
                       if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
                         onOpen(r);
                       }
                     }}
-                    className={`hv-card p-3.5 flex items-center gap-3 active:bg-canvas ${isSel ? 'ring-2 ring-brand/40' : ''}`}
+                    className={`flex-1 min-w-0 p-3.5 flex items-center gap-3 active:bg-canvas outline-none focus-visible:shadow-[inset_0_0_0_2px_var(--color-brand)] ${selectable ? 'pr-2' : ''}`}
                   >
-                    {selectable && (
-                      <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                        <Checkbox checked={Boolean(isSel)} onChange={() => onToggle?.(r.id)} />
-                      </span>
-                    )}
                     <ScoreBadge score={r.score} category={r.category} size={48} />
                     <div className="min-w-0 flex-1">
                       <p className="text-[14px] font-bold text-ink truncate" dir="auto">

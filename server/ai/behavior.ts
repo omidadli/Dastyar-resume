@@ -21,7 +21,7 @@
 import type { BehaviorConfig, BehaviorSectionKey, IndustryProfile, Strictness } from '../../src/types/admin';
 import { normalizeForSearch } from '../../src/lib/normalizeFa';
 import { formatJalaliDateReadable } from '../../src/utils/jalali';
-import { tehranJalaliOf } from '../tehran-time';
+import { tehranJalaliOf, tehranWallDate } from '../tehran-time';
 import { behaviorHistory, saveBehaviorConfig, storedBehavior } from '../platform';
 
 export const SECTION_KEYS: BehaviorSectionKey[] = ['identity', 'principles', 'rubric', 'documents', 'fairness', 'seniority', 'deep', 'output', 'custom'];
@@ -544,9 +544,11 @@ export function detectIndustry(ctx: IndustryContext, cfg: BehaviorConfig = curre
 
 // ---------------------------------------------------------------- prompt ----
 
-export function todayLine(): string {
-  const now = new Date();
-  return `تاریخ امروز: ${formatJalaliDateReadable(tehranJalaliOf(now))} (${now.toISOString().slice(0, 10)})`;
+export function todayLine(now = new Date()): string {
+  // Both calendars name the same Tehran day: the UTC date lags behind until 03:30 Tehran time.
+  const w = tehranWallDate(now);
+  const gregorian = `${w.getFullYear()}-${String(w.getMonth() + 1).padStart(2, '0')}-${String(w.getDate()).padStart(2, '0')}`;
+  return `تاریخ امروز: ${formatJalaliDateReadable(tehranJalaliOf(now))} (${gregorian})`;
 }
 
 export function industryGuide(p: IndustryProfile): string {

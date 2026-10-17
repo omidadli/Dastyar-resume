@@ -6,6 +6,7 @@ import { buildAnswersBrief, buildTemplateUnderstanding, evaluateResumeLocal, fin
 import { rtfToText } from '../src/lib/rtf';
 import { safeExt } from '../server/db';
 import { matchesSearch, normalizeForSearch, normalizePersianText } from '../src/lib/normalizeFa';
+import { faRelative } from '../src/lib/format';
 import { assemblePageText, restoreZwnj, type PdfTextItem } from '../src/lib/pdfLayout';
 import fs from 'fs';
 import path from 'path';
@@ -143,7 +144,23 @@ const u: JobUnderstanding = {
   assert(matchesSearch(['کارشناس جذب‌و‌استخدام'], 'جذب و استخدام'), 'ZWNJ and spaces are interchangeable');
   assert(matchesSearch(['۰۹۱۲۱۲۳۴۵۶۷'], '0912'), 'Persian and ASCII digits match');
   assert(matchesSearch(['آموزش و توسعه'], 'اموزش'), 'آ matches ا');
+  assert(matchesSearch(['مدیر برنامۀ توسعه'], 'برنامه'), 'ۀ matches ه');
+  assert(matchesSearch(['مدیر برنامهٔ توسعه'], 'برنامه'), 'هٔ matches ه');
   assert(!matchesSearch(['حسابداری'], 'فروش'), 'unrelated words do not match');
+}
+
+{
+  // «دیروز» means the previous calendar day in Tehran, not «24–48 hours ago».
+  const realNow = Date.now;
+  try {
+    Date.now = () => Date.parse('2026-10-16T03:30:00Z'); // 07:00 Tehran
+    assert(faRelative('2026-10-15T04:30:00Z') === '۲۳ ساعت پیش', 'under a day: hours', faRelative('2026-10-15T04:30:00Z'));
+    assert(faRelative('2026-10-15T02:30:00Z') === 'دیروز', '25 hours ago, yesterday morning → «دیروز»', faRelative('2026-10-15T02:30:00Z'));
+    assert(faRelative('2026-10-14T19:30:00Z') === '۲ روز پیش', '32 hours ago, 23:00 two calendar days back → «۲ روز پیش»', faRelative('2026-10-14T19:30:00Z'));
+    assert(faRelative('2026-10-08T03:30:00Z') === '۱ هفته پیش', 'eight days → one week', faRelative('2026-10-08T03:30:00Z'));
+  } finally {
+    Date.now = realNow;
+  }
 }
 
 // ---- file extensions are preserved (bug #4) ----

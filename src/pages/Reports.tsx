@@ -172,7 +172,7 @@ export default function Reports() {
             />
           </div>
 
-          <div className="grid xl:grid-cols-[1fr_380px] gap-5">
+          <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_380px] gap-5">
             <Card>
               <CardHeader title="روند رزومه‌ها" subtitle="تعداد رزومه‌های تحلیل‌شده، با تطابق بالا و تأییدشده در هر بازه" />
               <div className="h-[300px] -mx-2" dir="ltr" style={{ fontFamily: 'inherit' }}>
@@ -182,7 +182,7 @@ export default function Reports() {
                     <XAxis
                       dataKey="label"
                       reversed
-                      tick={{ fontSize: 11, fill: '#6B746F', fontFamily: 'Vazirmatn' }}
+                      tick={{ fontSize: 11, fill: '#5C6560', fontFamily: 'Vazirmatn' }}
                       tickLine={false}
                       axisLine={{ stroke: '#E5E7EB' }}
                       interval="preserveStartEnd"
@@ -191,7 +191,7 @@ export default function Reports() {
                     <YAxis
                       orientation="right"
                       allowDecimals={false}
-                      tick={{ fontSize: 11, fill: '#6B746F', fontFamily: 'Vazirmatn' }}
+                      tick={{ fontSize: 11, fill: '#5C6560', fontFamily: 'Vazirmatn' }}
                       tickFormatter={(v) => toPersianDigits(v)}
                       tickLine={false}
                       axisLine={false}
@@ -294,7 +294,7 @@ export default function Reports() {
             </Card>
           </div>
 
-          <div className="grid lg:grid-cols-[1fr_340px] gap-5">
+          <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-5">
             <Card padded={false}>
               <div className="px-5 pt-5">
                 <CardHeader title="فرصت‌های شغلی" subtitle="وضعیت هر فرصت در این بازه" />

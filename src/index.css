@@ -37,10 +37,13 @@
   --color-brand-soft: #E8F1EA;
   --color-brand-tint: #F3F8F4;
 
+  /* Text greys. Every step stays readable (WCAG AA, ≥ 4.5:1) on white, the
+     canvas and the light tints (#EFF1F0 chips, #F3F8F4 rows, #E8F1EA): ink-3
+     ≥ 4.87:1 everywhere, ink-4 ≥ 4.5:1 — even 11px timestamps and counts. */
   --color-ink: #252C28;
   --color-ink-2: #4B5550;
-  --color-ink-3: #6B746F;
-  --color-ink-4: #9AA29D;
+  --color-ink-3: #5C6560;
+  --color-ink-4: #666F6A;
 
   --color-line: #E5E7EB;
   --color-line-2: #EFF1F0;

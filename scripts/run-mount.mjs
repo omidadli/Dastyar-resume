@@ -75,7 +75,8 @@ root.remove();
 navigate('/app');
 mount(root2);
 assert(await waitFor(() => text().includes('در انتظار تصمیم شما'), 10000), 'dashboard renders for the demo workspace');
-assert(text().includes('زمان صرفه‌جویی‌شده (برآورد)'), 'the time-saved figure is labelled as an estimate');
+// The card titles show while the figures still load: wait for the data itself.
+assert(await waitFor(() => text().includes('زمان صرفه‌جویی‌شده (برآورد)'), 10000), 'the time-saved figure is labelled as an estimate');
 
 // 3. Jobs list
 navigate('/app/jobs');

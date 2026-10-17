@@ -73,7 +73,16 @@ export default function SystemPage() {
   // Unsaved settings: leaving the page (or the tab) asks first.
   useLeaveGuard(dirty);
 
-  if (error && !data) return <ErrorState message={error} onRetry={reload} />;
+  if (error && !data) {
+    return (
+      <div>
+        <AdminHeader title="تنظیمات سامانه" />
+        <div className="hv-card">
+          <ErrorState message={error} onRetry={reload} />
+        </div>
+      </div>
+    );
+  }
   if (!form || !data) return <Skeleton className="h-[420px] rounded-card" />;
 
   const set = <K extends keyof SystemSettings>(k: K, v: SystemSettings[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));

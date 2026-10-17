@@ -100,7 +100,16 @@ export default function Behavior() {
   // Unsaved behaviour edits: leaving the page (or the tab) asks first.
   useLeaveGuard(dirty);
 
-  if (error && !data) return <ErrorState message={error} onRetry={reload} />;
+  if (error && !data) {
+    return (
+      <div>
+        <AdminHeader title="رفتار هوش مصنوعی" />
+        <div className="hv-card">
+          <ErrorState message={error} onRetry={reload} />
+        </div>
+      </div>
+    );
+  }
   if (!data || !draft) return <Skeleton className="h-[480px] rounded-card" />;
 
   const accept = (p: BehaviorPayload, message: string) => {
@@ -258,10 +267,10 @@ function RulesTab({ draft, defaults, onChange }: { draft: BehaviorConfig; defaul
           <Card key={s.key}>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <h3 className="text-[15px] font-extrabold text-ink flex items-center gap-2">
+                <h2 className="text-[15px] font-extrabold text-ink flex items-center gap-2">
                   {s.title}
                   {changed && <Chip tone="warning">ویرایش‌شده</Chip>}
-                </h3>
+                </h2>
                 <p className="text-[12.5px] text-ink-3 mt-1 leading-relaxed">{s.hint}</p>
               </div>
               {changed && (
@@ -271,6 +280,7 @@ function RulesTab({ draft, defaults, onChange }: { draft: BehaviorConfig; defaul
               )}
             </div>
             <TextArea
+              aria-label={s.title}
               value={value}
               onChange={(e) => onChange({ ...draft, sections: { ...draft.sections, [s.key]: e.target.value } })}
               rows={s.rows}
@@ -487,7 +497,7 @@ function LabTab({ draft, dirty }: { draft: BehaviorConfig; dirty: boolean }) {
             </div>
           )}
           <TextArea label="متن رزومه" optional={Boolean(file)} rows={7} value={resumeText} onChange={(e) => setResumeText(e.target.value)} placeholder="متن رزومه را اینجا بچسبانید، یا فایل انتخاب کنید." />
-          <label className="flex items-center gap-3 rounded-[12px] border border-dashed border-line-strong px-4 py-3 cursor-pointer hover:border-brand/50 focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/15">
+          <label className="relative flex items-center gap-3 rounded-[12px] border border-dashed border-line-strong px-4 py-3 cursor-pointer hover:border-brand/50 focus-within:border-brand focus-within:ring-[3px] focus-within:ring-brand/15">
             <FileUp className="w-5 h-5 text-brand-strong" />
             <span className="flex-1 min-w-0 text-[13px] text-ink-2 truncate">{file ? file.name : 'انتخاب فایل رزومه (هر قالبی)'}</span>
             {file && (

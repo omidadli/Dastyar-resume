@@ -3,13 +3,13 @@ import { CheckCircle2, Plus, UploadCloud, Users } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
 import { CandidatePanel } from '../components/candidates/CandidatePanel';
 import { CandidateTable } from '../components/candidates/CandidateTable';
-import { Button, Card, Drawer, EmptyState, ErrorState, Pagination, SearchInput, Segmented, Select, Tabs } from '../components/ui';
+import { ButtonLink, Card, Drawer, EmptyState, ErrorState, Pagination, SearchInput, Segmented, Select, Tabs } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useOnChange } from '../lib/events';
 import { jalaliDaysAgo } from '../lib/format';
 import { MATCH_FILTERS } from '../lib/match';
-import { navigate, setQuery, useLocation } from '../lib/router';
+import { setQuery, useLocation } from '../lib/router';
 import { useAsync, useDebounced } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { DecisionFilter, MatchFilter, ResumeListItem, ResumeSort } from '../types/screening';
@@ -98,11 +98,13 @@ export default function Candidates() {
       />
       <Card padded={false}>
         <div className="p-4 sm:p-5 border-b border-line-2 flex flex-col gap-3">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-            <SearchInput value={qInput} onChange={setQInput} placeholder="نام، مهارت، شهر یا یادداشت…" className="lg:w-[280px]" size="sm" />
-            <div className="flex flex-wrap items-center gap-2 lg:mr-auto">
+          <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+            <SearchInput value={qInput} onChange={setQInput} placeholder="نام، مهارت، شهر یا یادداشت…" className="xl:w-[280px]" size="sm" />
+            <div className="flex flex-wrap items-center gap-2 xl:mr-auto">
               <Select
                 compact
+                // A long job title must not stretch the filter row.
+                className="max-w-[220px]"
                 aria-label="فرصت شغلی"
                 value={jobId}
                 onChange={(e) => setQuery({ job: e.target.value || null })}
@@ -167,9 +169,9 @@ export default function Candidates() {
                     title="هنوز رزومه‌ای ثبت نشده است"
                     description="یک فرصت شغلی بسازید و رزومه‌ها را بارگذاری کنید؛ هویدا آن‌ها را با معیارهای همان فرصت می‌سنجد."
                     action={
-                      <Button icon={Plus} onClick={() => navigate('/app/jobs/new')}>
+                      <ButtonLink to="/app/jobs/new" icon={Plus}>
                         ایجاد فرصت شغلی
-                      </Button>
+                      </ButtonLink>
                     }
                     compact
                   />

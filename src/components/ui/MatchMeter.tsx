@@ -50,7 +50,8 @@ export function ScoreBadge({ score, category, size = 56 }: { score: number; cate
   const c = 2 * Math.PI * r;
   const stroke = { high: '#22C55E', review: '#F59E0B', low: '#EF4444', insufficient: '#94A3B8' }[m.level];
   return (
-    <div className="relative shrink-0" style={{ width: size, height: size }} aria-label={na ? m.label : `${value}٪ تطابق`}>
+    // role=img: a plain div cannot carry a name, so screen readers would skip the score.
+    <div className="relative shrink-0" style={{ width: size, height: size }} role="img" aria-label={na ? m.label : `${toPersianDigits(value)}٪ تطابق`}>
       <svg viewBox="0 0 36 36" width={size} height={size} className="-rotate-90">
         <circle cx="18" cy="18" r={r} fill="none" stroke="#EFF1F0" strokeWidth="3" />
         {!na && (

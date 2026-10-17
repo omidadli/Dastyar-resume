@@ -49,6 +49,14 @@ export function useEscapeLayer(open: boolean, onClose: () => void) {
   }, [open]);
 }
 
+/**
+ * Where the most recently closed overlay sent focus back to. An overlay opened
+ * from inside another one that closes in the same update (a «بیشتر» sheet item
+ * or a search result that raises the unsaved-changes question) records an
+ * element that is gone a moment later; it inherits this target instead.
+ */
+let lastClosedOpener: HTMLElement | null = null;
+
 /** Puts keyboard focus back where it was (the button that opened the overlay). */
 export function useRestoreFocus(open: boolean) {
   // Read while rendering the opening frame, not in the effect: React applies
@@ -62,8 +70,17 @@ export function useRestoreFocus(open: boolean) {
   wasOpen.current = open;
   useEffect(() => {
     if (!open) return;
+    // React runs every effect cleanup of a commit before the new effects, so a
+    // sheet that closed together with this overlay's opening has already
+    // reported where it returns focus to.
+    if (opener.current && !opener.current.isConnected && lastClosedOpener?.isConnected) opener.current = lastClosedOpener;
     const before = opener.current;
     return () => {
+      // Valid only for the effects of this same commit (they run in one synchronous batch).
+      lastClosedOpener = before;
+      queueMicrotask(() => {
+        if (lastClosedOpener === before) lastClosedOpener = null;
+      });
       if (before && before !== document.body && before.isConnected) {
         window.setTimeout(() => {
           // Only if nothing else claimed focus meanwhile (e.g. a page change).
@@ -251,7 +268,7 @@ export function Drawer({
   useLockScroll(open);
   useEscapeLayer(open, onClose);
   useRestoreFocus(open);
-  const panelRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
     const t = window.setTimeout(() => {
@@ -264,7 +281,8 @@ export function Drawer({
   return createPortal(
     <div className="fixed inset-0 z-[70]" dir="rtl">
       <div className="absolute inset-0 bg-[#18211c]/35 animate-fade-in" onClick={onClose} />
-      <aside
+      {/* A div, not <aside>: a complementary landmark may not take the dialog role. */}
+      <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -275,7 +293,7 @@ export function Drawer({
         style={{ maxWidth: width }}
       >
         {children}
-      </aside>
+      </div>
     </div>,
     document.body
   );

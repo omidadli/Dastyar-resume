@@ -97,9 +97,9 @@ export default function Talent({ dept }: { dept?: string }) {
       </div>
 
       <div className="hv-card p-4 mb-4 flex flex-col gap-3">
-        <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-          <SearchInput value={qInput} onChange={setQInput} placeholder="نام، مهارت، برچسب یا یادداشت…" className="lg:w-[300px]" size="sm" />
-          <div className="flex flex-wrap items-center gap-2 lg:mr-auto">
+        <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+          <SearchInput value={qInput} onChange={setQInput} placeholder="نام، مهارت، برچسب یا یادداشت…" className="xl:w-[300px]" size="sm" />
+          <div className="flex flex-wrap items-center gap-2 xl:mr-auto">
             <Select
               compact
               aria-label="حداقل تطابق"

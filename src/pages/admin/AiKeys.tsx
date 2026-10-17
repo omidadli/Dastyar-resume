@@ -78,7 +78,16 @@ export default function AiKeys() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (error && !data) return <ErrorState message={error} onRetry={reload} />;
+  if (error && !data) {
+    return (
+      <div>
+        <AdminHeader title="کلیدهای هوش مصنوعی" />
+        <div className="hv-card">
+          <ErrorState message={error} onRetry={reload} />
+        </div>
+      </div>
+    );
+  }
   if (!data) return <Skeleton className="h-[420px] rounded-card" />;
 
   const adminKeys = data.keys.filter((k) => k.source === 'admin');

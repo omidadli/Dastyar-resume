@@ -235,6 +235,7 @@ export function Checkbox({
   indeterminate,
   className = '',
   disabled,
+  ariaLabel,
 }: {
   checked: boolean;
   onChange: (v: boolean) => void;
@@ -242,16 +243,26 @@ export function Checkbox({
   indeterminate?: boolean;
   className?: string;
   disabled?: boolean;
+  /** Accessible name when there is no visible label (e.g. row selection in a table). */
+  ariaLabel?: string;
 }) {
+  const ref = React.useRef<HTMLInputElement>(null);
+  // «Some selected» is the native indeterminate state (read out as «mixed»);
+  // aria-checked on a native checkbox is ignored in favour of `checked`.
+  React.useEffect(() => {
+    // Every render: a click clears the DOM flag even when the prop stays the same.
+    if (ref.current) ref.current.indeterminate = Boolean(indeterminate);
+  });
   return (
     <label className={`inline-flex items-center gap-2.5 select-none ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'} ${className}`}>
       <span className="relative inline-flex">
         <input
+          ref={ref}
           type="checkbox"
           className="peer sr-only"
           checked={checked}
           disabled={disabled}
-          aria-checked={indeterminate ? 'mixed' : checked}
+          aria-label={ariaLabel}
           onChange={(e) => onChange(e.target.checked)}
         />
         <span

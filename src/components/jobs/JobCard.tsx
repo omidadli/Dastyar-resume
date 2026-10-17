@@ -6,7 +6,7 @@ import { EMPLOYMENT_LABELS } from '../../lib/match';
 import { faNumber, faRelative } from '../../lib/format';
 import { DistributionBar, JobStatusPill } from '../ui';
 
-export function JobCard({ job, running }: { job: JobSummary; running?: boolean }) {
+export function JobCard({ job, running, titleAs: Heading = 'h2' }: { job: JobSummary; running?: boolean; titleAs?: 'h2' | 'h3' }) {
   const s = job.stats;
   return (
     <Link
@@ -15,7 +15,7 @@ export function JobCard({ job, running }: { job: JobSummary; running?: boolean }
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h3 className="text-[15.5px] font-bold text-ink leading-snug group-hover:text-brand-stronger transition-colors truncate">{job.roleTitle}</h3>
+          <Heading className="text-[15.5px] font-bold text-ink leading-snug group-hover:text-brand-stronger transition-colors truncate">{job.roleTitle}</Heading>
           <p className="text-[12.5px] text-ink-3 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <span>{job.departmentName}</span>
             {job.location && (

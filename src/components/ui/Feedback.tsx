@@ -4,7 +4,7 @@ import { Button } from './Button';
 
 export function Spinner({ className = 'w-5 h-5', label }: { className?: string; label?: string }) {
   return (
-    <span className="inline-flex items-center gap-2 text-ink-3" role="status">
+    <span className="relative inline-flex items-center gap-2 text-ink-3" role="status">
       <Loader2 className={`${className} animate-spin text-brand`} aria-hidden />
       {label ? <span className="text-[13px] font-medium">{label}</span> : <span className="sr-only">در حال بارگذاری…</span>}
     </span>
@@ -22,6 +22,7 @@ export function EmptyState({
   action,
   className = '',
   compact,
+  titleAs: Heading = 'h2',
 }: {
   icon: LucideIcon;
   title: string;
@@ -29,13 +30,15 @@ export function EmptyState({
   action?: React.ReactNode;
   className?: string;
   compact?: boolean;
+  /** h1 when the empty state is the whole page (not found); h3 inside a titled section. */
+  titleAs?: 'h1' | 'h2' | 'h3';
 }) {
   return (
     <div className={`flex flex-col items-center text-center ${compact ? 'py-8 px-4' : 'py-14 px-6'} ${className}`}>
       <div className={`${compact ? 'w-12 h-12' : 'w-14 h-14'} rounded-[16px] bg-brand-soft flex items-center justify-center mb-4`}>
         <Icon className={`${compact ? 'w-6 h-6' : 'w-7 h-7'} text-brand-strong`} strokeWidth={1.6} />
       </div>
-      <h3 className="text-[15px] font-bold text-ink">{title}</h3>
+      <Heading className="text-[15px] font-bold text-ink">{title}</Heading>
       {description && <p className="text-[13px] text-ink-3 mt-1.5 max-w-[420px] leading-relaxed">{description}</p>}
       {action && <div className="mt-5 flex flex-wrap items-center justify-center gap-2">{action}</div>}
     </div>

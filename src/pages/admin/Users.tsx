@@ -109,7 +109,9 @@ export default function UsersPage() {
                   <th className="text-right font-semibold px-3 py-2.5">آخرین ورود</th>
                   <th className="text-center font-semibold px-3 py-2.5">نشست فعال</th>
                   <th className="text-right font-semibold px-3 py-2.5">وضعیت</th>
-                  <th className="px-3 py-2.5" />
+                  <th className="relative px-3 py-2.5">
+                    <span className="sr-only">عملیات</span>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line-2">

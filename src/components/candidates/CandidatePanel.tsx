@@ -36,11 +36,11 @@ import { emitChange } from '../../lib/events';
 import { copyText } from '../../lib/clipboard';
 import { isInCompare, removeFromCompare, toggleCompare, useCompare } from '../../lib/compare';
 import { toEnglishDigits } from '../../lib/normalizeFa';
-import { navigate } from '../../lib/router';
 import { candidateName, faDate, faNumber, faRelative, toPersianDigits } from '../../lib/format';
 import { DECISION_META, matchMeta } from '../../lib/match';
 import {
   Button,
+  ButtonLink,
   Callout,
   Chip,
   ConfidenceBadge,
@@ -74,11 +74,11 @@ export interface CandidatePanelProps {
 function SectionTitle({ icon: Icon, children, tone = 'neutral', count }: { icon: LucideIcon; children: React.ReactNode; tone?: 'neutral' | 'high' | 'review' | 'low'; count?: number }) {
   const cls = { neutral: 'text-ink-3', high: 'text-high-ink', review: 'text-review-ink', low: 'text-low-ink' }[tone];
   return (
-    <h4 className="flex items-center gap-2 text-[13.5px] font-bold text-ink mb-2.5">
+    <h3 className="flex items-center gap-2 text-[13.5px] font-bold text-ink mb-2.5">
       <Icon className={`w-[17px] h-[17px] ${cls}`} strokeWidth={2} />
       {children}
       {count !== undefined && <span className="text-[12px] font-semibold text-ink-4 hv-num">{toPersianDigits(count)}</span>}
-    </h4>
+    </h3>
   );
 }
 
@@ -388,9 +388,9 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
             {inCompare ? 'در فهرست مقایسه' : 'افزودن به مقایسه'}
           </Button>
           {variant === 'panel' && (
-            <Button variant="secondary" size="sm" icon={ExternalLink} onClick={() => navigate(`/app/candidates/${record.id}`)} className="flex-1">
+            <ButtonLink to={`/app/candidates/${record.id}`} variant="secondary" size="sm" icon={ExternalLink} className="flex-1">
               مشاهده رزومه کامل
-            </Button>
+            </ButtonLink>
           )}
           <Menu
             align="end"

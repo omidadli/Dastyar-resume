@@ -18,7 +18,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { Button, Callout, Card, CardHeader, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
+import { Button, ButtonLink, Callout, Card, CardHeader, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
 import { copyText } from '../lib/clipboard';
 import { useAuth, useCan } from '../lib/auth';
@@ -427,7 +427,7 @@ function MessagesTab() {
       <Card>
         <CardHeader icon={MessageSquareText} title="امضای پیام‌ها" subtitle="به انتهای همه پیش‌نویس‌های پیام کاندیداها اضافه می‌شود." />
         {!canEdit && <ReadOnlyNote />}
-        <TextArea value={sig} onChange={(e) => setSig(e.target.value)} rows={5} disabled={!canEdit} />
+        <TextArea value={sig} onChange={(e) => setSig(e.target.value)} rows={5} disabled={!canEdit} aria-label="امضای پیام‌ها" />
         {canEdit && (
           <div className="flex justify-end mt-4">
             <Button icon={Save} onClick={save} loading={saving} disabled={sig.trim() === (org.messageSignature || '').trim()}>
@@ -469,7 +469,7 @@ function AiTab() {
   };
   if (!ai) return null;
   return (
-    <div className="grid lg:grid-cols-[1fr_1fr] gap-5 max-w-[1000px]">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-w-[1000px]">
       <Card>
         <CardHeader icon={ai.available ? Sparkles : Cpu} title="وضعیت هوش مصنوعی" subtitle="موتور تحلیل این سرور را مدیر سامانه (میزبان هویدا) تنظیم می‌کند." />
         <div className={`rounded-[14px] border p-4 ${ai.available ? 'border-brand/25 bg-brand-tint' : 'border-review/25 bg-review-soft'}`}>
@@ -512,12 +512,12 @@ function AiTab() {
               <li>دستورالعمل‌های تحلیل، سطح سخت‌گیری و راهنمای تخصصی هر صنعت</li>
             </ul>
             <div className="flex flex-wrap gap-2 mt-4">
-              <Button icon={KeyRound} onClick={() => navigate('/admin/ai')}>
+              <ButtonLink to="/admin/ai" icon={KeyRound}>
                 کلیدهای هوش مصنوعی
-              </Button>
-              <Button variant="secondary" icon={Sparkles} onClick={() => navigate('/admin/behavior')}>
+              </ButtonLink>
+              <ButtonLink to="/admin/behavior" variant="secondary" icon={Sparkles}>
                 رفتار هوش مصنوعی
-              </Button>
+              </ButtonLink>
             </div>
           </>
         ) : (

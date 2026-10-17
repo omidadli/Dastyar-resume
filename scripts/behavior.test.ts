@@ -159,6 +159,13 @@ async function main() {
   const pf = finalizeEvaluation({ document: { isResume: false, type: 'portfolio' }, score: 60, criterionScores: [] }, understanding, {}, 'ai');
   assert(!pf.flags.notResume, 'a portfolio is still judged');
 
+  // ---------------- «today» in the prompt ----------------
+  // 01:30 in Tehran is still the previous day in UTC: both calendars must name the Tehran day.
+  const late = b.todayLine(new Date('2026-10-16T22:00:00Z'));
+  assert(late.includes('(2026-10-17)') && late.includes('۲۵ مهر ۱۴۰۵'), 'prompt date: Gregorian and Jalali agree on the Tehran day after midnight', late);
+  const noon = b.todayLine(new Date('2026-10-16T09:00:00Z'));
+  assert(noon.includes('(2026-10-16)') && noon.includes('۲۴ مهر ۱۴۰۵'), 'prompt date at noon', noon);
+
   fs.rmSync(DATA, { recursive: true, force: true });
   console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
   process.exit(failures === 0 ? 0 : 1);

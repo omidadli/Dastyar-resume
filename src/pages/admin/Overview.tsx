@@ -1,16 +1,24 @@
 import React from 'react';
 import { Activity, AlertTriangle, BrainCircuit, Building2, FileStack, HardDrive, KeyRound, RefreshCw, Server, Users } from 'lucide-react';
-import { Button, Card, CardHeader, Callout, ErrorState, Skeleton } from '../../components/ui';
+import { Button, ButtonLink, Card, CardHeader, Callout, ErrorState, Skeleton } from '../../components/ui';
 import { adminApi } from '../../lib/api';
 import { useAsync } from '../../lib/useAsync';
-import { navigate } from '../../lib/router';
 import { faNumber, toPersianDigits } from '../../lib/format';
 import { AdminHeader, MiniStat, Row, faBytes, faDateTime } from './shared';
 
 export default function Overview() {
   const { data, error, loading, reload } = useAsync(() => adminApi.overview(), []);
 
-  if (error && !data) return <ErrorState message={error} onRetry={reload} />;
+  if (error && !data) {
+    return (
+      <div>
+        <AdminHeader title="نمای کلی سامانه" />
+        <div className="hv-card">
+          <ErrorState message={error} onRetry={reload} />
+        </div>
+      </div>
+    );
+  }
   if (!data) {
     return (
       <div className="grid gap-4">
@@ -46,16 +54,20 @@ export default function Overview() {
           title="هوش مصنوعی فعال نیست"
           className="mb-5"
           action={
-            <Button size="sm" onClick={() => navigate('/admin/ai')}>
+            <ButtonLink to="/admin/ai" size="sm">
               افزودن کلید
-            </Button>
+            </ButtonLink>
           }
         >
           تا وقتی کلید معتبری ثبت نشود، رزومه‌ها با «تحلیل محلی» (کلیدواژه‌ای) سنجیده می‌شوند.
         </Callout>
       )}
       {ai.enabled && ai.invalid > 0 && (
-        <Callout tone="danger" className="mb-5" title={`${faNumber(ai.invalid)} کلید پذیرفته نشده است`} action={<Button size="sm" variant="secondary" onClick={() => navigate('/admin/ai')}>بررسی کلیدها</Button>}>
+        <Callout tone="danger" className="mb-5" title={`${faNumber(ai.invalid)} کلید پذیرفته نشده است`} action={
+            <ButtonLink to="/admin/ai" size="sm" variant="secondary">
+              بررسی کلیدها
+            </ButtonLink>
+          }>
           سرویس هوش مصنوعی این کلیدها را رد کرده است؛ تا اصلاح نشوند، سامانه از کلیدهای دیگر استفاده می‌کند.
         </Callout>
       )}

@@ -10,6 +10,7 @@ import {
   Pause,
   Pencil,
   Play,
+  SearchX,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
@@ -27,6 +28,7 @@ import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
 import {
   Button,
+  ButtonLink,
   Callout,
   Card,
   CardHeader,
@@ -336,7 +338,28 @@ export default function JobDetail({ id }: { id: string }) {
   // A hiccup while the opening is already on screen (after an action, say)
   // keeps the page; a 4xx — deleted, no access — replaces it.
   if (jobQ.error && (!job || (jobQ.errorStatus !== null && jobQ.errorStatus >= 400 && jobQ.errorStatus < 500))) {
-    return <ErrorState message={jobQ.error} onRetry={jobQ.reload} />;
+    // Deleted or never existed: «try again» cannot help — offer the way back instead.
+    if (jobQ.errorStatus === 404) {
+      return (
+        <div className="hv-card mt-6">
+          <EmptyState
+            icon={SearchX}
+            titleAs="h1"
+            title="این فرصت شغلی پیدا نشد"
+            description="ممکن است حذف شده باشد یا پیوند اشتباه باشد."
+            action={<ButtonLink to="/app/jobs">بازگشت به فرصت‌های شغلی</ButtonLink>}
+          />
+        </div>
+      );
+    }
+    return (
+      <div>
+        <PageHeader breadcrumb={[{ label: 'فرصت‌های شغلی', to: '/app/jobs' }]} title="فرصت شغلی" />
+        <div className="hv-card">
+          <ErrorState message={jobQ.error} onRetry={jobQ.reload} />
+        </div>
+      </div>
+    );
   }
   if (!job) {
     return (
@@ -480,9 +503,10 @@ export default function JobDetail({ id }: { id: string }) {
         <div className={`grid gap-5 ${panelOpen && isWide ? 'grid-cols-[minmax(0,1fr)_440px]' : 'grid-cols-1'}`}>
           <Card padded={false} className="min-w-0">
             <div className="p-4 sm:p-5 border-b border-line-2 flex flex-col gap-3">
-              <div className={`flex flex-col gap-3 ${panelOpen && isWide ? '' : 'lg:flex-row lg:items-center'}`}>
-                <SearchInput value={qInput} onChange={setQInput} placeholder="جست‌وجوی نام، مهارت، شهر…" className={panelOpen && isWide ? '' : 'lg:w-[260px]'} size="sm" />
-                <div className={`flex flex-wrap items-center gap-2 ${panelOpen && isWide ? '' : 'lg:mr-auto'}`}>
+              {/* One row only from xl: below it the three filters would wrap one by one beside the search box. */}
+              <div className={`flex flex-col gap-3 ${panelOpen && isWide ? '' : 'xl:flex-row xl:items-center'}`}>
+                <SearchInput value={qInput} onChange={setQInput} placeholder="جست‌وجوی نام، مهارت، شهر…" className={panelOpen && isWide ? '' : 'xl:w-[260px]'} size="sm" />
+                <div className={`flex flex-wrap items-center gap-2 ${panelOpen && isWide ? '' : 'xl:mr-auto'}`}>
                   <Select
                     compact
                     aria-label="تصمیم"
@@ -602,7 +626,9 @@ export default function JobDetail({ id }: { id: string }) {
           </Card>
 
           {panelOpen && isWide && (
-            <aside className="hv-card sticky top-[88px] h-[calc(100vh-108px)] overflow-hidden animate-fade-in">{sidePanel}</aside>
+            <aside aria-label="جزئیات کاندید" className="hv-card sticky top-[88px] h-[calc(100vh-108px)] overflow-hidden animate-fade-in">
+              {sidePanel}
+            </aside>
           )}
         </div>
       )}

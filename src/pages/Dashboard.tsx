@@ -16,13 +16,13 @@ import {
 import { PageHeader } from '../components/layout/AppShell';
 import { ActivityRow } from '../components/layout/NotificationsPanel';
 import { JobCard } from '../components/jobs/JobCard';
-import { Button, ButtonLink, Callout, Card, CardHeader, EmptyState, ErrorState, MatchMeter, MatchPill, Monogram, Skeleton, Stat } from '../components/ui';
+import { ButtonLink, Callout, Card, CardHeader, EmptyState, ErrorState, MatchMeter, MatchPill, Monogram, Skeleton, Stat } from '../components/ui';
 import { api } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAnalysis } from '../lib/analysis';
 import { useOnChange } from '../lib/events';
 import { candidateName, faNumber, greeting, toPersianDigits } from '../lib/format';
-import { Link, navigate, useLocation } from '../lib/router';
+import { Link, useLocation } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 
@@ -93,15 +93,16 @@ export default function Dashboard() {
                       <p className="text-[14px] font-bold text-ink">{s.t}</p>
                     </div>
                     <p className="text-[13px] text-ink-3 mt-2 leading-relaxed flex-1">{s.d}</p>
-                    <Button variant={i === 0 ? 'primary' : 'secondary'} size="sm" className="mt-3 self-start" onClick={() => navigate(s.to)}>
+                    {/* A link, not a button: it goes somewhere (and opens in a new tab with Ctrl/middle-click). */}
+                    <ButtonLink to={s.to} variant={i === 0 ? 'primary' : 'secondary'} size="sm" className="mt-3 self-start">
                       {s.cta}
-                    </Button>
+                    </ButtonLink>
                   </div>
                 ))}
               </div>
             </Card>
           ) : (
-            <div className="grid xl:grid-cols-[1fr_360px] gap-5 mt-5">
+            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5 mt-5">
               <div className="flex flex-col gap-5 min-w-0">
                 {/* Pending decisions */}
                 <Card padded={false}>
@@ -123,7 +124,7 @@ export default function Dashboard() {
                       ))}
                     </div>
                   ) : data!.pending.length === 0 ? (
-                    <EmptyState icon={CheckCircle2} title="کاری در صف نیست" description="برای همه کاندیداهای مهم تصمیم گرفته‌اید." compact />
+                    <EmptyState icon={CheckCircle2} title="کاری در صف نیست" description="برای همه کاندیداهای مهم تصمیم گرفته‌اید." compact titleAs="h3" />
                   ) : (
                     <ul className="divide-y divide-line-2 pb-2">
                       {data!.pending.map((r) => (
@@ -160,6 +161,7 @@ export default function Dashboard() {
                     <div className="hv-card">
                       <EmptyState
                         icon={BriefcaseBusiness}
+                        titleAs="h3"
                         title="فرصت شغلی فعالی ندارید"
                         description="همه فرصت‌های شغلی بسته شده‌اند. یک فرصت تازه بسازید یا یکی از فرصت‌های بسته را دوباره باز کنید."
                         action={
@@ -174,7 +176,7 @@ export default function Dashboard() {
                     <div className="grid md:grid-cols-2 gap-3 sm:gap-4">
                       {loading && !data
                         ? Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-[210px] rounded-card" />)
-                        : data!.jobs.map((j) => <JobCard key={j.id} job={j} running={runs.some((r) => r.jobId === j.id && r.status === 'running')} />)}
+                        : data!.jobs.map((j) => <JobCard key={j.id} job={j} titleAs="h3" running={runs.some((r) => r.jobId === j.id && r.status === 'running')} />)}
                     </div>
                   )}
                 </div>

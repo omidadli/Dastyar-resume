@@ -189,7 +189,7 @@ export function CriteriaEditor({
                   <IconButton icon={Plus} label="افزایش وزن" size="sm" disabled={c.weight >= 100} onClick={() => patch(c.id, { weight: Math.min(100, c.weight + 5) })} />
                 </div>
               )}
-              <label className={`inline-flex items-center gap-1.5 text-[12px] font-semibold ${readOnly ? '' : 'cursor-pointer'} ${c.mustHave ? 'text-low-ink' : 'text-ink-3'}`}>
+              <label className={`relative inline-flex items-center gap-1.5 text-[12px] font-semibold ${readOnly ? '' : 'cursor-pointer'} ${c.mustHave ? 'text-low-ink' : 'text-ink-3'}`}>
                 <input type="checkbox" className="sr-only peer" checked={c.mustHave} disabled={readOnly} onChange={(e) => patch(c.id, { mustHave: e.target.checked })} />
                 <span
                   className={`w-4 h-4 rounded border flex items-center justify-center peer-focus-visible:ring-2 peer-focus-visible:ring-brand/50 peer-focus-visible:ring-offset-1 ${

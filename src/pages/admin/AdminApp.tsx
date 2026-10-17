@@ -15,10 +15,10 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { HovidaLogo, HovidaMark } from '../../components/brand/Logo';
-import { Button, Callout, Spinner, TextInput, trapTabKey, useEscapeLayer, useLockScroll, useRestoreFocus } from '../../components/ui';
+import { Button, ButtonLink, Callout, Spinner, TextInput, trapTabKey, useEscapeLayer, useLockScroll, useRestoreFocus } from '../../components/ui';
 import { adminApi, api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { navigate } from '../../lib/router';
+import { Link, navigate } from '../../lib/router';
 import { useMediaQuery } from '../../lib/useAsync';
 import { useTitle } from '../../lib/useTitle';
 import type { AdminMe } from '../../types/admin';
@@ -65,10 +65,10 @@ function Centered({ children }: { children: React.ReactNode }) {
           </span>
         </div>
         <div className="hv-card p-6 sm:p-7">{children}</div>
-        <button onClick={() => navigate('/')} className="mt-5 mx-auto flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3 hover:text-ink">
+        <Link to="/" className="mt-5 mx-auto w-fit flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-3 hover:text-ink">
           <ArrowRight className="w-4 h-4" />
           بازگشت به هویدا
-        </button>
+        </Link>
       </div>
     </div>
   );
@@ -172,9 +172,9 @@ function NotAdmin({ setupPending, onClaimed }: { setupPending: boolean; onClaime
         </form>
       )}
       <div className="flex gap-2 mt-5">
-        <Button variant="secondary" block onClick={() => navigate('/app')}>
+        <ButtonLink to="/app" variant="secondary" block>
           رفتن به فضای کاری
-        </Button>
+        </ButtonLink>
         <Button variant="ghost" icon={LogOut} onClick={() => void signOut({ silent: true })}>
           خروج
         </Button>
@@ -185,7 +185,7 @@ function NotAdmin({ setupPending, onClaimed }: { setupPending: boolean; onClaime
 
 function NavLinks({ current, onNavigate }: { current: string; onNavigate?: () => void }) {
   return (
-    <nav className="flex flex-col gap-0.5">
+    <nav className="flex flex-col gap-0.5" aria-label="ناوبری پنل مدیریت">
       {NAV.map((item) => {
         const active = item.to === current;
         return (
@@ -216,9 +216,9 @@ function SidebarFooter() {
       <p className="text-[13px] font-bold text-white truncate">{user?.name}</p>
       <p className="text-[11.5px] text-white/50 truncate hv-latin text-right">{user?.email}</p>
       <div className="flex gap-1.5 mt-3">
-        <button onClick={() => navigate('/app')} className="flex-1 h-9 rounded-[10px] bg-white/[0.07] hover:bg-white/[0.12] text-[12.5px] font-semibold text-white">
+        <Link to="/app" className="flex-1 h-9 rounded-[10px] bg-white/[0.07] hover:bg-white/[0.12] text-[12.5px] font-semibold text-white inline-flex items-center justify-center">
           فضای کاری من
-        </button>
+        </Link>
         <button
           onClick={() => void signOut()}
           aria-label="خروج"
@@ -255,7 +255,7 @@ function AdminShell({ pathname }: { pathname: string }) {
   return (
     <div dir="rtl" className="min-h-screen bg-canvas">
       <SkipToMain />
-      <aside className="hidden lg:flex fixed inset-y-0 right-0 w-[252px] flex-col bg-[#1E2521] px-4 py-5 z-30">
+      <aside aria-label="نوار کناری پنل مدیریت" className="hidden lg:flex fixed inset-y-0 right-0 w-[252px] flex-col bg-[#1E2521] px-4 py-5 z-30">
         <div className="px-1 mb-6">{brand}</div>
         <div className="flex-1 overflow-y-auto hv-scroll">
           <NavLinks current={section.to} />

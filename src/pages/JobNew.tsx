@@ -24,24 +24,33 @@ function Stepper({ step }: { step: Step }) {
     { n: 3, label: 'بارگذاری رزومه‌ها' },
   ];
   return (
-    <ol className="flex items-center gap-2 sm:gap-3 mb-6 overflow-x-auto hv-scroll pb-1">
+    <ol className="flex items-center gap-2 sm:gap-3 mb-6 overflow-x-auto hv-scroll pb-1" aria-label="مراحل ساخت فرصت شغلی">
       {steps.map((s, i) => {
         const done = step > s.n;
         const active = step === s.n;
         return (
-          <React.Fragment key={s.n}>
-            {i > 0 && <span className={`h-px w-6 sm:w-12 shrink-0 ${done || active ? 'bg-brand' : 'bg-line-strong'}`} />}
-            <li className="flex items-center gap-2 shrink-0" aria-current={active ? 'step' : undefined}>
+          // Only <li> may sit directly in a list: the connector line lives inside the step.
+          <li key={s.n} className="relative flex items-center gap-2 sm:gap-3 shrink-0" aria-current={active ? 'step' : undefined}>
+            {i > 0 && <span aria-hidden className={`h-px w-6 sm:w-12 shrink-0 ${done || active ? 'bg-brand' : 'bg-line-strong'}`} />}
+            <span className="flex items-center gap-2">
               <span
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-extrabold hv-num ${
                   done ? 'bg-brand-strong text-white' : active ? 'bg-brand-soft text-brand-stronger ring-2 ring-brand/40' : 'bg-line-2 text-ink-3'
                 }`}
               >
-                {done ? <Check className="w-4 h-4" strokeWidth={3} /> : toPersianDigits(s.n)}
+                {done ? (
+                  <>
+                    <Check className="w-4 h-4" strokeWidth={3} aria-hidden />
+                    <span className="sr-only">انجام‌شده:</span>
+                  </>
+                ) : (
+                  toPersianDigits(s.n)
+                )}
               </span>
-              <span className={`text-[13px] font-semibold ${active ? 'text-ink' : 'text-ink-3'} ${active ? '' : 'hidden sm:inline'}`}>{s.label}</span>
-            </li>
-          </React.Fragment>
+              {/* On phones only the current step shows its name; the others stay readable for screen readers. */}
+              <span className={`text-[13px] font-semibold ${active ? 'text-ink' : 'text-ink-3 max-sm:sr-only'}`}>{s.label}</span>
+            </span>
+          </li>
         );
       })}
     </ol>

@@ -12,19 +12,22 @@ export function CardHeader({
   action,
   icon: Icon,
   className = '',
+  as: Heading = 'h2',
 }: {
   title: React.ReactNode;
   subtitle?: React.ReactNode;
   action?: React.ReactNode;
   icon?: LucideIcon;
   className?: string;
+  /** Cards sit right under the page title (h1), so their titles are h2; h3 when nested under another heading. */
+  as?: 'h2' | 'h3';
 }) {
   return (
     <div className={`flex items-start justify-between gap-3 mb-4 ${className}`}>
       <div className="flex items-start gap-2.5 min-w-0">
         {Icon && <Icon className="w-[18px] h-[18px] text-ink-3 mt-0.5 shrink-0" strokeWidth={1.8} />}
         <div className="min-w-0">
-          <h3 className="text-[15px] font-bold text-ink leading-snug">{title}</h3>
+          <Heading className="text-[15px] font-bold text-ink leading-snug">{title}</Heading>
           {subtitle && <p className="text-xs text-ink-3 mt-0.5 leading-relaxed">{subtitle}</p>}
         </div>
       </div>
@@ -118,6 +121,7 @@ export function Pagination({
               <button
                 key={p}
                 onClick={() => onChange(p)}
+                aria-label={`صفحه ${toPersianDigits(p)}`}
                 aria-current={p === page ? 'page' : undefined}
                 className={`min-w-8 h-8 px-2 rounded-[9px] text-[13px] font-semibold hv-num ${
                   p === page ? 'bg-brand-soft text-brand-stronger' : 'text-ink-2 hover:bg-line-2'

@@ -76,7 +76,7 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
       const prefix = url.searchParams.get('prefix') || '';
       if (!safePrefix(prefix)) return json({ error: 'bad prefix' }, 400);
       const cursor = url.searchParams.get('cursor') || '';
-      const rows = await db.prepare(`SELECT object_key, size_bytes FROM storage_objects WHERE object_key LIKE ? ESCAPE '\\' AND object_key > ? ORDER BY object_key LIMIT 1000`)
+      const rows = await db.prepare(\`SELECT object_key, size_bytes FROM storage_objects WHERE object_key LIKE ? ESCAPE '\\' AND object_key > ? ORDER BY object_key LIMIT 1000\`)
         .bind(root + prefix.replace(/[\\%_]/g, (m) => '\\' + m) + '%', cursor).all<{ object_key: string; size_bytes: number }>();
       const objects = rows.results.map((r) => ({ key: r.object_key.slice(root.length), size: r.size_bytes }));
       return json({ objects, cursor: rows.results.length === 1000 ? rows.results[rows.results.length - 1].object_key : null });

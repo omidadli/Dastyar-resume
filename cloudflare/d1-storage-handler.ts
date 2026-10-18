@@ -45,6 +45,8 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
         return request.method === 'HEAD' ? new Response(null, { headers }) : new Response(row.body, { headers });
       }
       if (request.method === 'PUT') {
+        const declaredLength = Number(request.headers.get('content-length') || 0);
+        if (declaredLength > 1_000_000) return json({ error: 'object too large for D1 preview (maximum 1000000 bytes)' }, 413);
         const body = await request.arrayBuffer();
         // Preserve the MD5 supplied by RemoteStorage: it is used to recognize
         // successful-but-ambiguous retries after a network timeout.

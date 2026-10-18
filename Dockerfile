@@ -4,8 +4,8 @@
 # usable on any Docker host as well:
 #   docker build -t hovida .
 #   docker run -p 8080:8080 -v hovida-data:/app/data -e APP_SECRET=… hovida
-# On Cloudflare the data lives in R2 (STORAGE_DRIVER=remote is set by the
-# Worker); elsewhere it lives in /app/data — mount a volume there.
+# On Cloudflare the remote storage protocol is backed by D1 (STORAGE_DRIVER=remote
+# is set by the Worker); elsewhere it lives in /app/data — mount a volume there.
 
 FROM node:22-bookworm-slim AS build
 WORKDIR /app

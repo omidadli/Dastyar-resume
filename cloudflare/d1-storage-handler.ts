@@ -53,7 +53,7 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
         let result: D1Result;
         if (ifMatch) {
           // Atomic compare-and-swap; avoid a read-then-write race between concurrent requests.
-          const expected = ifMatch.split(',').map((v) => v.trim().replace(/^W\\//, '').replace(/^"(.*)"$/, '$1'));
+          const expected = ifMatch.split(',').map((v) => v.trim().replace(/^W\//, '').replace(/^"(.*)"$/, '$1'));
           if (expected.includes('*')) {
             result = await db.prepare(`UPDATE storage_objects SET body=?, size_bytes=?, etag=?, md5=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE object_key=?`)
               .bind(body, body.byteLength, etag, md5, objectKey).run();
@@ -93,8 +93,10 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
       const prefix = url.searchParams.get('prefix') || '';
       if (!safePrefix(prefix)) return json({ error: 'bad prefix' }, 400);
       const cursor = url.searchParams.get('cursor') || '';
-      const rows = await db.prepare(`SELECT object_key, size_bytes FROM storage_objects WHERE object_key LIKE ? ESCAPE '\\' AND object_key > ? ORDER BY object_key LIMIT 1000`)
-        .bind(root + prefix.replace(/[\\%_]/g, (m) => '\\' + m) + '%', cursor).all<{ object_key: string; size_bytes: number }>();
+      const fullPrefix = root + prefix;
+      const rows = await db.prepare('SELECT object_key, size_bytes FROM storage_objects WHERE substr(object_key, 1, length(?)) = ? AND object_key > ? ORDER BY object_key LIMIT 1000')
+        .bind(fullPrefix, fullPrefix, cursor).all<{ object_key: string; size_bytes: number }>();
+        .bind(fullPrefix, fullPrefix, cursor).all<{ object_key: string; size_bytes: number }>();
       const objects = rows.results.map((r) => ({ key: r.object_key.slice(root.length), size: r.size_bytes }));
       return json({ objects, cursor: rows.results.length === 1000 ? rows.results[rows.results.length - 1].object_key : null });
     }

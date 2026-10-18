@@ -10,7 +10,7 @@ function json(body: unknown, status = 200, headers: Record<string, string> = {})
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json', ...headers } });
 }
 export function isSafeKey(key: string): boolean {
-  if (typeof key !== 'string' || !key || key.length > 600 || key.startsWith('/') || key.includes('\\\\') || key.includes('\\0')) return false;
+  if (typeof key !== 'string' || !key || key.length > 600 || key.startsWith('/') || key.includes('\\') || key.includes('\0')) return false;
   return key.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
 }
 function safePrefix(prefix: string) { return prefix === '' || (prefix.endsWith('/') && isSafeKey(prefix.slice(0, -1))); }

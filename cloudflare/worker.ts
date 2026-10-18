@@ -16,7 +16,7 @@ import { Container, ContainerProxy } from '@cloudflare/containers';
 import { routeRequest, CLIENT_IP_HEADER } from './router';
 import { handleD1StorageRequest } from './d1-storage-handler';
 
-// Required for outbound interception (the container → R2 bridge).
+// Required for outbound interception (the container → D1 storage bridge).
 export { ContainerProxy };
 
 export interface Env {
@@ -126,7 +126,7 @@ export class HovidaServer extends Container<Env> {
     return this.containerFetch(request, SERVER_PORT);
   }
 
-  /** SIGTERM: the server finishes open requests and saves its data to R2, then exits. */
+  /** SIGTERM: the server finishes open requests and saves its data to D1, then exits. */
   private async restartForNewSettings() {
     console.log('[hovida] settings changed — restarting the server container to apply them');
     await this.stop('SIGTERM');

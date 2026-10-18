@@ -47,16 +47,32 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
       if (request.method === 'PUT') {
         const body = await request.arrayBuffer();
         const { etag } = await digest(body);
-        const old = await db.prepare('SELECT etag FROM storage_objects WHERE object_key = ?').bind(objectKey).first<{ etag: string }>();
         const ifMatch = request.headers.get('if-match');
         const ifNoneMatch = request.headers.get('if-none-match');
-        if (ifMatch && (!old || !etagMatches(ifMatch, old.etag))) return json({ error: 'precondition failed' }, 412);
-        if (ifNoneMatch?.trim() === '*' && old) return json({ error: 'precondition failed' }, 412);
         const md5 = request.headers.get('x-hovida-md5');
-        await db.prepare(`INSERT INTO storage_objects (object_key, body, size_bytes, etag, md5, updated_at)
-          VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-          ON CONFLICT(object_key) DO UPDATE SET body=excluded.body, size_bytes=excluded.size_bytes, etag=excluded.etag, md5=excluded.md5, updated_at=excluded.updated_at`)
-          .bind(objectKey, body, body.byteLength, etag, md5).run();
+        let result: D1Result;
+        if (ifMatch) {
+          // Atomic compare-and-swap; avoid a read-then-write race between concurrent requests.
+          const expected = ifMatch.split(',').map((v) => v.trim().replace(/^W\\//, '').replace(/^"(.*)"$/, '$1'));
+          if (expected.includes('*')) {
+            result = await db.prepare(`UPDATE storage_objects SET body=?, size_bytes=?, etag=?, md5=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE object_key=?`)
+              .bind(body, body.byteLength, etag, md5, objectKey).run();
+          } else {
+            result = await db.prepare(`UPDATE storage_objects SET body=?, size_bytes=?, etag=?, md5=?, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE object_key=? AND etag IN (${expected.map(() => '?').join(',')})`)
+              .bind(body, body.byteLength, etag, md5, objectKey, ...expected).run();
+          }
+          if (!result.meta.changes) return json({ error: 'precondition failed' }, 412);
+        } else if (ifNoneMatch?.trim() === '*') {
+          result = await db.prepare(`INSERT OR IGNORE INTO storage_objects (object_key, body, size_bytes, etag, md5, updated_at)
+            VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`)
+            .bind(objectKey, body, body.byteLength, etag, md5).run();
+          if (!result.meta.changes) return json({ error: 'precondition failed' }, 412);
+        } else {
+          await db.prepare(`INSERT INTO storage_objects (object_key, body, size_bytes, etag, md5, updated_at)
+            VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            ON CONFLICT(object_key) DO UPDATE SET body=excluded.body, size_bytes=excluded.size_bytes, etag=excluded.etag, md5=excluded.md5, updated_at=excluded.updated_at`)
+            .bind(objectKey, body, body.byteLength, etag, md5).run();
+        }
         return json({ etag, size: body.byteLength }, 200, { etag });
       }
       if (request.method === 'DELETE') {

@@ -69,7 +69,8 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
       const payload = await request.json().catch(() => ({})) as { prefix?: string };
       const prefix = payload.prefix;
       if (typeof prefix !== 'string' || !prefix || !safePrefix(prefix)) return json({ error: 'bad prefix' }, 400);
-      const result = await db.prepare('DELETE FROM storage_objects WHERE object_key LIKE ?').bind(root + prefix.replace(/[\\%_]/g, (m) => '\\' + m) + '%').run();
+      const fullPrefix = root + prefix;
+      const result = await db.prepare('DELETE FROM storage_objects WHERE substr(object_key, 1, length(?)) = ?').bind(fullPrefix, fullPrefix).run();
       return json({ deleted: result.meta.changes || 0 });
     }
     if (path === '/v1/list' && request.method === 'GET') {
@@ -84,8 +85,9 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
     if (path === '/v1/usage' && request.method === 'GET') {
       const prefix = url.searchParams.get('prefix') || '';
       if (!safePrefix(prefix)) return json({ error: 'bad prefix' }, 400);
-      const row = await db.prepare('SELECT COALESCE(SUM(size_bytes),0) AS bytes, COUNT(*) AS objects FROM storage_objects WHERE object_key LIKE ?')
-        .bind(root + prefix.replace(/[\\%_]/g, (m) => '\\' + m) + '%').first<{ bytes: number; objects: number }>();
+      const fullPrefix = root + prefix;
+      const row = await db.prepare('SELECT COALESCE(SUM(size_bytes),0) AS bytes, COUNT(*) AS objects FROM storage_objects WHERE substr(object_key, 1, length(?)) = ?')
+        .bind(fullPrefix, fullPrefix).first<{ bytes: number; objects: number }>();
       return json({ bytes: row?.bytes || 0, objects: row?.objects || 0 });
     }
     return json({ error: 'unknown endpoint' }, 404);

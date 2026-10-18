@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // HOVIDA (هویدا) on Cloudflare: Workers (edge + static pages) + Containers (the
-  // Node server, built from ./Dockerfile) + R2 (data and resume files).
+  // HOVIDA (هویدا) on Cloudflare: Workers + Containers + D1 (metadata and object storage).
   // Step-by-step guide (Persian): docs/DEPLOY-CLOUDFLARE.md
   "name": "hovida",
   "main": "cloudflare/worker.ts",
@@ -37,11 +36,8 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HovidaServer"] }],
 
-  // Create it once: Cloudflare dashboard › R2 › Create bucket › "hovida-data".
-  "r2_buckets": [{ "binding": "DATA", "bucket_name": "hovida-data" }],
-
-  // 01:00 Tehran time: daily copy of the data snapshot inside the bucket (backups/daily/).
-  "triggers": { "crons": ["30 21 * * *"] },
+  // D1 stores the JSON snapshot and uploaded resume objects. Apply migrations/0001_hovida_storage.sql.
+  "d1_databases": [{ "binding": "DB", "database_name": "hovida-preview", "database_id": "2d113165-ed7b-4272-a07f-f56c128763db", "migrations_dir": "migrations" }],
 
   // Secrets (APP_SECRET, ADMIN_EMAILS, AI keys…) are set in the dashboard or with
   // `npx wrangler secret put NAME` — never here. keep_vars: variables added in the

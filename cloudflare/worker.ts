@@ -5,25 +5,24 @@
  *                      └─ /api/* ─► Durable Object «main» ─► container (Node server, Dockerfile)
  *                                                               │ http://storage.hovida
  *                                                               ▼
- *                                         outbound handler ─► R2 bucket (data/, backups/)
+ *                                         outbound handler ─► D1 (data and resume files)
  *
  * One container instance holds the app (its data lives in memory and is saved
- * to R2 as it changes), so every request goes to the same Durable Object.
+ * to D1 as it changes), so every request goes to the same Durable Object.
  * The container sleeps after CONTAINER_SLEEP_AFTER without traffic; the next
- * request wakes it in a few seconds and it loads its data back from R2.
+ * request wakes it in a few seconds and it loads its data back from D1.
  */
 import { Container, ContainerProxy } from '@cloudflare/containers';
-import { dailyBackup } from './daily-backup';
 import { routeRequest, CLIENT_IP_HEADER } from './router';
-import { handleStorageRequest } from './storage-handler';
+import { handleD1StorageRequest } from './d1-storage-handler';
 
-// Required for outbound interception (the container → R2 bridge).
+// Required for outbound interception (the container → D1 storage bridge).
 export { ContainerProxy };
 
 export interface Env {
   ASSETS: Fetcher;
   HOVIDA_SERVER: DurableObjectNamespace<HovidaServer>;
-  DATA: R2Bucket;
+  DB: D1Database;
   /** How long the container stays up without requests (e.g. "30m", "2h"). */
   CONTAINER_SLEEP_AFTER?: string;
   APP_SECRET?: string;
@@ -127,7 +126,7 @@ export class HovidaServer extends Container<Env> {
     return this.containerFetch(request, SERVER_PORT);
   }
 
-  /** SIGTERM: the server finishes open requests and saves its data to R2, then exits. */
+  /** SIGTERM: the server finishes open requests and saves its data to D1, then exits. */
   private async restartForNewSettings() {
     console.log('[hovida] settings changed — restarting the server container to apply them');
     await this.stop('SIGTERM');
@@ -158,7 +157,7 @@ export class HovidaServer extends Container<Env> {
 }
 
 HovidaServer.outboundByHost = {
-  [STORAGE_HOST]: (request: Request, env: Env) => handleStorageRequest(request, env.DATA, { prefix: DATA_PREFIX }),
+  [STORAGE_HOST]: (request: Request, env: Env) => handleD1StorageRequest(request, env.DB, { prefix: DATA_PREFIX }),
 };
 
 function server(env: Env) {
@@ -170,13 +169,5 @@ function server(env: Env) {
 export default {
   fetch(request, env) {
     return routeRequest(request, { assets: env.ASSETS, backend: (req) => server(env).fetch(req) });
-  },
-  async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(
-      dailyBackup(env.DATA, DATA_PREFIX, 30).then(
-        (r) => console.log(`[hovida] daily copy: ${r.copied ?? 'nothing to copy yet'}; removed ${r.pruned} old copies`),
-        (err) => console.error('[hovida] daily copy failed:', err)
-      )
-    );
   },
 } satisfies ExportedHandler<Env>;

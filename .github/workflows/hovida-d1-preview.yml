@@ -1,0 +1,34 @@
+name: HOVIDA D1 preview checks
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cloudflare/**'
+      - 'migrations/**'
+      - 'wrangler.jsonc'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/cloudflare.test.ts'
+      - '.github/workflows/hovida-d1-preview.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Cloudflare TypeScript check
+        run: npm run cf:typecheck
+      - name: Build Cloudflare assets
+        run: npm run build:cloudflare
+      - name: Cloudflare runtime integration tests
+        run: npm run test:cloudflare

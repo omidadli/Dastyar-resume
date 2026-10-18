@@ -16,7 +16,7 @@ export function isSafeKey(key: string): boolean {
 function safePrefix(prefix: string) { return prefix === '' || (prefix.endsWith('/') && isSafeKey(prefix.slice(0, -1))); }
 function etagMatches(header: string | null, etag: string) {
   if (!header) return false;
-  return header.split(',').some((v) => v.trim().replace(/^W\\//, '').replace(/^"(.*)"$/, '$1') === etag || v.trim() === '*');
+  return header.split(',').some((v) => v.trim().replace(/^W\//, '').replace(/^"(.*)"$/, '$1') === etag || v.trim() === '*');
 }
 async function digest(buf: ArrayBuffer): Promise<{ etag: string; md5: string }> {
   const hash = await crypto.subtle.digest('SHA-256', buf);

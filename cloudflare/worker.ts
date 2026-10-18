@@ -10,7 +10,7 @@
  * One container instance holds the app (its data lives in memory and is saved
  * to D1 as it changes), so every request goes to the same Durable Object.
  * The container sleeps after CONTAINER_SLEEP_AFTER without traffic; the next
- * request wakes it in a few seconds and it loads its data back from R2.
+ * request wakes it in a few seconds and it loads its data back from D1.
  */
 import { Container, ContainerProxy } from '@cloudflare/containers';
 import { routeRequest, CLIENT_IP_HEADER } from './router';

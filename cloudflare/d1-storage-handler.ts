@@ -45,11 +45,18 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
         return request.method === 'HEAD' ? new Response(null, { headers }) : new Response(row.body, { headers });
       }
       if (request.method === 'PUT') {
+        const declaredLength = Number(request.headers.get('content-length') || 0);
+        if (declaredLength > 1_000_000) return json({ error: 'object too large for D1 preview (maximum 1000000 bytes)' }, 413);
         const body = await request.arrayBuffer();
+        // Preserve the MD5 supplied by RemoteStorage: it is used to recognize
+        // successful-but-ambiguous retries after a network timeout.
         const { etag } = await digest(body);
         const ifMatch = request.headers.get('if-match');
         const ifNoneMatch = request.headers.get('if-none-match');
         const md5 = request.headers.get('x-hovida-md5');
+        // D1 values and query payloads have strict size ceilings. Keep a conservative
+        // ceiling below the per-value limit; larger resumes need another storage backend.
+        if (body.byteLength > 1_000_000) return json({ error: 'object too large for D1 preview (maximum 1000000 bytes)' }, 413);
         let result: D1Result;
         if (ifMatch) {
           // Atomic compare-and-swap; avoid a read-then-write race between concurrent requests.

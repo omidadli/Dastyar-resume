@@ -5,7 +5,7 @@
  *  - fs (default): files under DATA_DIR (a Render disk, a Docker volume, …).
  *  - remote: an HTTP object store at STORAGE_URL. On Cloudflare the container
  *    calls http://storage.hovida and the Worker's outbound handler maps those
- *    requests onto the R2 bucket (cloudflare/storage-handler.ts). The same
+ *    requests onto Cloudflare D1 (cloudflare/d1-storage-handler.ts). The same
  *    small protocol is served by scripts/mock-storage-server.mjs for local runs.
  *
  * Keys are relative POSIX paths: `hovida-store.json`, `.app-secret`,
@@ -245,7 +245,7 @@ export class RemoteStorage implements Storage {
   }
 
   get location(): string {
-    return process.env.HOVIDA_PLATFORM === 'cloudflare' ? 'Cloudflare R2' : this.base;
+    return process.env.HOVIDA_PLATFORM === 'cloudflare' ? 'Cloudflare D1' : this.base;
   }
 
   async init() {
@@ -262,8 +262,7 @@ export class RemoteStorage implements Storage {
   }
 
   /**
-   * Idempotent request with retries: network errors, 429 (R2 allows one write
-   * per key per second) and 5xx are retried with backoff.
+   * Idempotent request with retries: network errors, 429 and 5xx are retried with backoff.
    */
   private async call(url: string, init: RequestInit & { timeoutMs?: number }, patienceMs = 8_000): Promise<Response> {
     const started = Date.now();

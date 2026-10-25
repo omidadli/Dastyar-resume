@@ -96,12 +96,14 @@ jobs:
           PY
           grep -c '"containers"' wrangler.jsonc || true
       - name: Deploy Worker + Container
-        run: /tmp/run.sh npx wrangler deploy
+        run: /tmp/run.sh npx wrangler deploy --var BACKEND_URL:https://hovida-api.onrender.com
       - name: Set secrets
         env:
           APP_SECRET: ${{ secrets.APP_SECRET }}
           ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
+          STORAGE_TOKEN: ${{ secrets.STORAGE_TOKEN }}
         run: |
+          printf '%s' "$STORAGE_TOKEN" | npx wrangler secret put STORAGE_TOKEN
           printf '%s' "$APP_SECRET" | npx wrangler secret put APP_SECRET
           if [ -n "$ADMIN_EMAILS" ]; then printf '%s' "$ADMIN_EMAILS" | npx wrangler secret put ADMIN_EMAILS; fi
       - name: Smoke test

@@ -35,6 +35,10 @@ export interface Env {
   OPENAI_MODEL?: string;
   DISABLE_DEMO?: string;
   LEGACY_OWNER_EMAIL?: string;
+  /** Free plan: URL of the Node server hosted elsewhere (e.g. Render). Without it the Container is used. */
+  BACKEND_URL?: string;
+  /** Shared secret that lets the external server reach D1 storage through /_storage/*. */
+  STORAGE_TOKEN?: string;
 }
 
 /** Worker variables and secrets handed to the Node server as environment. */
@@ -166,8 +170,42 @@ function server(env: Env) {
   return env.HOVIDA_SERVER.get(env.HOVIDA_SERVER.idFromName('main'), { locationHint: 'weur' });
 }
 
+function sameToken(a: string, b: string): boolean {
+  if (a.length !== b.length || !a.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Free plan: the Node server runs on another host and reaches D1 through this Worker. */
+async function storageBridge(request: Request, env: Env): Promise<Response> {
+  const token = request.headers.get('x-hovida-storage-token') || '';
+  if (!env.STORAGE_TOKEN || !sameToken(token, env.STORAGE_TOKEN)) {
+    return new Response(JSON.stringify({ error: 'unauthorized' }), { status: 401, headers: { 'content-type': 'application/json' } });
+  }
+  const url = new URL(request.url);
+  url.pathname = url.pathname.slice('/_storage'.length) || '/';
+  return handleD1StorageRequest(new Request(url.toString(), request), env.DB, { prefix: DATA_PREFIX });
+}
+
+async function externalBackend(request: Request, env: Env): Promise<Response> {
+  const target = new URL(env.BACKEND_URL as string);
+  const url = new URL(request.url);
+  url.protocol = target.protocol;
+  url.host = target.host;
+  const forwarded = new Request(url.toString(), request);
+  forwarded.headers.delete('host');
+  // A sleeping free-tier server needs up to a minute to wake: give up earlier and let the app retry.
+  return fetch(forwarded, { signal: AbortSignal.timeout(45_000) });
+}
+
 export default {
   fetch(request, env) {
-    return routeRequest(request, { assets: env.ASSETS, backend: (req) => server(env).fetch(req) });
+    const { pathname } = new URL(request.url);
+    if (pathname === '/_storage' || pathname.startsWith('/_storage/')) return storageBridge(request, env);
+    return routeRequest(request, {
+      assets: env.ASSETS,
+      backend: (req) => (env.BACKEND_URL ? externalBackend(req, env) : server(env).fetch(req)),
+    });
   },
 } satisfies ExportedHandler<Env>;

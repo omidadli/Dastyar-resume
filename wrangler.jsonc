@@ -16,7 +16,7 @@
     "not_found_handling": "single-page-application",
     // API calls (also file and backup downloads opened as a page) and the
     // bundles go through the Worker; everything else is served as a static file.
-    "run_worker_first": ["/api/*", "/assets/*"]
+    "run_worker_first": ["/api/*", "/assets/*", "/_storage/*"]
   },
 
   "containers": [

@@ -120,5 +120,6 @@ jobs:
           STORAGE_URL: https://hovida.omidadli.workers.dev/_storage
           STORAGE_TOKEN: ${{ secrets.STORAGE_TOKEN }}
         run: |
-          npx tsx scripts/selftest-storage.ts 2>&1 | tee /tmp/selftest.txt
+          set -o pipefail
+          npx tsx scripts/selftest-storage.ts 2>&1 | tee /tmp/selftest.txt || { echo "::error title=selftest::$(sed 's/%/%25/g' /tmp/selftest.txt | tail -12 | awk '{printf "%s%%0A", $0}')"; exit 1; }
           echo "::notice title=selftest::$(sed 's/%/%25/g' /tmp/selftest.txt | awk '{printf "%s%%0A", $0}')"

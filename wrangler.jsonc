@@ -37,7 +37,7 @@
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["HovidaServer"] }],
 
   // D1 stores the JSON snapshot and uploaded resume objects. Apply migrations/0001_hovida_storage.sql.
-  "d1_databases": [{ "binding": "DB", "database_name": "hovida-preview", "database_id": "2d113165-ed7b-4272-a07f-f56c128763db", "migrations_dir": "migrations" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "hovida-preview", "database_id": "1c058367-8aa0-4b34-95ab-db5ca1a72c91", "migrations_dir": "migrations" }],
 
   // Secrets (APP_SECRET, ADMIN_EMAILS, AI keys…) are set in the dashboard or with
   // `npx wrangler secret put NAME` — never here. keep_vars: variables added in the

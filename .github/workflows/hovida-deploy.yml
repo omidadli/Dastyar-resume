@@ -41,6 +41,25 @@ jobs:
           chmod +x /tmp/run.sh
       - name: Build
         run: npm run build:cloudflare
+      - name: Ensure D1 database in this account
+        run: |
+          /tmp/run.sh npx wrangler d1 list --json > /tmp/d1.json || true
+          ID=$(python3 - <<'PY'
+          import json,re
+          t=open('/tmp/d1.json').read()
+          try:
+              d=json.loads(t[t.index('['):t.rindex(']')+1])
+          except Exception: d=[]
+          print(next((x['uuid'] for x in d if x['name']=='hovida-preview'),''))
+          PY
+          )
+          if [ -z "$ID" ]; then
+            /tmp/run.sh npx wrangler d1 create hovida-preview --location weur > /tmp/d1create.txt
+            ID=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' /tmp/d1create.txt | head -1)
+          fi
+          echo "D1 id: $ID"
+          sed -i -E "s/\"database_id\": \"[0-9a-f-]+\"/\"database_id\": \"$ID\"/" wrangler.jsonc
+          grep database_id wrangler.jsonc
       - name: Apply D1 migrations
         run: /tmp/run.sh npx wrangler d1 migrations apply DB --remote
       - name: Deploy Worker + Container

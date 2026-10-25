@@ -13,7 +13,7 @@ export const DEFAULT_PUBLIC_CONFIG: PublicConfig = {
   signup: true,
   announcement: null,
   maintenance: null,
-  maxFileMb: 20,
+  maxFileMb: 50,
   maxFilesPerBatch: 500,
   supportEmail: '',
 };

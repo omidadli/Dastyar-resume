@@ -50,8 +50,8 @@ async function startServer() {
     next();
   });
 
-  // 40mb fits the largest allowed resume (25mb, /admin › تنظیمات سامانه) as base64.
-  app.use(express.json({ limit: '40mb' }));
+  // 70mb fits the largest allowed resume (50mb, /admin › تنظیمات سامانه) as base64.
+  app.use(express.json({ limit: '70mb' }));
   // A rejected body (too large / malformed) must come back as JSON.
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!err) return next();

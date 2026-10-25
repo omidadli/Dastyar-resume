@@ -26,7 +26,7 @@ import type {
 } from '../src/types/admin';
 
 export const MAX_AI_KEYS = 5;
-export const MAX_FILE_MB_CAP = 25;
+export const MAX_FILE_MB_CAP = 50;
 const BEHAVIOR_HISTORY_CAP = 20;
 
 interface StoredKey {
@@ -65,7 +65,7 @@ export const DEFAULT_SYSTEM: SystemSettings = {
   signupEnabled: true,
   demoEnabled: true,
   demoHours: 24,
-  maxFileMb: 20,
+  maxFileMb: 50,
   maxFilesPerBatch: 500,
   sessionDays: 30,
   announcement: { enabled: false, text: '', tone: 'info' },

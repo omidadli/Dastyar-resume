@@ -15,7 +15,7 @@
 import type { ZipEntryLike, ZipLike } from '../../src/lib/officeText';
 
 /** Largest single entry we inflate (a resume's document.xml is rarely > 5 MB). */
-export const MAX_ENTRY_BYTES = 40 * 1024 * 1024;
+export const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 /** Total inflated bytes allowed for one uploaded file. */
 export const MAX_INFLATE_BYTES = 128 * 1024 * 1024;
 /** Archives with more entries than this are not resumes. */

@@ -35,7 +35,7 @@ const MANIFEST_ENTRY = 'manifest.json';
 const STORE_ENTRY = 'hovida-store.json';
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const MAX_STORE_BYTES = 768 * 1024 * 1024;
-const MAX_FILE_BYTES = 40 * 1024 * 1024;
+const MAX_FILE_BYTES = 64 * 1024 * 1024;
 /** Plain ZIP (no ZIP64) stays under 4 GB. */
 export const MAX_BACKUP_BYTES = 4 * 1024 * 1024 * 1024 - 1;
 /** Restore uploads are sent in pieces of at most this size. */

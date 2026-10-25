@@ -233,6 +233,9 @@ export class FsStorage implements Storage {
 // ================================================================= remote ====
 
 const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+/** Objects above INLINE_MAX are uploaded in PART_BYTES pieces and read with Range requests of the same size. */
+const INLINE_MAX = 1_000_000;
+const PART_BYTES = 8_000_000;
 
 export class RemoteStorage implements Storage {
   readonly driver = 'remote' as const;
@@ -286,13 +289,29 @@ export class RemoteStorage implements Storage {
   }
 
   async get(key: string, opts: GetOptions = {}): Promise<StoredObject | null> {
-    const res = await this.call(this.objUrl(key), { method: 'GET', headers: this.headers() }, opts.patienceMs ?? 8_000);
-    if (res.status === 404) {
-      await res.body?.cancel().catch(() => {});
-      return null;
+    const url = this.objUrl(key);
+    const parts: Buffer[] = [];
+    let etag: string | null = null;
+    let pos = 0;
+    for (let n = 0; ; n++) {
+      const res = await this.call(url, { method: 'GET', headers: this.headers({ range: `bytes=${pos}-${pos + PART_BYTES - 1}` }) }, opts.patienceMs ?? 8_000);
+      if (res.status === 404) {
+        await res.body?.cancel().catch(() => {});
+        if (n === 0) return null;
+        throw new StorageError(`storage GET ${key}: the object was deleted while it was being read`, 404);
+      }
+      if (!res.ok) throw new StorageError(`storage GET ${key} → ${res.status}`, res.status);
+      const buf = Buffer.from(await res.arrayBuffer());
+      const tag = res.headers.get('etag');
+      if (n === 0) etag = tag;
+      else if (tag !== etag) throw new StorageError(`storage GET ${key}: the object changed while it was being read`, 409);
+      parts.push(buf);
+      if (res.status !== 206) break;
+      pos += buf.length;
+      const total = Number(res.headers.get('x-hovida-size') || 0);
+      if (!buf.length || pos >= total) break;
     }
-    if (!res.ok) throw new StorageError(`storage GET ${key} → ${res.status}`, res.status);
-    return { body: Buffer.from(await res.arrayBuffer()), etag: res.headers.get('etag') };
+    return { body: parts.length === 1 ? parts[0] : Buffer.concat(parts), etag };
   }
 
   private async headRaw(key: string): Promise<{ size: number; etag: string | null; md5: string | null } | null> {
@@ -314,6 +333,7 @@ export class RemoteStorage implements Storage {
   async put(key: string, body: Buffer | string, opts: PutOptions = {}): Promise<{ etag: string | null }> {
     const buf = typeof body === 'string' ? Buffer.from(body, 'utf-8') : body;
     const md5 = crypto.createHash('md5').update(buf).digest('hex');
+    if (buf.length > INLINE_MAX) return this.putMultipart(key, buf, md5, opts);
     const headers = this.headers({ 'content-type': 'application/octet-stream', 'x-hovida-md5': md5 });
     if (opts.ifMatch) headers['if-match'] = opts.ifMatch;
     else if (opts.ifNoneMatch === '*') headers['if-none-match'] = '*';
@@ -353,6 +373,77 @@ export class RemoteStorage implements Storage {
         continue;
       }
       throw new StorageError(`storage PUT ${key} → ${res.status}`, res.status);
+    }
+  }
+
+  /** Large object: upload it in parts (each its own request), then publish it with one "complete" call. */
+  private async putMultipart(key: string, buf: Buffer, md5: string, opts: PutOptions): Promise<{ etag: string | null }> {
+    const id = crypto.randomBytes(16).toString('hex');
+    const base = this.objUrl(key);
+    const parts = Math.ceil(buf.length / PART_BYTES);
+    for (let n = 0; n < parts; n++) {
+      const slice = buf.subarray(n * PART_BYTES, Math.min(buf.length, (n + 1) * PART_BYTES));
+      for (let attempt = 0; ; attempt++) {
+        let res: Response;
+        try {
+          res = await fetch(`${base}?upload=${id}&part=${n}`, {
+            method: 'PUT',
+            body: slice,
+            headers: this.headers({ 'content-type': 'application/octet-stream' }),
+            signal: AbortSignal.timeout(120_000),
+          });
+        } catch (err) {
+          if (attempt >= 5) throw new StorageError(`storage PUT ${key} (part ${n + 1}/${parts}) failed: ${(err as any)?.message || err}`);
+          await sleep(Math.min(5_000, 400 * 2 ** attempt));
+          continue;
+        }
+        await res.body?.cancel().catch(() => {});
+        if (res.ok) break;
+        if (RETRYABLE.has(res.status) && attempt < 5) {
+          await sleep(Math.min(5_000, (res.status === 429 ? 1_100 : 400) * 2 ** attempt));
+          continue;
+        }
+        throw new StorageError(`storage PUT ${key} (part ${n + 1}/${parts}) → ${res.status}`, res.status);
+      }
+    }
+    const headers = this.headers({ 'content-type': 'application/json' });
+    if (opts.ifMatch) headers['if-match'] = opts.ifMatch;
+    else if (opts.ifNoneMatch === '*') headers['if-none-match'] = '*';
+    const landed = async () => {
+      const h = await this.headRaw(key).catch(() => null);
+      return h && h.etag === id ? { etag: h.etag } : null;
+    };
+    let ambiguous = false;
+    for (let attempt = 0; ; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(`${base}?upload=${id}&complete=1`, { method: 'POST', headers, body: JSON.stringify({ size: buf.length, md5 }), signal: AbortSignal.timeout(60_000) });
+      } catch (err) {
+        ambiguous = true;
+        if (attempt >= 5) throw new StorageError(`storage PUT ${key} failed to complete: ${(err as any)?.message || err}`);
+        await sleep(Math.min(5_000, 400 * 2 ** attempt));
+        const done = await landed();
+        if (done) return done;
+        continue;
+      }
+      if (res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { etag?: string };
+        return { etag: data.etag ?? res.headers.get('etag') };
+      }
+      await res.body?.cancel().catch(() => {});
+      if (res.status === 412) {
+        if (ambiguous) {
+          const done = await landed();
+          if (done) return done;
+        }
+        throw new PreconditionFailedError(key);
+      }
+      if (RETRYABLE.has(res.status) && attempt < 5) {
+        ambiguous = true;
+        await sleep(Math.min(5_000, (res.status === 429 ? 1_100 : 400) * 2 ** attempt));
+        continue;
+      }
+      throw new StorageError(`storage PUT ${key} (complete) → ${res.status}`, res.status);
     }
   }
 
@@ -398,13 +489,31 @@ export class RemoteStorage implements Storage {
   }
 
   async openStream(key: string) {
-    const res = await this.call(this.objUrl(key), { method: 'GET', headers: this.headers(), timeoutMs: 10 * 60_000 });
-    if (res.status === 404) {
-      await res.body?.cancel().catch(() => {});
+    const url = this.objUrl(key);
+    const first = await this.call(url, { method: 'GET', headers: this.headers({ range: `bytes=0-${PART_BYTES - 1}` }), timeoutMs: 10 * 60_000 });
+    if (first.status === 404) {
+      await first.body?.cancel().catch(() => {});
       return null;
     }
-    if (!res.ok || !res.body) throw new StorageError(`storage GET ${key} → ${res.status}`, res.status);
-    return { stream: Readable.fromWeb(res.body as any), size: Number(res.headers.get('x-hovida-size') || res.headers.get('content-length') || 0) };
+    if (!first.ok || !first.body) throw new StorageError(`storage GET ${key} → ${first.status}`, first.status);
+    const size = Number(first.headers.get('x-hovida-size') || first.headers.get('content-length') || 0);
+    const etag = first.headers.get('etag');
+    const self = this;
+    async function* pieces() {
+      let res = first;
+      let pos = 0;
+      for (;;) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        if (!buf.length) return;
+        yield buf;
+        pos += buf.length;
+        if (res.status !== 206 || pos >= size) return;
+        res = await self.call(url, { method: 'GET', headers: self.headers({ range: `bytes=${pos}-${pos + PART_BYTES - 1}` }), timeoutMs: 10 * 60_000 });
+        if (!res.ok) throw new StorageError(`storage GET ${key} → ${res.status}`, res.status);
+        if (res.headers.get('etag') !== etag) throw new StorageError(`storage GET ${key}: the object changed while it was being read`, 409);
+      }
+    }
+    return { stream: Readable.from(pieces()), size };
   }
 }
 

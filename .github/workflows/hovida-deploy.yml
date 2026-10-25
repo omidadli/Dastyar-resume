@@ -115,3 +115,10 @@ jobs:
           echo "::notice title=api health::$C $(head -c 300 /tmp/h)"
           C=$(curl -s -o /tmp/b -w "%{http_code}" $U/); echo "::notice title=home::$C"
           S=$(curl -s -o /tmp/s -w "%{http_code}" $U/_storage/v1/usage); echo "::notice title=storage no token::$S"
+      - name: Storage self-test (up to 50 MB)
+        env:
+          STORAGE_URL: https://hovida.omidadli.workers.dev/_storage
+          STORAGE_TOKEN: ${{ secrets.STORAGE_TOKEN }}
+        run: |
+          npx tsx scripts/selftest-storage.ts 2>&1 | tee /tmp/selftest.txt
+          echo "::notice title=selftest::$(sed 's/%/%25/g' /tmp/selftest.txt | awk '{printf "%s%%0A", $0}')"

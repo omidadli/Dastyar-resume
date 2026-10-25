@@ -7,7 +7,7 @@
  *
  *   PUT  /v1/o/<key>?upload=<id>&part=<n>     one part (<= 8 MB = 8 chunks)
  *   POST /v1/o/<key>?upload=<id>&complete=1   {size, md5}: publish the object (honours If-Match / If-None-Match)
- *   GET  /v1/o/<key>  with  Range: bytes=a-b  reads at most 8 MB per request
+ *   GET  /v1/o/<key>  with  Range: bytes=a-b  answers at most 2 MB per request (206: the client continues)
  */
 export interface D1StorageHandlerOptions { prefix: string }
 const DEFAULT_OPTIONS: D1StorageHandlerOptions = { prefix: 'data/' };
@@ -16,6 +16,8 @@ const CHUNK = 1_000_000;
 const PART = 8_000_000;
 const CHUNKS_PER_PART = PART / CHUNK;
 const INLINE_MAX = 1_000_000;
+/** One read answers at most this much (the client loops): keeps each free-plan invocation small. */
+const READ_MAX = 2_000_000;
 const MAX_OBJECT = 100_000_000;
 
 function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
@@ -141,10 +143,10 @@ export async function handleD1StorageRequest(request: Request, db: D1Database, o
           start = Number(m[1]);
           end = m[2] === '' ? total - 1 : Math.min(Number(m[2]), total - 1);
           if (start >= total || start > end) { headers.set('content-range', `bytes */${total}`); return new Response(null, { status: 416, headers }); }
-        } else if (total > PART) {
-          return json({ error: `object is large: read it with Range requests of at most ${PART} bytes` }, 413);
+        } else if (total > READ_MAX) {
+          return json({ error: `object is large: read it with Range requests (at most ${READ_MAX} bytes each)` }, 413);
         }
-        if (end - start + 1 > PART) end = start + PART - 1;
+        if (end - start + 1 > READ_MAX) end = start + READ_MAX - 1;
         let out: Uint8Array;
         if (row.chunk_version) {
           const first = Math.floor(start / CHUNK);

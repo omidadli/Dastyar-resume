@@ -26,12 +26,25 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Helper
+        run: |
+          cat > /tmp/run.sh <<'SH'
+          #!/bin/bash
+          out=$("$@" 2>&1); code=$?
+          echo "$out"
+          if [ $code -ne 0 ]; then
+            msg=$(echo "$out" | tail -25 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=cmd failed::$msg"
+          fi
+          exit $code
+          SH
+          chmod +x /tmp/run.sh
       - name: Build
         run: npm run build:cloudflare
       - name: Apply D1 migrations
-        run: npx wrangler d1 migrations apply DB --remote
+        run: /tmp/run.sh npx wrangler d1 migrations apply DB --remote
       - name: Deploy Worker + Container
-        run: npx wrangler deploy
+        run: /tmp/run.sh npx wrangler deploy
       - name: Set secrets
         env:
           APP_SECRET: ${{ secrets.APP_SECRET }}

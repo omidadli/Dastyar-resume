@@ -108,8 +108,10 @@ jobs:
           if [ -n "$ADMIN_EMAILS" ]; then printf '%s' "$ADMIN_EMAILS" | npx wrangler secret put ADMIN_EMAILS; fi
       - name: Smoke test
         run: |
-          sleep 8
-          for p in / /api/health; do
-            C=$(curl -s -o /tmp/b -w "%{http_code}" https://hovida.omidadli.workers.dev$p)
-            echo "::notice title=GET $p::$C $(head -c 200 /tmp/b | tr '\n' ' ')"
+          U=https://hovida.omidadli.workers.dev
+          for i in 1 2 3 4 5 6 7 8; do
+            C=$(curl -s -o /tmp/h -w "%{http_code}" $U/api/health); [ "$C" = 200 ] && break; sleep 10
           done
+          echo "::notice title=api health::$C $(head -c 300 /tmp/h)"
+          C=$(curl -s -o /tmp/b -w "%{http_code}" $U/); echo "::notice title=home::$C"
+          S=$(curl -s -o /tmp/s -w "%{http_code}" $U/_storage/v1/usage); echo "::notice title=storage no token::$S"

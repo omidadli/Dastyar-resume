@@ -77,6 +77,24 @@ jobs:
           fi
           if [ -z "$SUB" ]; then echo "::error title=subdomain::$CUR"; exit 1; fi
           echo "workers.dev subdomain: $SUB"
+      - name: Free plan - deploy without Container
+        if: ${{ vars.USE_CONTAINER != 'true' }}
+        run: |
+          python3 - <<'PY'
+          t=open('wrangler.jsonc').read()
+          i=t.index('"containers"')
+          j=t.index('[',i); d=0
+          for k in range(j,len(t)):
+              if t[k]=='[': d+=1
+              elif t[k]==']':
+                  d-=1
+                  if d==0: break
+          end=k+1
+          if t[end]==',': end+=1
+          t=t[:i]+t[end:]
+          open('wrangler.jsonc','w').write(t)
+          PY
+          grep -c '"containers"' wrangler.jsonc || true
       - name: Deploy Worker + Container
         run: /tmp/run.sh npx wrangler deploy
       - name: Set secrets
@@ -86,3 +104,10 @@ jobs:
         run: |
           printf '%s' "$APP_SECRET" | npx wrangler secret put APP_SECRET
           if [ -n "$ADMIN_EMAILS" ]; then printf '%s' "$ADMIN_EMAILS" | npx wrangler secret put ADMIN_EMAILS; fi
+      - name: Smoke test
+        run: |
+          sleep 8
+          for p in / /api/health; do
+            C=$(curl -s -o /tmp/b -w "%{http_code}" https://hovida.omidadli.workers.dev$p)
+            echo "::notice title=GET $p::$C $(head -c 200 /tmp/b | tr '\n' ' ')"
+          done

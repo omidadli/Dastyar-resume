@@ -77,6 +77,7 @@ NODE_ENV=production npm start
 - **ایمیل سازمان (SMTP):** راهنما: [`docs/CONNECT-EMAIL.md`](docs/CONNECT-EMAIL.md).
 - **Google Calendar:** راهنما: [`docs/CONNECT-GOOGLE-CALENDAR.md`](docs/CONNECT-GOOGLE-CALENDAR.md).
 - **چه کلیدی از کجا و کجای سایت؟** پرامپت آماده برای گرفتن راهنمای گام‌به‌گام: [`docs/PROMPT-API-KEYS.md`](docs/PROMPT-API-KEYS.md).
+- **دسترسی LinkedIn را چطور بخرم و چه چیزی واقعاً قابل خرید است؟** [`docs/LINKEDIN-ACCESS-OPTIONS.md`](docs/LINKEDIN-ACCESS-OPTIONS.md).
 
 مقادیر ورودی در پنل با AES-256-GCM رمزنگاری می‌شوند، دوباره به مرورگر برنمی‌گردند و تنها بخش کوتاهی از آن‌ها نمایش داده
 می‌شود. سرویس جست‌وجو پیش از ذخیره و کلید گوگل هنگام ذخیره آزمایش می‌شوند.

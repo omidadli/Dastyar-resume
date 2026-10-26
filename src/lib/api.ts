@@ -53,10 +53,13 @@ import type {
   BackupSummary,
   BehaviorConfig,
   BehaviorPayload,
+  ConnectionsPayload,
+  GoogleConnectionInput,
   KeyStrategy,
   LabResult,
   PublicConfig,
   RestoreStatus,
+  SourcingConnectionInput,
   SystemSettings,
 } from '../types/admin';
 
@@ -452,6 +455,13 @@ export const adminApi = {
     mode?: 'standard' | 'deep';
   }) => post<LabResult>('/api/admin/behavior/lab', b, { timeoutMs: 270_000 }),
   jobs: () => get<{ items: Array<{ id: string; orgId: string | null; orgName: string; title: string; departmentName: string }> }>('/api/admin/jobs'),
+  connections: () => get<ConnectionsPayload>('/api/admin/connections'),
+  saveSourcingConnection: (b: SourcingConnectionInput) => put<ConnectionsPayload>('/api/admin/connections/sourcing', b, { timeoutMs: 40_000 }),
+  testSourcingConnection: () => post<{ result: { ok: boolean; error: string | null; count: number | null }; connections: ConnectionsPayload }>('/api/admin/connections/sourcing/test', {}, { timeoutMs: 40_000 }),
+  removeSourcingConnection: () => del<ConnectionsPayload>('/api/admin/connections/sourcing'),
+  saveGoogleConnection: (b: GoogleConnectionInput) =>
+    put<{ connections: ConnectionsPayload; check: { ok: boolean | null; error: string | null } }>('/api/admin/connections/google', b, { timeoutMs: 40_000 }),
+  removeGoogleConnection: () => del<ConnectionsPayload>('/api/admin/connections/google'),
   system: () => get<SystemSettings>('/api/admin/system'),
   updateSystem: (b: Partial<SystemSettings>) => patch<SystemSettings>('/api/admin/system', b),
   audit: (p: { q?: string; limit?: number } = {}) => get<{ items: AuditItem[] }>(`/api/admin/audit${qs(p)}`),

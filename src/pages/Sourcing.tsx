@@ -235,7 +235,8 @@ export default function Sourcing() {
         <Callout tone="warning" icon={AlertTriangle} className="mb-5" title="جست‌وجوی LinkedIn در این نصب فعال نیست">
           {sourcing.setupHint}
           <span className="block mt-1 text-[12px]">
-            مستند اتصال: <span dir="ltr" className="font-mono">{sourcing.docPath}</span>
+            مدیر سامانه می‌تواند آدرس و توکن سرویس را در «پنل مدیریت ← اتصال‌ها» ثبت کند. مستند اتصال:{' '}
+            <span dir="ltr" className="font-mono">{sourcing.docPath}</span>
           </span>
         </Callout>
       ) : (

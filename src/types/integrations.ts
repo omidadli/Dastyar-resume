@@ -120,7 +120,7 @@ export interface SentEmail {
 // ---------------------------------------------------------------- calendar ----
 
 export interface CalendarStatusPublic {
-  /** Server has GOOGLE_CLIENT_ID/SECRET. Without it no workspace can connect. */
+  /** The deployment has an OAuth client (saved in /admin › «اتصال‌ها» or from GOOGLE_CLIENT_ID/SECRET). Without it no workspace can connect. */
   configured: boolean;
   /** This workspace has a stored Google connection. */
   connected: boolean;

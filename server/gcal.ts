@@ -14,6 +14,7 @@ import crypto from 'crypto';
 import type { CalendarStatusPublic, InterviewRecord } from '../src/types/integrations';
 import type { OrgSecrets } from './db';
 import { deriveKey } from './secret';
+import { googleOAuthConnection } from './platform';
 
 const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -26,21 +27,25 @@ export const GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
 ];
 
+/**
+ * The OAuth client is saved in /admin › «اتصال‌ها» (or comes from
+ * GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the server).
+ */
+
 export const CALENDAR_TIMEZONE = 'Asia/Tehran';
 
 export function googleClient(): { clientId: string; clientSecret: string } | null {
-  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
-  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
-  return clientId && clientSecret ? { clientId, clientSecret } : null;
+  const conn = googleOAuthConnection();
+  return conn ? { clientId: conn.clientId, clientSecret: conn.clientSecret } : null;
 }
 
 export function calendarCalendarId(): string {
-  return (process.env.GOOGLE_CALENDAR_ID || 'primary').trim() || 'primary';
+  return googleOAuthConnection()?.calendarId || 'primary';
 }
 
 /** The exact redirect URI to paste into the Google Cloud console. */
 export function redirectUriFor(origin: string): string {
-  const fixed = (process.env.GOOGLE_REDIRECT_URI || '').trim();
+  const fixed = googleOAuthConnection()?.redirectUri || '';
   if (fixed) return fixed;
   return `${origin.replace(/\/$/, '')}/api/integrations/calendar/callback`;
 }
@@ -50,6 +55,53 @@ export class CalendarError extends Error {
   constructor(message: string, code = 'CALENDAR_ERROR') {
     super(message);
     this.code = code;
+  }
+}
+
+/**
+ * Checks the OAuth client itself (not a workspace's connection): Google's token
+ * endpoint answers `invalid_grant` for a real client and `invalid_client` for a
+ * wrong id/secret — no user interaction and no data is touched.
+ * `ok: null` means the check could not be made (this server has no route to
+ * Google), which is reported honestly rather than as a success or a failure.
+ */
+export async function verifyGoogleClient(
+  clientId: string,
+  clientSecret: string,
+  redirectUri: string
+): Promise<{ ok: boolean | null; error: string | null }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const res = await fetch(TOKEN_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: 'hovida-connectivity-probe',
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+      }).toString(),
+      signal: controller.signal,
+    });
+    const json: any = await res.json().catch(() => ({}));
+    const code = String(json?.error || '');
+    if (code === 'invalid_grant' || (res.ok && code !== 'invalid_client')) {
+      return { ok: true, error: null };
+    }
+    if (code === 'invalid_client' || res.status === 401) {
+      return {
+        ok: false,
+        error: 'گوگل این Client ID/Secret را نپذیرفت؛ مقدارها را از همان OAuth Client در Google Cloud بردارید و دوباره ذخیره کنید.',
+      };
+    }
+    return { ok: false, error: `گوگل پاسخ ${res.status} داد${code ? ` (${code})` : ''}.` };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') return { ok: null, error: 'گوگل در ۱۲ ثانیه پاسخ نداد؛ اتصال سرور به اینترنت را بررسی کنید.' };
+    return { ok: null, error: `بررسی آنلاین ممکن نشد (${err?.message || 'خطای شبکه'}); ذخیره شد و در اولین اتصال حساب مشخص می‌شود.` };
+  } finally {
+    clearTimeout(timer);
   }
 }
 

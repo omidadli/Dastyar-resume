@@ -16,8 +16,17 @@ import {
   aiSettings,
   audit,
   claimWithSetupCode,
+  clearGoogleConnection,
+  clearSourcingConnection,
+  connectionsPublic,
   deleteKey,
   envForcedOff,
+  googleOAuthConnection,
+  markGoogleProbe,
+  markSourcingProbe,
+  saveGoogleConnection,
+  saveSourcingConnection,
+  sourcingConnection,
   isEnvAdmin,
   isPlatformAdmin,
   listKeysPublic,
@@ -56,6 +65,8 @@ import type {
   LabResult,
   SystemSettings,
 } from '../../src/types/admin';
+import { probeProvider } from '../linkedin';
+import { verifyGoogleClient } from '../gcal';
 import type { Role } from '../../src/types/app';
 import type { Job } from '../../src/types/screening';
 import { matchesSearch } from '../../src/lib/normalizeFa';
@@ -622,6 +633,102 @@ export function adminRoutes(): express.Router {
     const changed = (Object.keys(next) as Array<keyof SystemSettings>).filter((k) => JSON.stringify(next[k]) !== JSON.stringify(before[k]));
     if (changed.length) log(req, 'system.update', 'تنظیمات سامانه', changed.join('، '));
     res.json(next);
+  });
+
+  // --------------------------------------------------------- connections ----
+  /**
+   * Deployment-level credentials — the only secrets a fresh install needs, and
+   * they can be entered here instead of in a .env file. Values are verified
+   * before they are stored, and secrets are only ever returned masked.
+   */
+
+  const requestOrigin = (req: express.Request) => {
+    const fixed = (process.env.PUBLIC_URL || '').trim();
+    if (fixed) return fixed.replace(/\/$/, '');
+    return `${req.protocol}://${req.get('host')}`;
+  };
+
+  r.get('/connections', (req, res) => res.json(connectionsPublic(requestOrigin(req))));
+
+  r.put('/connections/sourcing', async (req, res) => {
+    const body = (req.body || {}) as { endpointUrl?: string; token?: string; providerLabel?: string };
+    const current = sourcingConnection();
+    // Verify the endpoint the way it will be used before committing it: a saved
+    // provider that does not answer would only surface later as a failed search.
+    const candidate = {
+      endpoint: (body.endpointUrl || '').trim() || (current?.source === 'admin' ? current.endpointUrl : ''),
+      token: (body.token || '').trim() || (current?.source === 'admin' ? current.token : ''),
+    };
+    if (candidate.endpoint && candidate.token) {
+      const probe = await probeProvider(candidate);
+      if (!probe.ok) {
+        return res.status(400).json({
+          error: `اتصال آزمایش نشد و ذخیره نشد: ${probe.error}`,
+          field: 'endpointUrl',
+          code: 'SOURCING_PROBE_FAILED',
+        });
+      }
+    }
+    try {
+      saveSourcingConnection(body, actor(req).name);
+    } catch (err) {
+      return inputError(res, err);
+    }
+    markSourcingProbe(true, null);
+    log(req, 'connections.sourcing', body.endpointUrl || '', 'توکن ذخیره شد (رمزنگاری‌شده)');
+    res.json(connectionsPublic(requestOrigin(req)));
+  });
+
+  r.post(
+    '/connections/sourcing/test',
+    h(async (req, res) => {
+      const conn = sourcingConnection();
+      if (!conn) return res.status(409).json({ error: 'هنوز سرویس جست‌وجویی ثبت نشده است.', code: 'SOURCING_NOT_CONFIGURED' });
+      const probe = await probeProvider({ endpoint: conn.endpointUrl, token: conn.token });
+      markSourcingProbe(probe.ok, probe.error); // no-op when the value comes from the environment
+      log(req, 'connections.sourcing.test', conn.endpointUrl, probe.ok ? 'موفق' : String(probe.error));
+      res.json({ result: probe, connections: connectionsPublic(requestOrigin(req)) });
+    })
+  );
+
+  r.delete('/connections/sourcing', (req, res) => {
+    const removed = clearSourcingConnection();
+    if (removed) log(req, 'connections.sourcing.remove', '', 'تنظیمات سرویس جست‌وجو پاک شد');
+    res.json(connectionsPublic(requestOrigin(req)));
+  });
+
+  r.put(
+    '/connections/google',
+    h(async (req, res) => {
+      const body = (req.body || {}) as { clientId?: string; clientSecret?: string; calendarId?: string; redirectUri?: string };
+      // Validate the shape first (the same rules the panel shows), then ask
+      // Google whether the pair is real. No reach → saved but unverified.
+      try {
+        const current = googleOAuthConnection();
+        const draft = {
+          clientId: (body.clientId || '').trim() || current?.clientId || '',
+          clientSecret: (body.clientSecret || '').trim() || current?.clientSecret || '',
+          calendarId: body.calendarId,
+          redirectUri: body.redirectUri,
+        };
+        if (!draft.clientId) throw new PlatformInputError('Client ID را وارد کنید.', 'clientId');
+        if (!draft.clientSecret) throw new PlatformInputError('Client Secret را وارد کنید.', 'clientSecret');
+        const redirect = draft.redirectUri || current?.redirectUri || `${requestOrigin(req)}/api/integrations/calendar/callback`;
+        saveGoogleConnection(body, actor(req).name);
+        const check = await verifyGoogleClient(draft.clientId, draft.clientSecret, redirect);
+        markGoogleProbe(check.ok, check.error);
+        log(req, 'connections.google', draft.clientId, check.ok === true ? 'کلید گوگل تأیید شد' : check.ok === false ? 'کلید گوگل رد شد' : 'بدون بررسی آنلاین');
+        res.json({ connections: connectionsPublic(requestOrigin(req)), check });
+      } catch (err) {
+        return inputError(res, err);
+      }
+    })
+  );
+
+  r.delete('/connections/google', (req, res) => {
+    const removed = clearGoogleConnection();
+    if (removed) log(req, 'connections.google.remove', '', 'کلید OAuth گوگل پاک شد');
+    res.json(connectionsPublic(requestOrigin(req)));
   });
 
   // ---------------------------------------------------------------- audit ----

@@ -20,8 +20,11 @@ import type {
   AiProviderKind,
   BehaviorConfig,
   BehaviorVersionInfo,
+  ConnectionsPayload,
+  GoogleConnectionInput,
   KeyStrategy,
   PublicConfig,
+  SourcingConnectionInput,
   SystemSettings,
 } from '../src/types/admin';
 
@@ -54,11 +57,43 @@ interface AiSettingsStored {
   keys: StoredKey[];
 }
 
+/** The LinkedIn-compatible sourcing provider (one per deployment, not per org). */
+interface StoredSourcingConnection {
+  endpointUrl: string;
+  tokenEnc: string;
+  tokenHint: string;
+  providerLabel: string;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+/** The OAuth *client* every workspace connects its own Google account with. */
+interface StoredGoogleConnection {
+  clientId: string;
+  clientSecretEnc: string;
+  calendarId: string;
+  redirectUri: string;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+interface ConnectionsStored {
+  sourcing: StoredSourcingConnection | null;
+  google: StoredGoogleConnection | null;
+}
+
 interface PlatformState {
   ai: AiSettingsStored;
   system: SystemSettings;
   behavior: BehaviorConfig | null;
   behaviorHistory: Array<BehaviorVersionInfo & { config: BehaviorConfig }>;
+  connections: ConnectionsStored;
 }
 
 export const DEFAULT_SYSTEM: SystemSettings = {
@@ -131,6 +166,42 @@ function normalizeKey(k: any): StoredKey | null {
   };
 }
 
+function normalizeSourcingConn(raw: any): StoredSourcingConnection | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const endpointUrl = text(raw.endpointUrl, 500).trim();
+  const tokenEnc = text(raw.tokenEnc, 1000);
+  if (!endpointUrl || !tokenEnc) return null;
+  return {
+    endpointUrl,
+    tokenEnc,
+    tokenHint: text(raw.tokenHint, 40),
+    providerLabel: text(raw.providerLabel, 80).trim() || 'LinkedIn Talent API',
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
+function normalizeGoogleConn(raw: any): StoredGoogleConnection | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const clientId = text(raw.clientId, 300).trim();
+  const clientSecretEnc = text(raw.clientSecretEnc, 1000);
+  if (!clientId || !clientSecretEnc) return null;
+  return {
+    clientId,
+    clientSecretEnc,
+    calendarId: text(raw.calendarId, 200).trim() || 'primary',
+    redirectUri: text(raw.redirectUri, 400).trim(),
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
 function normalize(raw: any): PlatformState {
   const r = raw && typeof raw === 'object' ? raw : {};
   const ai = r.ai && typeof r.ai === 'object' ? r.ai : {};
@@ -147,6 +218,10 @@ function normalize(raw: any): PlatformState {
     system: normalizeSystem(r.system),
     behavior: r.behavior && typeof r.behavior === 'object' ? (r.behavior as BehaviorConfig) : null,
     behaviorHistory: Array.isArray(r.behaviorHistory) ? r.behaviorHistory.slice(0, BEHAVIOR_HISTORY_CAP) : [],
+    connections: {
+      sourcing: normalizeSourcingConn(r.connections?.sourcing),
+      google: normalizeGoogleConn(r.connections?.google),
+    },
   };
 }
 
@@ -454,6 +529,259 @@ export function reorderKeys(ids: string[]) {
   const ordered = ids.map((id) => byId.get(id)).filter(Boolean) as StoredKey[];
   for (const k of s.ai.keys) if (!ordered.includes(k)) ordered.push(k);
   commit({ ...s, ai: { ...s.ai, keys: ordered } });
+}
+
+// -------------------------------------------------------- connections ----
+
+/**
+ * Deployment-level connection credentials, entered in /admin › «اتصال‌ها».
+ * The environment variables (LINKEDIN_API_URL, GOOGLE_CLIENT_ID…) still work and
+ * are used only when nothing was saved in the panel — so an existing .env keeps
+ * running, and a fresh install never has to touch the server at all.
+ */
+
+export interface SourcingConnection {
+  endpointUrl: string;
+  token: string;
+  providerLabel: string;
+  source: 'admin' | 'env';
+}
+
+export interface GoogleOAuthConnection {
+  clientId: string;
+  clientSecret: string;
+  calendarId: string;
+  /** Fixed redirect URI from the panel/environment; empty = derive from the request origin. */
+  redirectUri: string;
+  source: 'admin' | 'env';
+}
+
+export const GOOGLE_SCOPE_LIST = ['openid', 'email', 'https://www.googleapis.com/auth/calendar.events'];
+
+function envSourcing(): SourcingConnection | null {
+  const endpointUrl = (process.env.LINKEDIN_API_URL || '').trim();
+  const token = (process.env.LINKEDIN_API_TOKEN || process.env.LINKEDIN_ACCESS_TOKEN || '').trim();
+  if (!endpointUrl || !token) return null;
+  return {
+    endpointUrl,
+    token,
+    providerLabel: (process.env.LINKEDIN_PROVIDER_LABEL || 'LinkedIn Talent API').trim() || 'LinkedIn Talent API',
+    source: 'env',
+  };
+}
+
+function envGoogle(): GoogleOAuthConnection | null {
+  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  if (!clientId || !clientSecret) return null;
+  return {
+    clientId,
+    clientSecret,
+    calendarId: (process.env.GOOGLE_CALENDAR_ID || 'primary').trim() || 'primary',
+    redirectUri: (process.env.GOOGLE_REDIRECT_URI || '').trim(),
+    source: 'env',
+  };
+}
+
+/** The sourcing provider in effect (panel first, then the environment). */
+export function sourcingConnection(): SourcingConnection | null {
+  const stored = state().connections.sourcing;
+  if (stored) {
+    const token = decryptSecret(stored.tokenEnc);
+    if (token) return { endpointUrl: stored.endpointUrl, token, providerLabel: stored.providerLabel, source: 'admin' };
+    // An unreadable token (another APP_SECRET) must not silently look configured.
+    return null;
+  }
+  return envSourcing();
+}
+
+/** The Google OAuth client in effect (panel first, then the environment). */
+export function googleOAuthConnection(): GoogleOAuthConnection | null {
+  const stored = state().connections.google;
+  if (stored) {
+    const clientSecret = decryptSecret(stored.clientSecretEnc);
+    if (clientSecret) {
+      return {
+        clientId: stored.clientId,
+        clientSecret,
+        calendarId: stored.calendarId,
+        redirectUri: stored.redirectUri,
+        source: 'admin',
+      };
+    }
+    return null;
+  }
+  return envGoogle();
+}
+
+function hostOfUrl(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+function hintOf(secret: string): string {
+  if (!secret) return '';
+  if (secret.length <= 8) return '••••';
+  return `${secret.slice(0, 4)}…${secret.slice(-4)}`;
+}
+
+/** What /admin and the workspace «اتصال‌ها» tab may see — never a secret. */
+export function connectionsPublic(origin: string): ConnectionsPayload {
+  const s = state().connections;
+  const src = sourcingConnection();
+  const goog = googleOAuthConnection();
+  const base = origin.replace(/\/$/, '');
+  const effective = goog?.redirectUri || `${base}/api/integrations/calendar/callback`;
+  const storedGoogle = s.google;
+  return {
+    sourcing: {
+      configured: Boolean(src),
+      source: src?.source ?? null,
+      endpointHost: src ? hostOfUrl(src.endpointUrl) : null,
+      endpointUrl: src?.source === 'admin' ? src.endpointUrl : '',
+      providerLabel: src?.providerLabel || 'LinkedIn',
+      tokenHint: s.sourcing ? s.sourcing.tokenHint : src ? 'از متغیرهای محیطی سرور' : '',
+      updatedAtISO: s.sourcing?.updatedAtISO ?? null,
+      updatedBy: s.sourcing?.updatedBy ?? null,
+      lastTestAtISO: s.sourcing?.lastTestAtISO ?? null,
+      lastTestOk: s.sourcing?.lastTestOk ?? null,
+      lastError: s.sourcing?.lastError ?? null,
+      fromEnv: src?.source === 'env',
+    },
+    google: {
+      configured: Boolean(goog),
+      source: goog?.source ?? null,
+      clientId: goog?.clientId || '',
+      secretHint: storedGoogle
+        ? hintOf(decryptSecret(storedGoogle.clientSecretEnc) || '')
+        : goog
+          ? 'از متغیرهای محیطی سرور'
+          : '',
+      hasSecret: Boolean(goog),
+      calendarId: goog?.calendarId || 'primary',
+      redirectUri: goog?.redirectUri || '',
+      effectiveRedirectUri: effective,
+      scopes: GOOGLE_SCOPE_LIST,
+      updatedAtISO: storedGoogle?.updatedAtISO ?? null,
+      updatedBy: storedGoogle?.updatedBy ?? null,
+      lastTestAtISO: storedGoogle?.lastTestAtISO ?? null,
+      lastTestOk: storedGoogle?.lastTestOk ?? null,
+      lastError: storedGoogle?.lastError ?? null,
+      fromEnv: goog?.source === 'env',
+    },
+    docs: { sourcing: 'docs/CONNECT-LINKEDIN.md', google: 'docs/CONNECT-GOOGLE-CALENDAR.md' },
+  };
+}
+
+function validEndpoint(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return /^https?:$/.test(u.protocol) && Boolean(u.host);
+  } catch {
+    return false;
+  }
+}
+
+function cleanSecret(v: unknown, max = 2000): string {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+export function saveSourcingConnection(input: SourcingConnectionInput, actor: string): void {
+  const st = state();
+  const endpointUrl = typeof input.endpointUrl === 'string' ? input.endpointUrl.trim() : st.connections.sourcing?.endpointUrl || '';
+  if (!endpointUrl) throw new PlatformInputError('آدرس سرویس جست‌وجو را وارد کنید.', 'endpointUrl');
+  if (!validEndpoint(endpointUrl)) throw new PlatformInputError('آدرس باید با http:// یا https:// شروع شود.', 'endpointUrl');
+  const token = cleanSecret(input.token) || (st.connections.sourcing ? decryptSecret(st.connections.sourcing.tokenEnc) || '' : '');
+  if (!token) throw new PlatformInputError('توکن دسترسی سرویس را وارد کنید.', 'token');
+  if (token.length < 4 || /\s/.test(token)) throw new PlatformInputError('توکن معتبر به نظر نمی‌رسد (دست‌کم ۴ نویسه، بدون فاصله).', 'token');
+  if (input.providerLabel !== undefined && input.providerLabel.length > 80) {
+    throw new PlatformInputError('نام سرویس خیلی طولانی است.', 'providerLabel');
+  }
+  const now = new Date().toISOString();
+  const previous = st.connections.sourcing;
+  const next: StoredSourcingConnection = {
+    endpointUrl,
+    tokenEnc: cleanSecret(input.token) ? encryptSecret(token) : previous!.tokenEnc,
+    tokenHint: hintOf(token),
+    providerLabel: (input.providerLabel || '').trim() || previous?.providerLabel || 'LinkedIn Talent API',
+    updatedAtISO: now,
+    updatedBy: actor,
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous?.lastTestOk ?? null,
+    lastError: previous?.lastError ?? null,
+  };
+  commit({ ...st, connections: { ...st.connections, sourcing: next } });
+}
+
+export function clearSourcingConnection(): boolean {
+  const st = state();
+  if (!st.connections.sourcing) return false;
+  commit({ ...st, connections: { ...st.connections, sourcing: null } });
+  return true;
+}
+
+export function markSourcingProbe(ok: boolean, error: string | null): void {
+  const st = state();
+  if (!st.connections.sourcing) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      sourcing: { ...st.connections.sourcing, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
+}
+
+export function saveGoogleConnection(input: GoogleConnectionInput, actor: string): void {
+  const st = state();
+  const previous = st.connections.google;
+  const clientId = (typeof input.clientId === 'string' ? input.clientId.trim() : previous?.clientId || '').slice(0, 300);
+  if (!clientId) throw new PlatformInputError('Client ID را وارد کنید.', 'clientId');
+  if (!/^[0-9A-Za-z_-]{6,}\.apps\.googleusercontent\.com$/.test(clientId)) {
+    throw new PlatformInputError('Client ID گوگل معمولاً به ‎.apps.googleusercontent.com ختم می‌شود.', 'clientId');
+  }
+  const secret = cleanSecret(input.clientSecret) || (previous ? decryptSecret(previous.clientSecretEnc) || '' : '');
+  if (!secret) throw new PlatformInputError('Client Secret را وارد کنید.', 'clientSecret');
+  if (secret.length < 8 || /\s/.test(secret)) throw new PlatformInputError('Client Secret معتبر به نظر نمی‌رسد.', 'clientSecret');
+  const redirectUri = input.redirectUri !== undefined ? input.redirectUri.trim().slice(0, 400) : previous?.redirectUri || '';
+  if (redirectUri && !validEndpoint(redirectUri)) throw new PlatformInputError('آدرس بازگشت باید یک URL کامل http(s) باشد.', 'redirectUri');
+  const calendarId = (input.calendarId !== undefined ? input.calendarId.trim() : previous?.calendarId || 'primary').slice(0, 200) || 'primary';
+  const now = new Date().toISOString();
+  const next: StoredGoogleConnection = {
+    clientId,
+    clientSecretEnc: cleanSecret(input.clientSecret) ? encryptSecret(secret) : previous!.clientSecretEnc,
+    calendarId,
+    redirectUri,
+    updatedAtISO: now,
+    updatedBy: actor,
+    // A changed client id/secret invalidates the previous probe result.
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous && previous.clientId === clientId ? previous.lastTestOk : null,
+    lastError: previous && previous.clientId === clientId ? previous.lastError : null,
+  };
+  commit({ ...st, connections: { ...st.connections, google: next } });
+}
+
+export function clearGoogleConnection(): boolean {
+  const st = state();
+  if (!st.connections.google) return false;
+  commit({ ...st, connections: { ...st.connections, google: null } });
+  return true;
+}
+
+export function markGoogleProbe(ok: boolean | null, error: string | null): void {
+  const st = state();
+  if (!st.connections.google) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      google: { ...st.connections.google, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
 }
 
 // ---------------------------------------------------------- behaviour ----

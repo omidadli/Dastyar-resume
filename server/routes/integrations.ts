@@ -314,7 +314,7 @@ export function integrationRoutes(): express.Router {
     const { org, user } = ctxOf(req);
     if (!googleClient()) {
       return res.status(409).json({
-        error: 'اتصال Google Calendar در این نصب تنظیم نشده است؛ مدیر سامانه باید GOOGLE_CLIENT_ID و GOOGLE_CLIENT_SECRET را تنظیم کند.',
+        error: 'اتصال Google Calendar در این نصب تنظیم نشده است؛ مدیر سامانه باید در پنل مدیریت › «اتصال‌ها» کلید OAuth گوگل را ثبت کند.',
         code: 'CALENDAR_NOT_CONFIGURED',
       });
     }

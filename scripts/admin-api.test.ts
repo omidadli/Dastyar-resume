@@ -78,6 +78,47 @@ function mockGateway(): Promise<http.Server> {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
+// -------------------------------------------------- mock sourcing provider ----
+
+const providerCalls: Array<{ auth: string; body: any }> = [];
+
+/** A tiny LinkedIn-compatible provider: proves /admin credentials are really used. */
+function mockSourcing(): Promise<http.Server> {
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(body || '{}');
+      } catch {
+        parsed = {};
+      }
+      providerCalls.push({ auth: String(req.headers.authorization || ''), body: parsed });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          total: 1,
+          items: [
+            {
+              id: 'li-admin-1',
+              fullName: 'لیلا احمدی',
+              headline: 'حسابدار ارشد | مسلط به اکسل',
+              location: 'تهران',
+              profileUrl: 'https://www.linkedin.com/in/leila-ahmadi-demo',
+              openToWork: true,
+              experiences: [{ title: 'حسابدار ارشد', company: 'شرکت نمونه', period: '۱۳۹۹ – اکنون' }],
+              education: [],
+              skills: ['اکسل'],
+            },
+          ],
+        })
+      );
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
 // --------------------------------------------------------------- fixtures ----
 
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
@@ -119,12 +160,29 @@ async function main() {
   const dist = path.join(process.cwd(), 'dist', 'server.cjs');
   if (!fs.existsSync(dist)) throw new Error('Run `npm run build` first.');
   const gateway = await mockGateway();
+  const provider = await mockSourcing();
+  const providerUrl = `http://127.0.0.1:${(provider.address() as any).port}/v1/people/search`;
   const gatewayUrl = `http://127.0.0.1:${(gateway.address() as any).port}/v1`;
   const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-api-'));
   const PORT = 3400 + Math.floor(Math.random() * 400);
   const BASE = `http://127.0.0.1:${PORT}`;
   const env = { ...process.env, NODE_ENV: 'production', PORT: String(PORT), DATA_DIR: DATA, APP_SECRET: 'api-test-secret-0123456789abcdef' } as NodeJS.ProcessEnv;
-  for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'AI_PROVIDER', 'ADMIN_EMAILS', 'DISABLE_DEMO']) delete env[k];
+  for (const k of [
+    'GEMINI_API_KEY',
+    'OPENAI_API_KEY',
+    'AI_PROVIDER',
+    'ADMIN_EMAILS',
+    'DISABLE_DEMO',
+    'LINKEDIN_API_URL',
+    'LINKEDIN_ACCESS_TOKEN',
+    'LINKEDIN_API_TOKEN',
+    'LINKEDIN_PROVIDER_LABEL',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'GOOGLE_REDIRECT_URI',
+    'GOOGLE_CALENDAR_ID',
+  ])
+    delete env[k];
   env.ADMIN_EMAILS = 'boss@example.com'; // reserved, nobody has signed up with it yet
   const child = spawn(process.execPath, [dist], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
@@ -380,6 +438,79 @@ async function main() {
     assert((await call('POST', '/api/auth/signup', null, { orgName: 'دیگر', name: 'دیگری', email: 'other@example.com', password: 'Other12345' })).status === 403, 'everyone else still sees sign-up closed');
     await call('PATCH', '/api/admin/system', A, { signupEnabled: true });
 
+    // ---------------------------------------------------- connections ----
+    // The two deployment-level credentials must be enterable from /admin only.
+    assert((await call('GET', '/api/admin/connections', S)).status === 403, 'a workspace owner who is not a platform admin cannot touch deployment connections');
+    const fresh = await call('GET', '/api/admin/connections', A);
+    assert(fresh.json.sourcing.configured === false && fresh.json.google.configured === false, 'a fresh install reports both as unconfigured (nothing is assumed)');
+    assert(fresh.json.google.effectiveRedirectUri.endsWith('/api/integrations/calendar/callback'), 'the exact redirect URI is shown even before a client exists', fresh.json.google.effectiveRedirectUri);
+
+    const deadProvider = await call('PUT', '/api/admin/connections/sourcing', A, { endpointUrl: 'http://127.0.0.1:1/search', token: 'dead-token-123456' });
+    assert(deadProvider.status === 400 && /ذخیره نشد/.test(deadProvider.json.error), 'a provider that does not answer is refused before it is stored', `${deadProvider.status} ${deadProvider.json?.error}`);
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.configured === false, 'and the workspace stays unconfigured (no fake success)');
+    assert((await call('PUT', '/api/admin/connections/sourcing', A, { endpointUrl: 'not a url', token: 'something-123' })).status === 400, 'a malformed provider URL is refused');
+
+    providerCalls.length = 0;
+    const savedConn = await call('PUT', '/api/admin/connections/sourcing', A, { endpointUrl: providerUrl, token: 'admin-provider-token-xyz', providerLabel: 'سرویس آزمایشی' });
+    assert(savedConn.status === 200 && savedConn.json.sourcing.configured === true && savedConn.json.sourcing.source === 'admin', 'the provider endpoint + token are saved from the panel', `${savedConn.status} ${JSON.stringify(savedConn.json?.error || '')}`);
+    assert(!JSON.stringify(savedConn.json).includes('admin-provider-token-xyz') && savedConn.json.sourcing.tokenHint.includes('…'), 'the provider token is only ever returned masked', savedConn.json.sourcing.tokenHint);
+    assert(providerCalls.length === 1 && providerCalls[0].auth === 'Bearer admin-provider-token-xyz', 'the save itself verifies the endpoint with the new token');
+
+    const wsStatus = await call('GET', '/api/integrations/status', A);
+    assert(wsStatus.json.sourcing.configured === true && wsStatus.json.sourcing.providerLabel === 'سرویس آزمایشی', 'workspaces see the panel-configured provider — no .env involved');
+    const orgForSearch = await call('GET', '/api/org', A);
+    const deptForSearch = orgForSearch.json.org.departments.find((d: any) => /فروش|مالی/.test(d.name)) || orgForSearch.json.org.departments[0];
+    const search = await call('POST', '/api/sourcing/searches', A, {
+      departmentId: deptForSearch.id,
+      prompt: 'حسابدار ارشد مسلط به اکسل',
+      openToWorkOnly: true,
+      limit: 5,
+      // The brief is fixed here so the assertion is about the credentials, not the parser.
+      brief: {
+        roleTitle: 'حسابدار ارشد',
+        seniority: null,
+        locations: [],
+        skills: ['اکسل'],
+        mustHave: [],
+        keywords: ['اکسل'],
+        booleanQuery: '"حسابدار ارشد" AND اکسل',
+        openToWorkOnly: true,
+        notes: '',
+        engine: 'local',
+      },
+    });
+    assert(search.status === 200 && search.json.search?.status === 'done' && search.json.search.results.length === 1, 'a real search runs with the credentials entered in /admin', `${search.status} ${JSON.stringify(search.json?.error || '')}`);
+    assert(providerCalls.at(-1)?.auth === 'Bearer admin-provider-token-xyz' && providerCalls.at(-1)?.body.query.openToWorkOnly === true, 'the workspace search carries the panel token and asks only for open-to-work people');
+
+    assert((await call('PUT', '/api/admin/connections/google', A, { clientId: 'not-a-google-client', clientSecret: 'x' })).status === 400, 'an implausible Google Client ID is refused');
+    const googleSaved = await call('PUT', '/api/admin/connections/google', A, {
+      clientId: '1234567890-hovidademo.apps.googleusercontent.com',
+      clientSecret: 'GOCSPX-demo-secret-123456',
+    });
+    assert(googleSaved.status === 200 && googleSaved.json.connections.google.configured === true, 'the Google OAuth client is saved', `${googleSaved.status} ${JSON.stringify(googleSaved.json?.error || '')}`);
+    assert(!JSON.stringify(googleSaved.json).includes('GOCSPX-demo-secret-123456') && googleSaved.json.connections.google.hasSecret === true, 'the client secret is never returned');
+    assert(
+      [null, true].includes(googleSaved.json.check?.ok),
+      'the online check is honest: verified, or «could not check» — never a fake failure',
+      JSON.stringify(googleSaved.json.check)
+    );
+    const calendarStatus = await call('GET', '/api/integrations/status', A);
+    assert(calendarStatus.json.calendar.configured === true, 'the calendar becomes available for every workspace after the panel key');
+    const consent = await call('GET', '/api/integrations/calendar/connect-url', A);
+    assert(
+      consent.status === 200 && String(consent.json.url).includes('client_id=1234567890-hovidademo') && consent.json.redirectUri === googleSaved.json.connections.google.effectiveRedirectUri,
+      'each workspace can now build the Google consent link (right client, registered redirect URI)',
+      String(consent.status)
+    );
+
+    assert((await call('DELETE', '/api/admin/connections/google', A)).json.google.configured === false, 'the panel can remove the Google client');
+    assert((await call('GET', '/api/integrations/calendar/connect-url', A)).status === 409, 'without it, the connect button explains why again');
+    const connAudit = await call('GET', '/api/admin/audit?limit=200', A);
+    const connActions = new Set(connAudit.json.items.map((x: any) => x.action));
+    for (const act of ['connections.sourcing', 'connections.google', 'connections.google.remove']) {
+      assert(connActions.has(act), `audit log has «${act}»`);
+    }
+
     // ------------------------------------------------------- delete ----
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'اشتباه' })).status === 400, 'delete needs the exact workspace name');
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'شرکت دوم' })).json.ok === true, 'workspace deleted');
@@ -387,7 +518,14 @@ async function main() {
   } finally {
     child.kill('SIGTERM');
     gateway.close();
-    await new Promise((r) => setTimeout(r, 400));
+    provider.close();
+    await new Promise((r) => setTimeout(r, 600));
+    try {
+      const snap = fs.readFileSync(path.join(DATA, 'hovida-store.json'), 'utf-8');
+      assert(snap.includes('tokenEnc') && !snap.includes('admin-provider-token-xyz'), 'the panel token is stored encrypted in the snapshot, never in clear');
+    } catch (e: any) {
+      assert(false, 'the store snapshot could be read', String(e?.message || e));
+    }
     fs.rmSync(DATA, { recursive: true, force: true });
   }
   if (failures) console.log(log.split('\n').slice(-30).join('\n'));

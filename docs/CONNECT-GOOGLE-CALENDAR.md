@@ -26,18 +26,27 @@
    https://<دامنهٔ هویدا>/api/integrations/calendar/callback
    ```
 
-   نشانی دقیق را در «تنظیمات ← اتصال‌ها» هم می‌بینید (دکمهٔ کپی دارد).
-۶. `Client ID` و `Client secret` را در محیط سرور بگذارید:
+   نشانی دقیق (بر اساس همان دامنه‌ای که در مرورگر می‌بینید) در **`/admin` › «اتصال‌ها» › کارت Google Calendar**
+   نوشته شده و دکمهٔ کپی دارد؛ همان را عیناً در کنسول گوگل بگذارید.
+۶. `Client ID` و `Client secret` را در همان صفحه وارد کنید و **«ذخیره و بررسی با گوگل»** را بزنید. هویدا با یک درخواست
+   بی‌خطر به گوگل بررسی می‌کند که این جفت کلید واقعی است: پاسخ `invalid_grant` یعنی کلید درست است، `invalid_client`
+   یعنی جفت کلید غلط است. اگر سرور به گوگل دسترسی نداشته باشد، صادقانه می‌نویسد «بررسی آنلاین ممکن نشد» و مقدار را
+   ذخیره می‌کند.
+۷. حالا «تنظیمات ← اتصال‌ها» در هر فضای کاری دکمهٔ «اتصال حساب گوگل» را نشان می‌دهد.
 
-   ```bash
-   PUBLIC_URL=https://hr.example.com
-   GOOGLE_CLIENT_ID=....apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=...
-   # GOOGLE_REDIRECT_URI=https://hr.example.com/api/integrations/calendar/callback
-   # GOOGLE_CALENDAR_ID=primary    # یا شناسهٔ تقویم مشترکی که این حساب می‌تواند در آن بنویسد
-   ```
+   شناسهٔ تقویم (اختیاری، پیش‌فرض `primary`) هم در همین کارت تنظیم می‌شود؛ برای تقویم مشترک سازمان، شناسهٔ آن را بگذارید.
 
-۷. سرور را دوباره راه‌اندازی کنید. حالا در «تنظیمات ← اتصال‌ها» دکمهٔ «اتصال حساب گوگل» فعال است.
+### جایگزین: متغیرهای محیطی
+
+```bash
+PUBLIC_URL=https://hr.example.com
+GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+# GOOGLE_REDIRECT_URI=https://hr.example.com/api/integrations/calendar/callback
+# GOOGLE_CALENDAR_ID=primary
+```
+
+مقداری که در پنل ذخیره شود بر متغیرهای محیطی مقدم است.
 
 ## هر فضای کاری: اتصال حساب
 

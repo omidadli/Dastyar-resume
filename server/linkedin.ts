@@ -21,6 +21,7 @@
  * people) and the UI points the workspace admin at the setup page.
  */
 import type { SourcingBrief, SourcingExperience, SourcingProfile, SourcingStatusPublic } from '../src/types/integrations';
+import { sourcingConnection } from './platform';
 
 export const LINKEDIN_DOC_PATH = 'docs/CONNECT-LINKEDIN.md';
 
@@ -46,15 +47,18 @@ interface ProviderConfig {
   label: string;
 }
 
-function configFromEnv(): ProviderConfig | null {
-  const endpoint = (process.env.LINKEDIN_API_URL || '').trim();
-  const token = (process.env.LINKEDIN_ACCESS_TOKEN || '').trim();
-  if (!endpoint || !token) return null;
-  return { endpoint, token, label: (process.env.LINKEDIN_PROVIDER_LABEL || 'LinkedIn Talent API').trim() };
+/**
+ * The endpoint and token come from /admin › «اتصال‌ها» (recommended) or, if
+ * nothing was saved there, from LINKEDIN_API_URL / LINKEDIN_ACCESS_TOKEN.
+ */
+function config(): ProviderConfig | null {
+  const conn = sourcingConnection();
+  if (!conn) return null;
+  return { endpoint: conn.endpointUrl, token: conn.token, label: conn.providerLabel };
 }
 
 export function sourcingStatus(configuredOverride?: boolean): SourcingStatusPublic {
-  const cfg = configFromEnv();
+  const cfg = config();
   const configured = configuredOverride ?? Boolean(cfg);
   return {
     configured,
@@ -62,9 +66,39 @@ export function sourcingStatus(configuredOverride?: boolean): SourcingStatusPubl
     endpointHost: cfg ? safeHost(cfg.endpoint) : null,
     setupHint: configured
       ? 'جست‌وجوی افراد بر اساس مجوز سازمان شما در سرویس لینکدین انجام می‌شود.'
-      : 'برای جست‌وجوی افراد در LinkedIn، مدیر سامانه باید LINKEDIN_API_URL و LINKEDIN_ACCESS_TOKEN را تنظیم کند (دسترسی رسمی Talent Solutions یا سرویس دادهٔ دارای مجوز).',
+      : 'برای جست‌وجوی افراد در LinkedIn، مدیر سامانه باید در پنل مدیریت › «اتصال‌ها» آدرس سرویس و توکن را ثبت کند (دسترسی رسمی Talent Solutions یا سرویس دادهٔ دارای مجوز).',
     docPath: LINKEDIN_DOC_PATH,
   };
+}
+
+/**
+ * One harmless request against the configured provider, used by the admin
+ * «آزمایش اتصال» button and before saving, so a dead endpoint is never stored
+ * as if it worked. Returns the Persian reason on failure.
+ */
+export async function probeProvider(cfg: { endpoint: string; token: string }): Promise<{ ok: boolean; error: string | null; count: number | null }> {
+  const body = { query: { booleanQuery: '"test"', roleTitle: 'test', locations: [], skills: [], mustHave: [], seniority: null, openToWorkOnly: true, keywords: [] }, limit: 1, cursor: null };
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const res = await fetch(cfg.endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${cfg.token}` },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (res.status === 401 || res.status === 403) return { ok: false, error: 'سرویس دسترسی را نپذیرفت؛ توکن یا مجوز سازمان معتبر نیست (۴۰۱/۴۰۳).', count: null };
+    if (res.status === 429) return { ok: false, error: 'سهمیهٔ درخواست سرویس تمام شده است (۴۲۹)؛ بعداً دوباره آزمایش کنید.', count: null };
+    if (!res.ok) return { ok: false, error: `سرویس پاسخ ${res.status} داد؛ آدرس و توکن را بررسی کنید.`, count: null };
+    const json: any = await res.json().catch(() => null);
+    const items = toArray(pick(json, ['items', 'elements', 'results', 'data', 'people']));
+    return { ok: true, error: null, count: items.length };
+  } catch (err: any) {
+    if (err?.name === 'AbortError') return { ok: false, error: 'سرویس در ۱۵ ثانیه پاسخ نداد؛ آدرس و دسترسی شبکه را بررسی کنید.', count: null };
+    return { ok: false, error: `ارتباط با سرویس برقرار نشد: ${err?.message || 'خطای شبکه'}`, count: null };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function safeHost(url: string): string | null {
@@ -144,7 +178,7 @@ export interface SearchResponse {
  * the Persian message with the search so the recruiter sees what went wrong.
  */
 export async function searchProfiles(brief: SourcingBrief, opts: SearchOptions = {}): Promise<SearchResponse> {
-  const cfg = configFromEnv();
+  const cfg = config();
   if (!cfg) throw new SourcingNotConfiguredError();
 
   const limit = Math.min(50, Math.max(1, opts.limit || 25));

@@ -8,6 +8,7 @@ import {
   KeyRound,
   LogOut,
   Menu as MenuIcon,
+  Plug,
   ScrollText,
   Settings2,
   ShieldCheck,
@@ -31,6 +32,7 @@ import Behavior from './Behavior';
 import SystemPage from './System';
 import Logs from './Logs';
 import BackupPage from './Backup';
+import ConnectionsPage from './Connections';
 import { SkipToMain } from '../../components/layout/SkipToMain';
 
 interface NavItem {
@@ -44,6 +46,7 @@ const NAV: NavItem[] = [
   { to: '/admin', label: 'نمای کلی', icon: Gauge, render: () => <Overview /> },
   { to: '/admin/orgs', label: 'فضاهای کاری', icon: Building2, render: () => <Orgs /> },
   { to: '/admin/users', label: 'کاربران', icon: Users, render: () => <UsersPage /> },
+  { to: '/admin/connections', label: 'اتصال‌ها', icon: Plug, render: () => <ConnectionsPage /> },
   { to: '/admin/ai', label: 'کلیدهای هوش مصنوعی', icon: KeyRound, render: () => <AiKeys /> },
   { to: '/admin/behavior', label: 'رفتار هوش مصنوعی', icon: BrainCircuit, render: () => <Behavior /> },
   { to: '/admin/system', label: 'تنظیمات سامانه', icon: Settings2, render: () => <SystemPage /> },

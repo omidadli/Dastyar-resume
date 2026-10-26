@@ -8,7 +8,7 @@
 process.env.APP_SECRET = 'integration-test-secret-0123456789';
 
 import { cleanSubject, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings } from '../server/mailer';
-import { buildInviteIcs, CALENDAR_TIMEZONE, redirectUriFor, signState, verifyState } from '../server/gcal';
+import { buildInviteIcs, CALENDAR_TIMEZONE, googleClient, redirectUriFor, signState, verifyState } from '../server/gcal';
 import { buildLocalBrief, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
 import { tehranIsoFromJalali, jalaliAndTehranTime } from '../server/tehran-time';
 import type { OrgSecrets } from '../server/db';
@@ -85,9 +85,15 @@ function assert(cond: boolean, label: string, extra = '') {
     'the redirect URI is derived from the request origin',
     redirectUriFor('https://hr.example.com/')
   );
+  // The redirect override only counts when a client is actually configured.
+  process.env.GOOGLE_CLIENT_ID = '1234567890-test.apps.googleusercontent.com';
+  process.env.GOOGLE_CLIENT_SECRET = 'GOCSPX-test-secret';
   process.env.GOOGLE_REDIRECT_URI = 'https://fixed.example.com/cb';
   assert(redirectUriFor('https://other.example.com') === 'https://fixed.example.com/cb', 'GOOGLE_REDIRECT_URI overrides the origin');
+  assert(googleClient()?.clientId === '1234567890-test.apps.googleusercontent.com', 'the environment client is used when nothing was saved in /admin');
   delete process.env.GOOGLE_REDIRECT_URI;
+  delete process.env.GOOGLE_CLIENT_ID;
+  delete process.env.GOOGLE_CLIENT_SECRET;
 
   const ics = buildInviteIcs({
     interview: {
@@ -169,7 +175,11 @@ function assert(cond: boolean, label: string, extra = '') {
   delete process.env.LINKEDIN_API_URL;
   delete process.env.LINKEDIN_ACCESS_TOKEN;
   const status = sourcingStatus();
-  assert(status.configured === false && status.setupHint.includes('LINKEDIN_API_URL'), 'without credentials the status says exactly what is missing');
+  assert(
+    status.configured === false && status.setupHint.includes('اتصال‌ها'),
+    'without credentials the status says exactly where to set them (admin panel)',
+    status.setupHint
+  );
 }
 
 if (failures > 0) {

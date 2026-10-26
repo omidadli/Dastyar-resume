@@ -338,9 +338,8 @@ function CalendarCard({ redirectUri, connected, accountEmail, configured }: { re
       <div className="flex flex-col gap-4">
         {!configured ? (
           <Callout tone="warning" icon={ShieldCheck} title="این نصب هنوز به گوگل وصل نشده است">
-            برای فعال‌سازی، مدیر سامانه باید یک «OAuth Client» از نوع Web application در Google Cloud Console بسازد و مقادیر
-            <span dir="ltr" className="font-mono text-[12px] mx-1">GOOGLE_CLIENT_ID</span> و
-            <span dir="ltr" className="font-mono text-[12px] mx-1">GOOGLE_CLIENT_SECRET</span> را در محیط سرور تنظیم کند. راهنمای گام‌به‌گام:
+            مدیر سامانه باید یک «OAuth Client» از نوع Web application در Google Cloud Console بسازد و Client ID و Client Secret را در
+            <span className="font-semibold"> پنل مدیریت › «اتصال‌ها»</span> ثبت کند (دیگر نیازی به تغییر فایل تنظیمات سرور نیست). راهنمای گام‌به‌گام:
             <span dir="ltr" className="font-mono text-[12px] mx-1">docs/CONNECT-GOOGLE-CALENDAR.md</span>
           </Callout>
         ) : (

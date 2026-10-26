@@ -95,6 +95,83 @@ export interface AiCallLog {
 
 export type AiPurpose = 'evaluate' | 'deep' | 'understand' | 'calibrate' | 'message' | 'test' | 'lab' | 'other';
 
+// ----------------------------------------------------- outside connections ----
+/**
+ * Deployment-level credentials for the two connections that cannot be set per
+ * workspace: the LinkedIn-compatible sourcing provider (licensed at deployment
+ * level) and the Google OAuth client (registered once for this server).
+ * Everything a workspace needs on its own — the SMTP mailbox and each
+ * workspace's Google account — is connected from «تنظیمات ← اتصال‌ها».
+ *
+ * Both can also come from the environment (LINKEDIN_API_URL…, GOOGLE_CLIENT_ID…);
+ * the value saved in /admin wins, and the panel shows which one is in effect.
+ */
+
+export type ConnectionSource = 'admin' | 'env';
+
+export interface SourcingConnectionPublic {
+  /** A provider endpoint + token are in effect (from /admin or the environment). */
+  configured: boolean;
+  source: ConnectionSource | null;
+  /** Host only — the endpoint path is not a secret, the token never leaves the server. */
+  endpointHost: string | null;
+  endpointUrl: string;
+  providerLabel: string;
+  /** Example: «AIza…9xQ2» — never the token itself. */
+  tokenHint: string;
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  /** True when the value is read-only because it comes from the environment. */
+  fromEnv: boolean;
+}
+
+export interface GoogleConnectionPublic {
+  configured: boolean;
+  source: ConnectionSource | null;
+  clientId: string;
+  /** Never the secret — only its last four characters. */
+  secretHint: string;
+  hasSecret: boolean;
+  calendarId: string;
+  /** Overrides the redirect URI derived from the request (rarely needed). */
+  redirectUri: string;
+  /** The URI to register in the Google Cloud console for this request's origin. */
+  effectiveRedirectUri: string;
+  /** openid, email, calendar.events */
+  scopes: string[];
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  fromEnv: boolean;
+}
+
+export interface ConnectionsPayload {
+  sourcing: SourcingConnectionPublic;
+  google: GoogleConnectionPublic;
+  /** Both docs are served from the repository, absolute paths are not needed. */
+  docs: { sourcing: string; google: string };
+}
+
+export interface SourcingConnectionInput {
+  endpointUrl?: string;
+  /** Only sent to set/replace the token. */
+  token?: string;
+  providerLabel?: string;
+}
+
+export interface GoogleConnectionInput {
+  clientId?: string;
+  /** Only sent to set/replace the secret. */
+  clientSecret?: string;
+  calendarId?: string;
+  redirectUri?: string;
+}
+
 // ----------------------------------------------------------- system config ----
 
 export type BannerTone = 'info' | 'warning' | 'success';

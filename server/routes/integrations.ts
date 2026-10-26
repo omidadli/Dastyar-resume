@@ -19,9 +19,10 @@ import {
   LINKEDIN_DOC_PATH,
   SourcingNotConfiguredError,
   SourcingRequestError,
+  pollApifySearch,
   profileToResumeText,
-  searchProfiles,
   sourcingStatus,
+  startSearch,
 } from '../linkedin';
 import { buildSearchBrief } from '../sourcing';
 import {
@@ -54,7 +55,13 @@ function originOf(req: express.Request): string {
 }
 
 function publicSearch(row: db.SourcingSearchRecord): Omit<db.SourcingSearchRecord, 'orgId'> {
-  return db.withoutOrg(row);
+  const { providerJob: _job, ...rest } = db.withoutOrg(row);
+  return rest as Omit<db.SourcingSearchRecord, 'orgId'>;
+}
+
+/** «۸ پروفایل پیدا شد» — one phrasing for both provider kinds. */
+function emptySearchMessage(): string {
+  return 'هیچ پروفایلی با این شرایط پیدا نشد؛ شرایط را کمی بازتر کنید (مثلاً شهر یا یک مهارت را بردارید).';
 }
 
 function publicInterview(row: db.InterviewRecordRow) {
@@ -583,12 +590,40 @@ export function integrationRoutes(): express.Router {
     res.json({ items });
   });
 
-  r.get('/sourcing/searches/:id', (req, res) => {
-    const { org } = ctxOf(req);
-    const row = db.getSearch(org.id, req.params.id);
-    if (!row) return res.status(404).json({ error: 'این جست‌وجو پیدا نشد.' });
-    res.json({ search: publicSearch(row) });
-  });
+  r.get(
+    '/sourcing/searches/:id',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const row = db.getSearch(org.id, req.params.id);
+      if (!row) return res.status(404).json({ error: 'این جست‌وجو پیدا نشد.' });
+
+      // An Apify run started earlier is finished here — the page polls this
+      // endpoint, so no request has to stay open while the actor works.
+      if (row.status === 'running' && row.providerJob?.provider === 'apify') {
+        try {
+          const state = await pollApifySearch(row.providerJob, MAX_RESULTS);
+          if (state.state === 'done') {
+            row.results = state.items;
+            row.status = 'done';
+            row.providerJob = null;
+            row.message = state.items.length === 0 ? state.notes || emptySearchMessage() : state.notes;
+            db.saveSearch(row);
+            db.logActivity(org.id, actorOf(req), 'sourcing.search', `جست‌وجوی «${row.brief.roleTitle}» در سرویس تمام شد (${toPersianDigits(state.items.length)} پروفایل)`, {
+              jobId: row.jobId,
+            });
+          }
+        } catch (err: any) {
+          const message = err instanceof SourcingRequestError ? err.message : 'جست‌وجو انجام نشد.';
+          row.status = 'error';
+          row.providerJob = null;
+          row.message = message;
+          db.saveSearch(row);
+          return res.status(502).json({ error: message, search: publicSearch(row) });
+        }
+      }
+      res.json({ search: publicSearch(row) });
+    })
+  );
 
   r.post(
     '/sourcing/searches',
@@ -651,13 +686,23 @@ export function integrationRoutes(): express.Router {
       db.saveSearch(row);
 
       try {
-        const found = await searchProfiles(brief, { limit: Math.min(MAX_RESULTS, Math.max(1, Number(req.body?.limit) || 25)) });
-        row.results = found.items;
+        const started = await startSearch(brief, { limit: Math.min(MAX_RESULTS, Math.max(1, Number(req.body?.limit) || 25)) });
+        if (started.state === 'pending') {
+          // Asynchronous provider (Apify): answer now, finish on the next read.
+          row.providerJob = started.job;
+          row.status = 'running';
+          row.message = 'جست‌وجو در سرویس شروع شد و در حال انجام است؛ نتیجه به‌محض آماده شدن همین‌جا می‌آید.';
+          db.saveSearch(row);
+          db.logActivity(org.id, actorOf(req), 'sourcing.search', `جست‌وجوی «${brief.roleTitle}» در سرویس را شروع کرد`, { jobId: job?.id });
+          return res.status(202).json({ search: publicSearch(row) });
+        }
+        row.results = started.items;
         row.status = 'done';
+        row.providerJob = null;
         row.message =
-          found.items.length === 0
-            ? 'هیچ پروفایلی با این شرایط پیدا نشد؛ شرایط را کمی بازتر کنید (مثلاً شهر یا یک مهارت را بردارید).'
-            : null;
+          started.items.length === 0
+            ? started.notes || emptySearchMessage()
+            : started.notes;
         res.json({ search: publicSearch(row) });
       } catch (err: any) {
         if (err instanceof SourcingNotConfiguredError) {

@@ -119,6 +119,89 @@ function mockSourcing(): Promise<http.Server> {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
+// ---------------------------------------------------- mock Apify platform ----
+
+/**
+ * Just enough of the Apify API for the «Apify (HarvestAPI)» provider: token
+ * check, start a run, report it as running once, then finished with a dataset.
+ */
+const apifyRuns: Array<{ input: any }> = [];
+const apifyDataset = [
+  {
+    id: 'ap-1',
+    publicIdentifier: 'leila-ahmadi',
+    linkedinUrl: 'https://www.linkedin.com/in/leila-ahmadi-demo',
+    firstName: 'لیلا',
+    lastName: 'احمدی',
+    headline: 'حسابدار ارشد | اکسل',
+    openToWork: true,
+    location: { linkedinText: 'Tehran, Iran' },
+    experience: [{ position: 'حسابدار ارشد', companyName: 'شرکت نمونه', duration: '2 yrs', description: 'دفتر کل و گزارش‌های مالی' }],
+    education: [{ schoolName: 'دانشگاه تهران', degree: 'کارشناسی' }],
+    skills: ['اکسل', 'دفتر کل'],
+  },
+  {
+    id: 'ap-2',
+    publicIdentifier: 'reza-karimi',
+    linkedinUrl: 'https://www.linkedin.com/in/reza-karimi-demo',
+    firstName: 'رضا',
+    lastName: 'کریمی',
+    headline: 'کارشناس مالی',
+    openToWork: false,
+    location: { linkedinText: 'Karaj, Iran' },
+    experience: [{ position: 'کارشناس مالی', companyName: 'شرکت دیگر', duration: '1 yr' }],
+    education: [],
+    skills: ['اکسل'],
+  },
+  {
+    id: 'ap-3',
+    publicIdentifier: 'sara-unknown',
+    linkedinUrl: 'https://www.linkedin.com/in/sara-unknown-demo',
+    firstName: 'سارا',
+    lastName: 'نامشخص',
+    headline: 'حسابدار',
+    openToWork: null,
+    location: { linkedinText: 'Tehran, Iran' },
+    experience: [],
+    education: [],
+    skills: [],
+  },
+];
+
+function mockApify(): Promise<http.Server> {
+  let polls = 0;
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url || '/', 'http://127.0.0.1');
+    const token = url.searchParams.get('token');
+    const send = (status: number, body: unknown) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    if (token !== 'apify_api_token_123') return send(401, { error: { type: 'unauthorized', message: 'Invalid token' } });
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      if (url.pathname === '/v2/users/me') return send(200, { data: { username: 'hovida-test' } });
+      if (req.method === 'POST' && url.pathname === '/v2/acts/harvestapi~linkedin-profile-search/runs') {
+        const input = JSON.parse(body || '{}');
+        apifyRuns.push({ input });
+        const fail = input.searchQuery === 'BROKEN';
+        return send(201, { data: { id: fail ? 'run-fail' : 'run-ok', defaultDatasetId: fail ? 'ds-fail' : 'ds-ok', status: 'RUNNING' } });
+      }
+      if (url.pathname.startsWith('/v2/actor-runs/')) {
+        polls += 1;
+        const id = url.pathname.split('/').pop();
+        if (id === 'run-fail') return send(200, { data: { id, status: 'FAILED' } });
+        // The first poll reports «still running»; the second one finishes.
+        return send(200, { data: { id, status: polls <= 1 ? 'RUNNING' : 'SUCCEEDED', defaultDatasetId: 'ds-ok' } });
+      }
+      if (url.pathname === '/v2/datasets/ds-ok/items') return send(200, apifyDataset);
+      return send(404, { error: { message: 'not found' } });
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
 // --------------------------------------------------------------- fixtures ----
 
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
@@ -162,6 +245,8 @@ async function main() {
   const gateway = await mockGateway();
   const provider = await mockSourcing();
   const providerUrl = `http://127.0.0.1:${(provider.address() as any).port}/v1/people/search`;
+  const apify = await mockApify();
+  const apifyBase = `http://127.0.0.1:${(apify.address() as any).port}/v2`;
   const gatewayUrl = `http://127.0.0.1:${(gateway.address() as any).port}/v1`;
   const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-api-'));
   const PORT = 3400 + Math.floor(Math.random() * 400);
@@ -511,6 +596,66 @@ async function main() {
       assert(connActions.has(act), `audit log has «${act}»`);
     }
 
+    // ------------------------------------------- apify (harvestapi) ----
+    // A third-party actor is asynchronous and has no «open to work» filter:
+    // the run is started, polled on the next read, and filtered on what the
+    // provider reports.
+    const badApify = await call('PUT', '/api/admin/connections/sourcing', A, { kind: 'apify', endpointUrl: apifyBase, token: 'wrong-token-999', actorId: 'harvestapi/linkedin-profile-search' });
+    assert(badApify.status === 400 && badApify.json.code === 'SOURCING_PROBE_FAILED', 'an Apify token that the platform rejects is not saved', `${badApify.status} ${badApify.json?.code}`);
+
+    const savedApify = await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+    });
+    assert(savedApify.status === 200 && savedApify.json.sourcing.kind === 'apify' && savedApify.json.sourcing.async === true, 'the Apify provider is saved as an asynchronous provider', `${savedApify.status} ${JSON.stringify(savedApify.json?.error || '')}`);
+    assert(savedApify.json.sourcing.actorId === 'harvestapi~linkedin-profile-search', 'the actor id is normalised to user~actor', savedApify.json.sourcing.actorId);
+    assert(!JSON.stringify(savedApify.json).includes('apify_api_token_123'), 'the Apify token is never returned');
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.configured === true, 'workspaces see the Apify provider as configured');
+
+    apifyRuns.length = 0;
+    const apifyBrief = {
+      roleTitle: 'حسابدار ارشد',
+      seniority: null,
+      locations: ['تهران'],
+      skills: ['اکسل'],
+      mustHave: [],
+      keywords: ['اکسل'],
+      booleanQuery: '"حسابدار ارشد" AND اکسل',
+      openToWorkOnly: true,
+      notes: '',
+      engine: 'local' as const,
+    };
+    const started = await call('POST', '/api/sourcing/searches', A, { departmentId: deptForSearch.id, prompt: 'حسابدار ارشد مسلط به اکسل', openToWorkOnly: true, brief: apifyBrief, limit: 10 });
+    assert(started.status === 202 && started.json.search.status === 'running', 'starting a run answers at once with «running» (no long request)', `${started.status} ${started.json?.search?.status}`);
+    assert(!JSON.stringify(started.json).includes('run-ok') && !JSON.stringify(started.json).includes('ds-ok'), 'the run id and dataset id stay on the server');
+    const runInput = apifyRuns[0]?.input || {};
+    assert(runInput.profileScraperMode === 'Full' && runInput.currentJobTitles?.[0] === 'حسابدار ارشد', 'the brief becomes the actor input (full profiles + title filter)', JSON.stringify(runInput).slice(0, 160));
+    assert(JSON.stringify(runInput.locations) === '["Tehran"]', 'Persian cities are translated before they reach LinkedIn', JSON.stringify(runInput.locations));
+    assert(runInput.maxItems >= 40, 'more profiles are requested than shown, so the open-to-work filter has room', String(runInput.maxItems));
+
+    const stillRunning = await call('GET', `/api/sourcing/searches/${started.json.search.id}`, A);
+    assert(stillRunning.status === 200 && stillRunning.json.search.status === 'running', 'the first poll reports the run is still going');
+    const finished = await call('GET', `/api/sourcing/searches/${started.json.search.id}`, A);
+    assert(finished.status === 200 && finished.json.search.status === 'done', 'the next poll finishes it and stores the result');
+    assert(finished.json.search.results.length === 1 && finished.json.search.results[0].fullName === 'لیلا احمدی', 'only the profile the actor reports as open-to-work is kept', JSON.stringify(finished.json.search.results.map((r: any) => r.fullName)));
+    assert(finished.json.search.results[0].experiences[0].company === 'شرکت نمونه', 'the Apify experience fields survive the mapping');
+    assert(/۳ پروفایل/.test(finished.json.search.message || '') && /۱ نفر/.test(finished.json.search.message || ''), 'the search explains how many were checked and how many qualified', finished.json.search.message);
+    assert(finished.json.search.providerJob === undefined, 'the internal run reference is not exposed');
+
+    // A failing run is reported honestly, never as «no results».
+    const failing = await call('POST', '/api/sourcing/searches', A, {
+      departmentId: deptForSearch.id,
+      prompt: 'BROKEN',
+      openToWorkOnly: true,
+      brief: { ...apifyBrief, skills: [], keywords: [], booleanQuery: 'BROKEN' },
+      limit: 5,
+    });
+    const failedRead = await call('GET', `/api/sourcing/searches/${failing.json.search.id}`, A);
+    assert(failedRead.status === 502 && failedRead.json.search.status === 'error', 'a failed run becomes a stored error, not an empty result', `${failedRead.status} ${failedRead.json?.search?.status}`);
+    assert(/ناکام/.test(failedRead.json.search.message || ''), 'the failure message says what happened', failedRead.json.search.message);
+
     // ------------------------------------------------------- delete ----
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'اشتباه' })).status === 400, 'delete needs the exact workspace name');
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'شرکت دوم' })).json.ok === true, 'workspace deleted');
@@ -519,6 +664,7 @@ async function main() {
     child.kill('SIGTERM');
     gateway.close();
     provider.close();
+    apify.close();
     await new Promise((r) => setTimeout(r, 600));
     try {
       const snap = fs.readFileSync(path.join(DATA, 'hovida-store.json'), 'utf-8');

@@ -9,7 +9,7 @@ process.env.APP_SECRET = 'integration-test-secret-0123456789';
 
 import { cleanSubject, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings } from '../server/mailer';
 import { buildInviteIcs, CALENDAR_TIMEZONE, googleClient, redirectUriFor, signState, verifyState } from '../server/gcal';
-import { buildLocalBrief, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
+import { apifyInput, buildLocalBrief, finishProfiles, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
 import { tehranIsoFromJalali, jalaliAndTehranTime } from '../server/tehran-time';
 import type { OrgSecrets } from '../server/db';
 
@@ -171,6 +171,58 @@ function assert(cond: boolean, label: string, extra = '') {
   const cleaned = sanitizeBrief({ roleTitle: 'مدیر مالی', locations: ['تهران', '', 42], skills: ['IFRS'], booleanQuery: '', openToWorkOnly: 'yes' }, brief);
   assert(cleaned.roleTitle === 'مدیر مالی' && cleaned.locations.join(',') === 'تهران' && cleaned.skills.join(',') === 'IFRS', 'model output is cleaned into usable lists');
   assert(cleaned.openToWorkOnly === true && cleaned.engine === 'ai', 'a non-boolean openToWorkOnly keeps the request value');
+
+  // ------------------------------------------------- apify / harvestapi ----
+  // A real HarvestAPI dataset item, trimmed to the fields HOVIDA reads.
+  const apifyItem = (openToWork: boolean | null) => ({
+    id: 'ACoAAAA',
+    publicIdentifier: 'maryam-kazemi',
+    linkedinUrl: 'https://www.linkedin.com/in/maryam-kazemi',
+    firstName: 'مریم',
+    lastName: 'کاظمی',
+    headline: 'کارشناس ارشد حسابداری صنعتی | SAP',
+    openToWork,
+    location: { linkedinText: 'Tehran, Tehran Province, Iran', parsed: { text: 'Tehran, Iran', city: 'Tehran' } },
+    currentPosition: [{ companyName: 'گروه صنعتی البرز' }],
+    experience: [
+      {
+        position: 'کارشناس ارشد حسابداری صنعتی',
+        companyName: 'گروه صنعتی البرز',
+        duration: '1 yr 7 mos',
+        startDate: { month: 'Jan', year: 2024, text: 'Jan 2024' },
+        endDate: { text: 'Present' },
+        description: 'بهای تمام‌شده و گزارش‌های مدیریتی',
+      },
+    ],
+    education: [{ schoolName: 'دانشگاه تهران', degree: 'کارشناسی ارشد' }],
+    skills: ['SAP', 'اکسل پیشرفته'],
+  });
+
+  const apifyBrief = buildLocalBrief('دنبال کارشناس حسابداری صنعتی مسلط به SAP در تهران', 'کارشناس حسابداری صنعتی', true);
+  const apifyRunInput = apifyInput(apifyBrief, 100);
+  assert(apifyRunInput.profileScraperMode === 'Full' && apifyRunInput.maxItems === 100, 'the Apify input asks for full profiles and the requested count');
+  assert(apifyRunInput.takePages === 4, 'pages are derived from the requested profiles (25 per page)', String(apifyRunInput.takePages));
+  assert(JSON.stringify(apifyRunInput.locations) === '["Tehran"]', 'Persian city names are translated for LinkedIn', JSON.stringify(apifyRunInput.locations));
+  assert(apifyRunInput.currentJobTitles?.[0] === 'کارشناس حسابداری صنعتی', 'the role becomes a title filter, not a fuzzy word');
+  assert(!('openToWorkOnly' in apifyRunInput) && !JSON.stringify(apifyRunInput).includes('openToWork'), 'the actor has no open-to-work filter and we never pretend it does');
+
+  const apifyProfile = normalizeProfile(apifyItem(true), 0)!;
+  assert(apifyProfile.fullName === 'مریم کاظمی' && apifyProfile.location === 'Tehran, Tehran Province, Iran', 'first/last name and the nested location are read', `${apifyProfile.fullName} / ${apifyProfile.location}`);
+  assert(apifyProfile.experiences[0].title === 'کارشناس ارشد حسابداری صنعتی' && apifyProfile.experiences[0].company === 'گروه صنعتی البرز' && apifyProfile.experiences[0].period === '1 yr 7 mos', 'HarvestAPI experience fields (position/companyName/duration) map correctly');
+  assert(apifyProfile.education[0] === 'دانشگاه تهران — کارشناسی ارشد' && apifyProfile.skills.length === 2, 'education keeps school + degree and skills stay a list');
+  assert(apifyProfile.currentCompany === 'گروه صنعتی البرز' && apifyProfile.profileUrl.includes('/in/maryam-kazemi'), 'current company falls back to currentPosition');
+
+  const onlyOpen = finishProfiles([apifyItem(true), apifyItem(false), apifyItem(null)], true, 25);
+  assert(onlyOpen.state === 'done' && onlyOpen.items.length === 1 && onlyOpen.items[0].fullName === 'مریم کاظمی', 'only profiles the provider reports as open-to-work are kept');
+  assert(/۳ پروفایل/.test(onlyOpen.notes || '') && /۱ نفر/.test(onlyOpen.notes || ''), 'the note says how many were checked and how many qualified', onlyOpen.notes || '');
+  const withUnknown = finishProfiles([apifyItem(null)], true, 25);
+  assert(withUnknown.items.length === 0, 'an unknown status is not treated as «open to work»');
+  const everyone = finishProfiles([apifyItem(true), apifyItem(false), apifyItem(null)], false, 25);
+  assert(everyone.items.length === 3 && everyone.items[1].openToWork === false, 'when the filter is off, unreported profiles still say «not open to work», never «yes»');
+  const capped = finishProfiles([apifyItem(true), apifyItem(true), apifyItem(true)], true, 2);
+  assert(capped.items.length === 2 && /۲ نفر/.test(capped.notes || ''), 'the display cap is reported, not silently applied', capped.notes || '');
+  const noneReported = finishProfiles([apifyItem(false)], true, 25);
+  assert(noneReported.items.length === 0 && /«آمادهٔ همکاری» را گزارش نکرد/.test(noneReported.notes || ''), 'a run without qualified people explains itself', noneReported.notes || '');
 
   delete process.env.LINKEDIN_API_URL;
   delete process.env.LINKEDIN_ACCESS_TOKEN;

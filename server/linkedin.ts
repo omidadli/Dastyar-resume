@@ -42,7 +42,9 @@ export class SourcingRequestError extends Error {
 }
 
 interface ProviderConfig {
+  kind: 'contract' | 'apify';
   endpoint: string;
+  actorId: string;
   token: string;
   label: string;
 }
@@ -54,7 +56,7 @@ interface ProviderConfig {
 function config(): ProviderConfig | null {
   const conn = sourcingConnection();
   if (!conn) return null;
-  return { endpoint: conn.endpointUrl, token: conn.token, label: conn.providerLabel };
+  return { kind: conn.kind, endpoint: conn.endpointUrl, actorId: conn.actorId, token: conn.token, label: conn.providerLabel };
 }
 
 export function sourcingStatus(configuredOverride?: boolean): SourcingStatusPublic {
@@ -76,7 +78,38 @@ export function sourcingStatus(configuredOverride?: boolean): SourcingStatusPubl
  * «آزمایش اتصال» button and before saving, so a dead endpoint is never stored
  * as if it worked. Returns the Persian reason on failure.
  */
-export async function probeProvider(cfg: { endpoint: string; token: string }): Promise<{ ok: boolean; error: string | null; count: number | null }> {
+export interface ProbeResult {
+  ok: boolean;
+  error: string | null;
+  /** How many items the test call returned (contract providers only). */
+  count: number | null;
+  /** Extra, human-readable confirmation (e.g. the Apify account). */
+  detail?: string;
+}
+
+export async function probeProvider(cfg: { kind?: 'contract' | 'apify'; endpoint: string; token: string; actorId?: string }): Promise<ProbeResult> {
+  // Apify: checking the token is free (no actor run is started).
+  if (cfg.kind === 'apify') {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const res = await fetch(`${cfg.endpoint.replace(/\/$/, '')}/users/me?token=${encodeURIComponent(cfg.token)}`, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+      if (res.status === 401 || res.status === 403) return { ok: false, error: 'اپافی این توکن را نپذیرفت؛ توکن API را از Console › Integrations بردارید.', count: null };
+      if (res.status === 402) return { ok: false, error: 'اعتبار حساب اپافی کافی نیست (۴۰۲)؛ پلن یا اعتبار را بررسی کنید.', count: null };
+      if (!res.ok) return { ok: false, error: `اپافی پاسخ ${res.status} داد؛ آدرس API و توکن را بررسی کنید.`, count: null };
+      const json: any = await res.json().catch(() => null);
+      const user = json?.data?.username || json?.data?.userId || '';
+      return { ok: true, error: null, count: null, detail: user ? `توکن معتبر است؛ حساب: ${user}` : 'توکن معتبر است.' };
+    } catch (err: any) {
+      if (err?.name === 'AbortError') return { ok: false, error: 'اپافی در ۱۵ ثانیه پاسخ نداد؛ دسترسی شبکهٔ سرور را بررسی کنید.', count: null };
+      return { ok: false, error: `ارتباط با اپافی برقرار نشد: ${err?.message || 'خطای شبکه'}`, count: null };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   const body = { query: { booleanQuery: '"test"', roleTitle: 'test', locations: [], skills: [], mustHave: [], seniority: null, openToWorkOnly: true, keywords: [] }, limit: 1, cursor: null };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
@@ -122,7 +155,9 @@ function toArray(v: unknown): any[] {
 /** Defensive mapping: providers differ in field names, never invent values. */
 export function normalizeProfile(raw: any, index: number): SourcingProfile | null {
   if (!raw || typeof raw !== 'object') return null;
-  const fullName = asText(pick(raw, ['fullName', 'name', 'full_name', 'displayName']), 120);
+  const fullName =
+    asText(pick(raw, ['fullName', 'name', 'full_name', 'displayName']), 120) ||
+    [asText(pick(raw, ['firstName', 'first_name']), 60), asText(pick(raw, ['lastName', 'last_name']), 60)].filter(Boolean).join(' ');
   const profileUrl = asText(pick(raw, ['profileUrl', 'url', 'publicProfileUrl', 'linkedinUrl', 'profile_url']), 500);
   if (!fullName && !profileUrl) return null;
   const experiences: SourcingExperience[] = toArray(pick(raw, ['experiences', 'experience', 'positions', 'workHistory']))
@@ -136,7 +171,12 @@ export function normalizeProfile(raw: any, index: number): SourcingProfile | nul
     .filter((e) => e.title || e.company);
 
   const education = toArray(pick(raw, ['education', 'schools']))
-    .map((e: any) => (typeof e === 'string' ? asText(e, 200) : asText(pick(e, ['school', 'schoolName', 'institution', 'degree', 'field']), 200)))
+    .map((e: any) => {
+      if (typeof e === 'string') return asText(e, 200);
+      const school = asText(pick(e, ['school', 'schoolName', 'institution']), 160);
+      const degree = asText(pick(e, ['degree', 'degreeName', 'field', 'fieldOfStudy']), 80);
+      return [school, degree].filter(Boolean).join(' — ');
+    })
     .filter(Boolean)
     .slice(0, 6);
 
@@ -145,16 +185,28 @@ export function normalizeProfile(raw: any, index: number): SourcingProfile | nul
     .filter(Boolean)
     .slice(0, 25);
 
-  const id = asText(pick(raw, ['id', 'profileId', 'memberId', 'urn']), 120) || profileUrl || `profile-${index}`;
+  const id = asText(pick(raw, ['id', 'profileId', 'memberId', 'urn', 'publicIdentifier']), 120) || profileUrl || `profile-${index}`;
   return {
     id,
     fullName: fullName || 'بدون نام',
     headline: asText(pick(raw, ['headline', 'title', 'occupation', 'summary']), 300),
-    location: asText(pick(raw, ['location', 'geoLocation', 'city', 'region']), 160),
+    // Apify/HarvestAPI returns an object here (location.linkedinText / parsed.text).
+    location: (() => {
+      const raw2: any = pick(raw, ['location', 'geoLocation']);
+      if (typeof raw2 === 'string') return asText(raw2, 160);
+      if (raw2 && typeof raw2 === 'object') {
+        return asText(raw2.linkedinText || raw2.parsed?.text || raw2.city || raw2.text || '', 160);
+      }
+      return asText(pick(raw, ['city', 'region']), 160);
+    })(),
     profileUrl,
     // Only what the provider reports: absent means «نامشخص», not false-positive.
     openToWork: Boolean(pick(raw, ['openToWork', 'isOpenToWork', 'open_to_work', 'openToWorkFlag'])),
-    currentCompany: asText(pick(raw, ['currentCompany', 'company', 'currentCompanyName']), 160) || null,
+    currentCompany:
+      asText(pick(raw, ['currentCompany', 'company', 'currentCompanyName']), 160) ||
+      asText(toArray(pick(raw, ['currentPosition', 'currentPositions']))[0]?.companyName, 160) ||
+      experiences[0]?.company ||
+      null,
     experiences,
     education,
     skills,
@@ -171,6 +223,177 @@ export interface SearchResponse {
   items: SourcingProfile[];
   total: number | null;
   nextCursor: string | null;
+  /** An optional explanation of what was filtered or counted. */
+  notes?: string | null;
+}
+
+// --------------------------------------------------------------- apify ----
+
+/**
+ * Apify actors are asynchronous: a run is started, then polled. The search row
+ * keeps the run id, so a long run never holds an HTTP request open — the next
+ * page load finishes it.
+ */
+export interface ApifyJob {
+  provider: 'apify';
+  runId: string;
+  datasetId: string;
+  startedAtISO: string;
+  /** Profiles requested from the provider (more than shown, «open to work» is filtered here). */
+  fetchLimit: number;
+  openToWorkOnly: boolean;
+}
+
+export type JobState =
+  | { state: 'pending' }
+  | { state: 'done'; items: SourcingProfile[]; total: number | null; notes: string | null };
+
+/** LinkedIn understands Latin place names; the brief is Persian. */
+const LATIN_CITY: Record<string, string> = {
+  تهران: 'Tehran',
+  کرج: 'Karaj',
+  اصفهان: 'Isfahan',
+  مشهد: 'Mashhad',
+  شیراز: 'Shiraz',
+  تبریز: 'Tabriz',
+  قم: 'Qom',
+  اهواز: 'Ahvaz',
+  رشت: 'Rasht',
+  کیش: 'Kish',
+  یزد: 'Yazd',
+  کرمان: 'Kerman',
+  بندرعباس: 'Bandar Abbas',
+  همدان: 'Hamadan',
+  اراک: 'Arak',
+  ساری: 'Sari',
+  زنجان: 'Zanjan',
+};
+
+/**
+ * The brief, translated into an Apify actor input. Note what is *not* here:
+ * the actor has no «open to work» filter, so that is applied after the run —
+ * on what the provider actually reports, never guessed.
+ */
+export function apifyInput(brief: SourcingBrief, fetchLimit: number) {
+  const keywords = Array.from(new Set([...(brief.skills || []), ...(brief.mustHave || [])]))
+    .filter(Boolean)
+    .slice(0, 5)
+    .join(' ')
+    .slice(0, 300);
+  const query = keywords || brief.booleanQuery.replace(/\b(AND|OR|NOT)\b|"/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+  const locations = (brief.locations || []).map((c) => LATIN_CITY[c.trim()] || c.trim()).filter(Boolean).slice(0, 10);
+  const perPage = 25;
+  return {
+    profileScraperMode: 'Full',
+    ...(brief.roleTitle ? { currentJobTitles: [brief.roleTitle] } : {}),
+    ...(query ? { searchQuery: query } : {}),
+    ...(locations.length ? { locations } : {}),
+    maxItems: fetchLimit,
+    takePages: Math.max(1, Math.min(100, Math.ceil(fetchLimit / perPage))),
+  };
+}
+
+function apifyApi(cfg: ProviderConfig, path: string): string {
+  return `${cfg.endpoint.replace(/\/$/, '')}${path}${path.includes('?') ? '&' : '?'}token=${encodeURIComponent(cfg.token)}`;
+}
+
+async function apifyFetch(url: string, init: RequestInit = {}): Promise<any> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25_000);
+  try {
+    const res = await fetch(url, {
+      ...init,
+      headers: { Accept: 'application/json', ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...(init.headers || {}) },
+      signal: controller.signal,
+    });
+    const json: any = await res.json().catch(() => null);
+    if (res.status === 401 || res.status === 403) throw new SourcingRequestError('اپافی این توکن را نپذیرفت؛ توکن API را بررسی کنید.', 502);
+    if (res.status === 402) throw new SourcingRequestError('اعتبار حساب اپافی کافی نیست (۴۰۲)؛ پلن اپافی را بررسی کنید.', 502);
+    if (res.status === 429) throw new SourcingRequestError('محدودیت نرخ اپافی فعال شد (۴۲۹)؛ چند دقیقه بعد دوباره تلاش کنید.', 429);
+    if (!res.ok) {
+      const detail = typeof json?.error?.message === 'string' ? ` — ${json.error.message.slice(0, 160)}` : '';
+      throw new SourcingRequestError(`اپافی پاسخ ${res.status} داد${detail}`, 502);
+    }
+    return json;
+  } catch (err: any) {
+    if (err instanceof SourcingRequestError) throw err;
+    if (err?.name === 'AbortError') throw new SourcingRequestError('اپافی در ۲۵ ثانیه پاسخ نداد؛ دوباره تلاش کنید.', 504);
+    throw new SourcingRequestError(`ارتباط با اپافی برقرار نشد: ${err?.message || 'خطای شبکه'}`, 502);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Starts an Apify actor run and returns the job the search row will keep. */
+export async function startApifySearch(brief: SourcingBrief, fetchLimit: number): Promise<ApifyJob> {
+  const cfg = config();
+  if (!cfg) throw new SourcingNotConfiguredError();
+  const actor = (cfg.actorId || 'harvestapi~linkedin-profile-search').replace(/\//g, '~');
+  const json = await apifyFetch(apifyApi(cfg, `/acts/${encodeURIComponent(actor)}/runs`), {
+    method: 'POST',
+    body: JSON.stringify(apifyInput(brief, fetchLimit)),
+  });
+  const run = json?.data;
+  if (!run?.id || !run?.defaultDatasetId) {
+    throw new SourcingRequestError('اپافی اجرای جست‌وجو را شروع نکرد (پاسخ ناقص بود).', 502);
+  }
+  return {
+    provider: 'apify',
+    runId: String(run.id),
+    datasetId: String(run.defaultDatasetId),
+    startedAtISO: new Date().toISOString(),
+    fetchLimit,
+    openToWorkOnly: brief.openToWorkOnly,
+  };
+}
+
+/** A run that is still going after this long is treated as failed for the user. */
+const APIFY_MAX_WAIT_MS = 10 * 60_000;
+
+/** Polls the run; returns the finished profiles (filtered) or «still running». */
+export async function pollApifySearch(job: ApifyJob, limit: number): Promise<JobState> {
+  const cfg = config();
+  if (!cfg) throw new SourcingNotConfiguredError();
+  const json = await apifyFetch(apifyApi(cfg, `/actor-runs/${encodeURIComponent(job.runId)}`), { method: 'GET' });
+  const status = String(json?.data?.status || '').toUpperCase();
+  if (['READY', 'RUNNING', ''].includes(status)) {
+    const age = Date.now() - new Date(job.startedAtISO).getTime();
+    if (age > APIFY_MAX_WAIT_MS) {
+      throw new SourcingRequestError('جست‌وجو بیش از ۱۰ دقیقه در صف اپافی ماند؛ با تعداد نتیجهٔ کمتر یا شهر مشخص‌تر دوباره تلاش کنید.', 504);
+    }
+    return { state: 'pending' };
+  }
+  if (['FAILED', 'ABORTED', 'TIMED-OUT', 'TIMED_OUT'].includes(status)) {
+    throw new SourcingRequestError('اجرای جست‌وجو در اپافی ناکام ماند؛ پلن/اعتبار اپافی و شناسهٔ Actor را بررسی کنید.', 502);
+  }
+  const items = await apifyFetch(apifyApi(cfg, `/datasets/${encodeURIComponent(job.datasetId)}/items?clean=true&format=json&limit=500`), { method: 'GET' });
+  const raw = Array.isArray(items) ? items : toArray(pick(items, ['items']));
+  return finishProfiles(raw, job.openToWorkOnly, limit);
+}
+
+/**
+ * Turns provider profiles into what the recruiter sees: only people the
+ * provider itself reports as «open to work» when that was asked for.
+ */
+export function finishProfiles(raw: any[], openToWorkOnly: boolean, limit: number): { state: 'done'; items: SourcingProfile[]; total: number | null; notes: string | null } {
+  const normalized = raw.map((r, i) => normalizeProfile(r, i)).filter((p): p is SourcingProfile => Boolean(p));
+  const total = normalized.length;
+  const reported = normalized.filter((p) => p.openToWork === true);
+  const kept = (openToWorkOnly ? reported : normalized).slice(0, limit);
+  let notes: string | null = null;
+  if (openToWorkOnly) {
+    if (total === 0) notes = null;
+    else if (reported.length === 0) {
+      notes = `${toPersianDigitsLocal(total)} پروفایل بررسی شد، ولی سرویس برای هیچ‌کدام وضعیت «آمادهٔ همکاری» را گزارش نکرد؛ چیزی نمایش داده نشد.`;
+    } else {
+      notes = `از ${toPersianDigitsLocal(total)} پروفایل بررسی‌شده، ${toPersianDigitsLocal(reported.length)} نفر «آمادهٔ همکاری» گزارش شده‌اند${reported.length > kept.length ? `؛ ${toPersianDigitsLocal(kept.length)} نفر نمایش داده شد` : ''}.`;
+    }
+  }
+  return { state: 'done', items: kept, total, notes };
+}
+
+function toPersianDigitsLocal(n: number): string {
+  return String(n).replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)]);
 }
 
 /**
@@ -180,6 +403,9 @@ export interface SearchResponse {
 export async function searchProfiles(brief: SourcingBrief, opts: SearchOptions = {}): Promise<SearchResponse> {
   const cfg = config();
   if (!cfg) throw new SourcingNotConfiguredError();
+  if (cfg.kind === 'apify') {
+    throw new SourcingRequestError('این سرویس ناهمگام است؛ از startSearch استفاده کنید.', 500);
+  }
 
   const limit = Math.min(50, Math.max(1, opts.limit || 25));
   const body = {
@@ -246,6 +472,29 @@ export async function searchProfiles(brief: SourcingBrief, opts: SearchOptions =
     total: Number.isFinite(totalRaw) ? totalRaw : null,
     nextCursor: asText(pick(json, ['nextCursor', 'cursor', 'paging.start']), 400) || null,
   };
+}
+
+/** What a started search produced: finished profiles, or an Apify run to poll. */
+export type StartSearchResult =
+  | { state: 'done'; items: SourcingProfile[]; total: number | null; notes: string | null }
+  | { state: 'pending'; job: ApifyJob };
+
+/**
+ * One entry point for a search, whatever the provider kind: a contract provider
+ * answers in the same request, an Apify actor is started and polled later.
+ */
+export async function startSearch(brief: SourcingBrief, opts: SearchOptions = {}): Promise<StartSearchResult> {
+  const cfg = config();
+  if (!cfg) throw new SourcingNotConfiguredError();
+  const limit = Math.min(50, Math.max(1, opts.limit || 25));
+  if (cfg.kind === 'apify') {
+    // «Open to work» cannot be filtered at the provider, so ask for more and keep
+    // the reported ones: 4× the wanted number, capped to keep the run cheap.
+    const fetchLimit = Math.min(200, Math.max(limit, limit * 4));
+    return { state: 'pending', job: await startApifySearch(brief, fetchLimit) };
+  }
+  const found = await searchProfiles(brief, { ...opts, limit });
+  return { state: 'done', items: found.items, total: found.total, notes: found.notes ?? null };
 }
 
 /** «Profile as it looks on LinkedIn», turned into text the screening engine can read. */

@@ -151,7 +151,21 @@ const sessions = new Map<string, SessionRecord>();
 const jobs = new Map<string, Job>();
 const resumes = new Map<string, ResumeRecord>();
 /** Stored shapes add the owning workspace; API responses drop it again. */
-export type SourcingSearchRecord = SourcingSearch & { orgId: string };
+/**
+ * An asynchronous provider run kept on the search row (Apify): the HTTP request
+ * returns at once and the next read finishes the search, so nothing has to stay
+ * open for minutes.
+ */
+export interface SourcingJobRef {
+  provider: 'apify';
+  runId: string;
+  datasetId: string;
+  startedAtISO: string;
+  fetchLimit: number;
+  openToWorkOnly: boolean;
+}
+
+export type SourcingSearchRecord = SourcingSearch & { orgId: string; providerJob?: SourcingJobRef | null };
 export type InterviewRecordRow = InterviewRecord & { orgId: string };
 export type SentEmailRow = SentEmail & { orgId: string };
 

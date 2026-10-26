@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Filter,
   Link2,
+  Loader2,
   MapPin,
   Search,
   Sparkles,
@@ -117,6 +118,47 @@ export default function Sourcing() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.get('search')]);
 
+  // An asynchronous provider (Apify) answers 202 and the run finishes later:
+  // read the search until the server reports a final status.
+  const runningId = search?.status === 'running' ? search.id : null;
+  useEffect(() => {
+    if (!runningId) return;
+    let stopped = false;
+    let tries = 0;
+    const tick = async () => {
+      tries += 1;
+      try {
+        const { search: latest } = await api.sourcing.get(runningId);
+        if (stopped) return;
+        setSearch(latest);
+        if (latest.status !== 'running') {
+          historyQ.refresh();
+          if (latest.status === 'done' && latest.results.length) {
+            toast(`${toPersianDigits(latest.results.length)} پروفایل پیدا شد.`, 'success');
+          } else if (latest.message) {
+            setError(latest.message);
+          }
+        }
+      } catch (e: any) {
+        if (!stopped) setError(e?.message || 'وضعیت جست‌وجو خوانده نشد.');
+      }
+    };
+    const timer = window.setInterval(() => {
+      // ~6 minutes of polling (90 × 4s); the server gives up on the run sooner.
+      if (tries >= 90) {
+        window.clearInterval(timer);
+        setError('جست‌وجو طولانی شد؛ چند دقیقه بعد صفحه را دوباره باز کنید یا جست‌وجو را با شرایط محدودتر تکرار کنید.');
+        return;
+      }
+      void tick();
+    }, 4000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runningId]);
+
   const makeBrief = async () => {
     setBriefing(true);
     setError(null);
@@ -156,7 +198,9 @@ export default function Sourcing() {
       setBrief(found.brief);
       setTargetJobId(found.jobId || targetJobId);
       historyQ.refresh();
-      if (found.message) setError(found.message);
+      if (found.status === 'running') {
+        toast('جست‌وجو در سرویس شروع شد؛ نتیجه خودکار نمایش داده می‌شود.', 'info');
+      } else if (found.message) setError(found.message);
       else if (found.results.length) toast(`${toPersianDigits(found.results.length)} پروفایل پیدا شد.`, 'success');
     } catch (e: any) {
       setError(e?.message || 'جست‌وجو انجام نشد.');
@@ -397,6 +441,12 @@ export default function Sourcing() {
                   <Callout tone="danger" icon={AlertTriangle} title="جست‌وجو انجام نشد">
                     {search.message || 'سرویس جست‌وجو پاسخ نداد.'}
                   </Callout>
+                </div>
+              )}
+              {search.status === 'running' && (
+                <div className="p-5 flex items-center gap-3">
+                  <Loader2 className="w-5 h-5 animate-spin text-brand-strong" />
+                  <p className="text-[13px] text-ink-2">{search.message || 'جست‌وجو در سرویس در حال انجام است…'}</p>
                 </div>
               )}
               {search.status === 'done' && results.length === 0 && (

@@ -39,7 +39,9 @@ function StateChip({ ok, label }: { ok: boolean; label: string }) {
 /** «جست‌وجوی متخصص در LinkedIn» — the provider endpoint every workspace searches with. */
 function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d: ConnectionsPayload) => void }) {
   const c = data.sourcing;
+  const [kind, setKind] = useState<'contract' | 'apify'>(c.kind);
   const [endpointUrl, setEndpointUrl] = useState(c.source === 'admin' ? c.endpointUrl : '');
+  const [actorId, setActorId] = useState(c.actorId);
   const [token, setToken] = useState('');
   const [providerLabel, setProviderLabel] = useState(c.providerLabel === 'LinkedIn' ? '' : c.providerLabel);
   const [saving, setSaving] = useState(false);
@@ -48,18 +50,26 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
   const [confirmOff, setConfirmOff] = useState(false);
 
   useEffect(() => {
+    setKind(c.kind);
     setEndpointUrl(c.source === 'admin' ? c.endpointUrl : '');
+    setActorId(c.actorId);
     setProviderLabel(c.providerLabel === 'LinkedIn' ? '' : c.providerLabel);
-  }, [c.source, c.endpointUrl, c.providerLabel]);
+  }, [c.source, c.endpointUrl, c.kind, c.actorId, c.providerLabel]);
 
   const save = async () => {
     setSaving(true);
     setError(null);
     try {
-      const next = await adminApi.saveSourcingConnection({ endpointUrl: endpointUrl.trim(), token: token.trim() || undefined, providerLabel });
+      const next = await adminApi.saveSourcingConnection({
+        kind,
+        endpointUrl: endpointUrl.trim() || undefined,
+        actorId: actorId.trim() || undefined,
+        token: token.trim() || undefined,
+        providerLabel,
+      });
       setData(next);
       setToken('');
-      toast('سرویس جست‌وجو ذخیره شد و پاسخ داد.', 'success');
+      toast(kind === 'apify' ? 'توکن اپافی ذخیره شد؛ جست‌وجوها از همین Actor انجام می‌شود.' : 'سرویس جست‌وجو ذخیره شد و پاسخ داد.', 'success');
     } catch (err: any) {
       setError({ message: err?.message || 'ذخیره نشد.', field: err?.field });
       toast(err?.message || 'ذخیره نشد.', 'error');
@@ -73,7 +83,12 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
     try {
       const { result, connections } = await adminApi.testSourcingConnection();
       setData(connections);
-      toast(result.ok ? `سرویس پاسخ داد (${result.count ?? 0} نتیجه در آزمایش).` : result.error || 'آزمایش ناموفق بود.', result.ok ? 'success' : 'error');
+      toast(
+        result.ok
+          ? result.detail || `سرویس پاسخ داد (${result.count ?? 0} نتیجه در آزمایش).`
+          : result.error || 'آزمایش ناموفق بود.',
+        result.ok ? 'success' : 'error'
+      );
     } catch (err: any) {
       toast(err?.message || 'آزمایش انجام نشد.', 'error');
     } finally {
@@ -96,18 +111,42 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
       <CardHeader
         icon={Users}
         title="جست‌وجوی متخصص در LinkedIn"
-        subtitle="آدرس و توکن سرویس دارای مجوز (Talent Solutions یا سرویس دادهٔ همکار). یک‌بار برای کل سامانه ثبت می‌شود."
+        subtitle="یک‌بار برای کل سامانه: سرویس دارای مجوز (Talent Solutions یا سرویس دادهٔ همکار) یا یک Actor آمادهٔ Apify."
         action={<StateChip ok={c.configured} label={c.configured ? (c.fromEnv ? 'از متغیرهای محیطی' : 'فعال') : 'تنظیم نشده'} />}
       />
 
       <div className="space-y-4">
-        <Callout tone="info" icon={ShieldCheck}>
-          هویدا خودش داده‌ای از لینکدین نمی‌خواند. این آدرس باید سرویسی باشد که مجوز جست‌وجوی افراد و وضعیت
-          «آمادهٔ همکاری» را به سازمان شما داده است. راهنمای قرارداد داده و نمونهٔ سرویس ساختگی:{' '}
-          <span dir="ltr" className="font-mono text-[12px]">
-            {data.docs.sourcing}
-          </span>
-        </Callout>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="نوع سرویس جست‌وجو">
+          {(
+            [
+              { id: 'contract', label: 'سرویس دارای مجوز / درگاه خودمان' },
+              { id: 'apify', label: 'Apify (HarvestAPI)' },
+            ] as const
+          ).map((k) => (
+            <Button key={k.id} size="sm" variant={kind === k.id ? 'primary' : 'secondary'} onClick={() => setKind(k.id)} aria-pressed={kind === k.id}>
+              {k.label}
+            </Button>
+          ))}
+        </div>
+
+        {kind === 'contract' ? (
+          <Callout tone="info" icon={ShieldCheck}>
+            هویدا خودش داده‌ای از لینکدین نمی‌خواند. این آدرس باید سرویسی باشد که مجوز جست‌وجوی افراد و وضعیت
+            «آمادهٔ همکاری» را به سازمان شما داده است. راهنمای قرارداد داده و نمونهٔ سرویس ساختگی:{' '}
+            <span dir="ltr" className="font-mono text-[12px]">
+              {data.docs.sourcing}
+            </span>
+          </Callout>
+        ) : (
+          <Callout tone="warning" icon={AlertTriangle} title="دربارهٔ Actor آمادهٔ Apify">
+            این مسیر از یک Actor آمادهٔ شخص ثالث (مثلاً <span dir="ltr" className="font-mono text-[12px]">harvestapi/linkedin-profile-search</span>)
+            استفاده می‌کند که داده را از صفحات عمومی لینکدین جمع می‌کند؛ هزینه‌اش با حساب Apify شماست و مسئولیت
+            حقوقی/انطباق (از جمله GDPR برای کارجویان اروپا) با سازمان شماست. فیلتر «آمادهٔ همکاری» در ورودی این
+            Actor وجود ندارد؛ هویدا پروفایل‌های کامل را می‌گیرد و فقط کسانی را نگه می‌دارد که خود سرویس
+            <span className="font-semibold"> openToWork = true </span>
+            گزارش کرده باشد.
+          </Callout>
+        )}
 
         {c.source === 'env' && (
           <Callout tone="warning" icon={AlertTriangle}>
@@ -116,25 +155,41 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
           </Callout>
         )}
 
+        {kind === 'contract' ? (
+          <TextInput
+            label="آدرس سرویس (POST)"
+            dir="ltr"
+            placeholder="https://api.provider.example/v1/people/search"
+            value={endpointUrl}
+            onChange={(e) => setEndpointUrl(e.target.value)}
+            error={error?.field === 'endpointUrl' ? error.message : undefined}
+            hint="همان آدرسی که درخواست جست‌وجو به آن فرستاده می‌شود. با http:// یا https:// شروع شود."
+          />
+        ) : (
+          <TextInput
+            label="شناسهٔ Actor"
+            dir="ltr"
+            placeholder="harvestapi/linkedin-profile-search"
+            value={actorId}
+            onChange={(e) => setActorId(e.target.value)}
+            error={error?.field === 'actorId' ? error.message : undefined}
+            hint="به شکل user/actor یا user~actor. پیش‌فرض همین Actor جست‌وجوی پروفایل HarvestAPI است."
+          />
+        )}
         <TextInput
-          label="آدرس سرویس (POST)"
-          dir="ltr"
-          placeholder="https://api.provider.example/v1/people/search"
-          value={endpointUrl}
-          onChange={(e) => setEndpointUrl(e.target.value)}
-          error={error?.field === 'endpointUrl' ? error.message : undefined}
-          hint="همان آدرسی که درخواست جست‌وجو به آن فرستاده می‌شود. با http:// یا https:// شروع شود."
-        />
-        <TextInput
-          label="توکن دسترسی (Bearer)"
+          label={kind === 'apify' ? 'توکن Apify' : 'توکن دسترسی (Bearer)'}
           dir="ltr"
           type="password"
           autoComplete="off"
-          placeholder={c.tokenHint ? `ذخیره‌شده: ${c.tokenHint} — برای تغییر، مقدار تازه بگذارید` : 'توکن سرویس'}
+          placeholder={c.tokenHint ? `ذخیره‌شده: ${c.tokenHint} — برای تغییر، مقدار تازه بگذارید` : kind === 'apify' ? 'apify_api_…' : 'توکن سرویس'}
           value={token}
           onChange={(e) => setToken(e.target.value)}
           error={error?.field === 'token' ? error.message : undefined}
-          hint="رمزنگاری‌شده ذخیره می‌شود و دیگر نمایش داده نمی‌شود؛ برای تعویض، توکن جدید را وارد کنید."
+          hint={
+            kind === 'apify'
+              ? 'از Apify Console › Settings › API & Integrations. ذخیره‌شده رمزنگاری می‌شود و دوباره نمایش داده نمی‌شود. آزمایش، فقط توکن را می‌سنجد و هزینه‌ای ندارد.'
+              : 'رمزنگاری‌شده ذخیره می‌شود و دیگر نمایش داده نمی‌شود؛ برای تعویض، توکن جدید را وارد کنید.'
+          }
         />
         <TextInput
           label="نام نمایشی سرویس (اختیاری)"
@@ -152,7 +207,12 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
         )}
 
         <div className="flex flex-wrap items-center gap-2 pt-1">
-          <Button onClick={save} loading={saving} disabled={!endpointUrl.trim() || (!token.trim() && !c.configured)} icon={Save}>
+          <Button
+            onClick={save}
+            loading={saving}
+            disabled={(kind === 'contract' && !endpointUrl.trim()) || (!token.trim() && !(c.configured && c.kind === kind))}
+            icon={Save}
+          >
             آزمایش و ذخیره
           </Button>
           <Button variant="secondary" onClick={test} loading={testing} disabled={!c.configured} icon={PlugZap}>

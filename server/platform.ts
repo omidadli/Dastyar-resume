@@ -59,7 +59,10 @@ interface AiSettingsStored {
 
 /** The LinkedIn-compatible sourcing provider (one per deployment, not per org). */
 interface StoredSourcingConnection {
+  kind: 'contract' | 'apify';
   endpointUrl: string;
+  /** Apify actor id, only for kind = 'apify'. */
+  actorId: string;
   tokenEnc: string;
   tokenHint: string;
   providerLabel: string;
@@ -166,12 +169,18 @@ function normalizeKey(k: any): StoredKey | null {
   };
 }
 
+const APIFY_DEFAULT_BASE = 'https://api.apify.com/v2';
+const APIFY_DEFAULT_ACTOR = 'harvestapi/linkedin-profile-search';
+
 function normalizeSourcingConn(raw: any): StoredSourcingConnection | null {
   if (!raw || typeof raw !== 'object') return null;
-  const endpointUrl = text(raw.endpointUrl, 500).trim();
+  const kind = raw.kind === 'apify' ? 'apify' : 'contract';
+  const endpointUrl = text(raw.endpointUrl, 500).trim() || (kind === 'apify' ? APIFY_DEFAULT_BASE : '');
   const tokenEnc = text(raw.tokenEnc, 1000);
   if (!endpointUrl || !tokenEnc) return null;
   return {
+    kind,
+    actorId: kind === 'apify' ? text(raw.actorId, 200).trim() || APIFY_DEFAULT_ACTOR : '',
     endpointUrl,
     tokenEnc,
     tokenHint: text(raw.tokenHint, 40),
@@ -541,7 +550,9 @@ export function reorderKeys(ids: string[]) {
  */
 
 export interface SourcingConnection {
+  kind: 'contract' | 'apify';
   endpointUrl: string;
+  actorId: string;
   token: string;
   providerLabel: string;
   source: 'admin' | 'env';
@@ -562,8 +573,11 @@ function envSourcing(): SourcingConnection | null {
   const endpointUrl = (process.env.LINKEDIN_API_URL || '').trim();
   const token = (process.env.LINKEDIN_API_TOKEN || process.env.LINKEDIN_ACCESS_TOKEN || '').trim();
   if (!endpointUrl || !token) return null;
+  const kind = /apify\.com/i.test(endpointUrl) ? 'apify' : 'contract';
   return {
+    kind,
     endpointUrl,
+    actorId: kind === 'apify' ? (process.env.LINKEDIN_ACTOR_ID || '').trim() || APIFY_DEFAULT_ACTOR : '',
     token,
     providerLabel: (process.env.LINKEDIN_PROVIDER_LABEL || 'LinkedIn Talent API').trim() || 'LinkedIn Talent API',
     source: 'env',
@@ -588,7 +602,16 @@ export function sourcingConnection(): SourcingConnection | null {
   const stored = state().connections.sourcing;
   if (stored) {
     const token = decryptSecret(stored.tokenEnc);
-    if (token) return { endpointUrl: stored.endpointUrl, token, providerLabel: stored.providerLabel, source: 'admin' };
+    if (token) {
+      return {
+        kind: stored.kind,
+        endpointUrl: stored.endpointUrl,
+        actorId: stored.actorId,
+        token,
+        providerLabel: stored.providerLabel,
+        source: 'admin',
+      };
+    }
     // An unreadable token (another APP_SECRET) must not silently look configured.
     return null;
   }
@@ -640,6 +663,9 @@ export function connectionsPublic(origin: string): ConnectionsPayload {
     sourcing: {
       configured: Boolean(src),
       source: src?.source ?? null,
+      kind: src?.kind ?? 'contract',
+      actorId: src?.actorId ?? '',
+      async: src?.kind === 'apify',
       endpointHost: src ? hostOfUrl(src.endpointUrl) : null,
       endpointUrl: src?.source === 'admin' ? src.endpointUrl : '',
       providerLabel: src?.providerLabel || 'LinkedIn',
@@ -691,9 +717,20 @@ function cleanSecret(v: unknown, max = 2000): string {
 
 export function saveSourcingConnection(input: SourcingConnectionInput, actor: string): void {
   const st = state();
-  const endpointUrl = typeof input.endpointUrl === 'string' ? input.endpointUrl.trim() : st.connections.sourcing?.endpointUrl || '';
+  const previous = st.connections.sourcing;
+  const kind: 'contract' | 'apify' = input.kind === 'apify' ? 'apify' : input.kind === 'contract' ? 'contract' : previous?.kind || 'contract';
+  const fallbackUrl = kind === 'apify' ? APIFY_DEFAULT_BASE : '';
+  const endpointUrl = (typeof input.endpointUrl === 'string' ? input.endpointUrl.trim() : '') || previous?.endpointUrl || fallbackUrl;
   if (!endpointUrl) throw new PlatformInputError('آدرس سرویس جست‌وجو را وارد کنید.', 'endpointUrl');
   if (!validEndpoint(endpointUrl)) throw new PlatformInputError('آدرس باید با http:// یا https:// شروع شود.', 'endpointUrl');
+  let actorId = '';
+  if (kind === 'apify') {
+    const raw = (typeof input.actorId === 'string' ? input.actorId.trim() : '') || previous?.actorId || APIFY_DEFAULT_ACTOR;
+    actorId = raw.replace(/\//g, '~');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{1,80}~[A-Za-z0-9][A-Za-z0-9_.-]{1,120}$/.test(actorId)) {
+      throw new PlatformInputError('شناسهٔ Actor آپافی به شکل user~actor یا user/actor است.', 'actorId');
+    }
+  }
   const token = cleanSecret(input.token) || (st.connections.sourcing ? decryptSecret(st.connections.sourcing.tokenEnc) || '' : '');
   if (!token) throw new PlatformInputError('توکن دسترسی سرویس را وارد کنید.', 'token');
   if (token.length < 4 || /\s/.test(token)) throw new PlatformInputError('توکن معتبر به نظر نمی‌رسد (دست‌کم ۴ نویسه، بدون فاصله).', 'token');
@@ -701,12 +738,16 @@ export function saveSourcingConnection(input: SourcingConnectionInput, actor: st
     throw new PlatformInputError('نام سرویس خیلی طولانی است.', 'providerLabel');
   }
   const now = new Date().toISOString();
-  const previous = st.connections.sourcing;
   const next: StoredSourcingConnection = {
+    kind,
     endpointUrl,
+    actorId,
     tokenEnc: cleanSecret(input.token) ? encryptSecret(token) : previous!.tokenEnc,
     tokenHint: hintOf(token),
-    providerLabel: (input.providerLabel || '').trim() || previous?.providerLabel || 'LinkedIn Talent API',
+    providerLabel:
+      (input.providerLabel || '').trim() ||
+      previous?.providerLabel ||
+      (kind === 'apify' ? 'Apify · HarvestAPI' : 'LinkedIn Talent API'),
     updatedAtISO: now,
     updatedBy: actor,
     lastTestAtISO: previous?.lastTestAtISO ?? null,

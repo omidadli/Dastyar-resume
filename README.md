@@ -67,7 +67,7 @@ NODE_ENV=production npm start
 | اتصال | کجا وارد می‌شود | سطح |
 | --- | --- | --- |
 | کلید هوش مصنوعی | `/admin` › **کلیدهای هوش مصنوعی** | یک‌بار برای کل نصب |
-| سرویس جست‌وجوی LinkedIn (آدرس + توکن) | `/admin` › **اتصال‌ها** | یک‌بار برای کل نصب |
+| سرویس جست‌وجوی LinkedIn (آدرس + توکن، یا Actor آمادهٔ Apify) | `/admin` › **اتصال‌ها** | یک‌بار برای کل نصب |
 | Google OAuth Client (Client ID/Secret) | `/admin` › **اتصال‌ها** | یک‌بار برای کل نصب |
 | صندوق ایمیل سازمان (SMTP) | تنظیمات › **اتصال‌ها** › ایمیل سازمان | برای هر فضای کاری |
 | اتصال حساب گوگل | تنظیمات › **اتصال‌ها** | برای هر فضای کاری |
@@ -158,6 +158,7 @@ BASE=http://127.0.0.1:3111 npm run test:mount   # اجرای واقعی اپ د�
 
 ```bash
 node scripts/mock-linkedin.mjs --port 9911 &   # سرویس جست‌وجوی ساختگی (افراد داستانی)
+node scripts/mock-apify.mjs --port 9922 &     # پلتفرم Apify ساختگی (Actor جست‌وجوی پروفایل)
 node scripts/mock-smtp.mjs --port 2525 &       # صندوق SMTP آزمایشی: پیام‌ها فقط چاپ می‌شوند
 LINKEDIN_API_URL=http://127.0.0.1:9911/search LINKEDIN_ACCESS_TOKEN=demo npm run dev
 ```

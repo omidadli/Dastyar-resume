@@ -36,6 +36,18 @@ LINKEDIN_ACCESS_TOKEN=...          # LINKEDIN_API_TOKEN هم پذیرفته می
 # LINKEDIN_PROVIDER_LABEL=LinkedIn Talent API     # optional label shown in the UI
 ```
 
+## دو نوع سرویس (از `/admin` › «اتصال‌ها»)
+
+| نوع | چه چیزی وصل می‌شود | هم‌گام؟ |
+| --- | --- | --- |
+| **سرویس دارای مجوز / درگاه خودتان** | آدرس POST + توکن Bearer با قرارداد همین صفحه | یک درخواست، پاسخ فوری |
+| **Apify (HarvestAPI)** | توکن Apify + شناسهٔ Actor، مثلاً `harvestapi/linkedin-profile-search` | ناهمگام: اجرا شروع می‌شود، صفحه وضعیت را می‌پرسد |
+
+در حالت Apify، ورودی جست‌وجو از بریف ساخته می‌شود (`currentJobTitles` از عنوان نقش، `searchQuery` از مهارت‌ها،
+`locations` با نام لاتین شهرها، `maxItems` چهار برابر تعداد درخواستی) و چون Actor فیلتر «آمادهٔ همکاری» ندارد،
+فقط پروفایل‌هایی نگه داشته می‌شوند که خودش `openToWork: true` گزارش کرده است. شمار «بررسی‌شده / واجد شرایط»
+در پیام همان جست‌وجو می‌آید. جزئیات: [`LINKEDIN-ACCESS-OPTIONS.md`](LINKEDIN-ACCESS-OPTIONS.md).
+
 ## قرارداد درخواست
 
 HOVIDA یک `POST` به `LINKEDIN_API_URL` می‌فرستد:

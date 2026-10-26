@@ -651,20 +651,27 @@ export function adminRoutes(): express.Router {
   r.get('/connections', (req, res) => res.json(connectionsPublic(requestOrigin(req))));
 
   r.put('/connections/sourcing', async (req, res) => {
-    const body = (req.body || {}) as { endpointUrl?: string; token?: string; providerLabel?: string };
+    const body = (req.body || {}) as { kind?: 'contract' | 'apify'; endpointUrl?: string; token?: string; providerLabel?: string; actorId?: string };
     const current = sourcingConnection();
+    const kind: 'contract' | 'apify' = body.kind === 'apify' ? 'apify' : body.kind === 'contract' ? 'contract' : current?.kind || 'contract';
     // Verify the endpoint the way it will be used before committing it: a saved
     // provider that does not answer would only surface later as a failed search.
+    // For Apify only the token is checked — no paid actor run is started.
     const candidate = {
-      endpoint: (body.endpointUrl || '').trim() || (current?.source === 'admin' ? current.endpointUrl : ''),
-      token: (body.token || '').trim() || (current?.source === 'admin' ? current.token : ''),
+      kind,
+      endpoint:
+        (body.endpointUrl || '').trim() ||
+        (current && current.kind === kind ? current.endpointUrl : '') ||
+        (kind === 'apify' ? 'https://api.apify.com/v2' : ''),
+      token: (body.token || '').trim() || (current?.kind === kind ? current.token : ''),
+      actorId: (body.actorId || '').trim() || (current?.kind === kind ? current.actorId : ''),
     };
     if (candidate.endpoint && candidate.token) {
       const probe = await probeProvider(candidate);
       if (!probe.ok) {
         return res.status(400).json({
           error: `اتصال آزمایش نشد و ذخیره نشد: ${probe.error}`,
-          field: 'endpointUrl',
+          field: kind === 'apify' ? 'token' : 'endpointUrl',
           code: 'SOURCING_PROBE_FAILED',
         });
       }
@@ -684,7 +691,7 @@ export function adminRoutes(): express.Router {
     h(async (req, res) => {
       const conn = sourcingConnection();
       if (!conn) return res.status(409).json({ error: 'هنوز سرویس جست‌وجویی ثبت نشده است.', code: 'SOURCING_NOT_CONFIGURED' });
-      const probe = await probeProvider({ endpoint: conn.endpointUrl, token: conn.token });
+      const probe = await probeProvider({ kind: conn.kind, endpoint: conn.endpointUrl, token: conn.token, actorId: conn.actorId });
       markSourcingProbe(probe.ok, probe.error); // no-op when the value comes from the environment
       log(req, 'connections.sourcing.test', conn.endpointUrl, probe.ok ? 'موفق' : String(probe.error));
       res.json({ result: probe, connections: connectionsPublic(requestOrigin(req)) });

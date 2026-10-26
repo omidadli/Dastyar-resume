@@ -109,10 +109,25 @@ export type AiPurpose = 'evaluate' | 'deep' | 'understand' | 'calibrate' | 'mess
 
 export type ConnectionSource = 'admin' | 'env';
 
+/**
+ * How the sourcing provider is spoken to:
+ *  - contract: the small JSON contract documented in docs/CONNECT-LINKEDIN.md
+ *    (any licensed provider or your own gateway).
+ *  - apify: an Apify actor (e.g. harvestapi/linkedin-profile-search) run through
+ *    the Apify API. Its search input cannot filter by «open to work», so full
+ *    profiles are fetched and only those reporting openToWork are kept.
+ */
+export type SourcingProviderKind = 'contract' | 'apify';
+
 export interface SourcingConnectionPublic {
   /** A provider endpoint + token are in effect (from /admin or the environment). */
   configured: boolean;
   source: ConnectionSource | null;
+  kind: SourcingProviderKind;
+  /** Apify actor id (only for kind = apify). */
+  actorId: string;
+  /** Apify: the run is asynchronous — a search may report «running» for a while. */
+  async: boolean;
   /** Host only — the endpoint path is not a secret, the token never leaves the server. */
   endpointHost: string | null;
   endpointUrl: string;
@@ -158,10 +173,13 @@ export interface ConnectionsPayload {
 }
 
 export interface SourcingConnectionInput {
+  kind?: SourcingProviderKind;
   endpointUrl?: string;
   /** Only sent to set/replace the token. */
   token?: string;
   providerLabel?: string;
+  /** Apify only, e.g. `harvestapi/linkedin-profile-search`. */
+  actorId?: string;
 }
 
 export interface GoogleConnectionInput {

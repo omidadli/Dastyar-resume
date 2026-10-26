@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Archive, Check, Copy, Mail, MessageCircle, MessageSquareText, Send, ThumbsDown } from 'lucide-react';
+import { Archive, Check, Copy, Mail, MailCheck, MessageCircle, MessageSquareText, Send, ThumbsDown } from 'lucide-react';
 import type { DraftMessage, MessageKind, ResumeListItem } from '../../types/screening';
 import { api } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
@@ -8,7 +8,8 @@ import { REJECT_REASONS } from '../../lib/match';
 import { candidateName } from '../../lib/format';
 import { emitChange } from '../../lib/events';
 import { copyText } from '../../lib/clipboard';
-import { Button, Callout, Chip, Modal, Segmented, Select, Skeleton, TextArea, TextInput, toast } from '../ui';
+import { Button, ButtonLink, Callout, Chip, Modal, Segmented, Select, Skeleton, TextArea, TextInput, toast } from '../ui';
+import type { EmailSettingsPublic } from '../../types/integrations';
 
 const KINDS: { id: MessageKind; label: string }[] = [
   { id: 'INTERVIEW_INVITE', label: 'دعوت به مصاحبه' },
@@ -42,6 +43,8 @@ export function MessageModal({
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [sendingMail, setSendingMail] = useState(false);
+  const [mailSettings, setMailSettings] = useState<EmailSettingsPublic | null>(null);
 
   useEffect(() => {
     if (!record) return;
@@ -67,6 +70,14 @@ export function MessageModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record?.id, kind]);
 
+  useEffect(() => {
+    if (!record) return;
+    api.integrations
+      .status()
+      .then((s) => setMailSettings(s.email))
+      .catch(() => setMailSettings(null));
+  }, [record?.id]);
+
   if (!record) return null;
   const phone = record.contact?.phone;
   const email = record.contact?.email;
@@ -82,6 +93,24 @@ export function MessageModal({
       setTimeout(() => setCopied(false), 1800);
     } else {
       toast('کپی خودکار ممکن نشد؛ متن را دستی انتخاب کنید.', 'error');
+    }
+  };
+
+  /** The real thing: send from the workspace's own mailbox. */
+  const sendFromOrg = async () => {
+    if (!email) return;
+    setSendingMail(true);
+    try {
+      const res = await api.integrations.sendEmail({ resumeId: record.id, to: email, subject, body });
+      if (res.record) onSent?.(res.record);
+      emitChange('activity');
+      emitChange('resumes', record.jobId);
+      toast(`ایمیل برای ${candidateName(record)} فرستاده شد.`);
+      onClose();
+    } catch (e: any) {
+      toast(e?.message || 'ارسال ایمیل ممکن نشد.', 'error');
+    } finally {
+      setSendingMail(false);
     }
   };
 
@@ -129,9 +158,15 @@ export function MessageModal({
           <Button variant="secondary" icon={copied ? Check : Copy} onClick={copy} disabled={loading}>
             کپی متن
           </Button>
-          <Button icon={Send} onClick={markSent} loading={saving} disabled={loading}>
-            ثبت به‌عنوان ارسال‌شده
-          </Button>
+          {mailSettings?.configured && email ? (
+            <Button icon={MailCheck} onClick={sendFromOrg} loading={sendingMail} disabled={loading}>
+              ارسال با ایمیل سازمان
+            </Button>
+          ) : (
+            <Button icon={Send} onClick={markSent} loading={saving} disabled={loading}>
+              ثبت به‌عنوان ارسال‌شده
+            </Button>
+          )}
         </>
       }
     >
@@ -154,8 +189,27 @@ export function MessageModal({
         <div className="flex flex-wrap items-center gap-2">
           {channel(wa, 'واتساپ', MessageCircle)}
           {channel(sms, 'پیامک', MessageSquareText)}
-          {channel(mail, 'ایمیل', Mail)}
+          {channel(mailLink(email, subject, body), 'ایمیل', Mail)}
         </div>
+
+        {mailSettings?.configured && email ? (
+          <Callout tone="brand" icon={MailCheck}>
+            این پیام با حساب «{mailSettings.fromAddress}» از همین صفحه برای {email} ارسال می‌شود؛ نسخهٔ ارسال‌شده در تاریخچهٔ کاندیدا می‌ماند.
+          </Callout>
+        ) : (
+          <Callout tone="info" icon={Mail}>
+            {!mailSettings?.configured
+              ? 'برای ارسال مستقیم از داخل هویدا، مدیر فضای کاری باید ایمیل سازمان را در «تنظیمات ← اتصال‌ها» وصل کند.'
+              : 'ایمیلی برای این کاندیدا ثبت نشده است؛ می‌توانید متن را کپی کنید یا از کانال دیگری بفرستید.'}
+            {!mailSettings?.configured && (
+              <span className="block mt-1.5">
+                <ButtonLink to="/app/settings/integrations" variant="secondary" size="sm">
+                  تنظیم ایمیل سازمان
+                </ButtonLink>
+              </span>
+            )}
+          </Callout>
+        )}
         {!phone && !email && (
           <Callout tone="warning">شماره تماس یا ایمیلی در رزومه پیدا نشد؛ می‌توانید متن را کپی کنید و از مسیر دیگری بفرستید.</Callout>
         )}

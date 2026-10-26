@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CalendarClock,
   CheckCircle2,
   Clock3,
   Columns3,
@@ -24,6 +25,7 @@ import {
 import { PageHeader } from '../components/layout/AppShell';
 import { CandidatePanel } from '../components/candidates/CandidatePanel';
 import { CandidateTable } from '../components/candidates/CandidateTable';
+import { InterviewList } from '../components/candidates/InterviewModal';
 import { AnalysisProgress } from '../components/jobs/AnalysisProgress';
 import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
@@ -67,7 +69,7 @@ import { useAsync, useDebounced, useMediaQuery } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { DecisionFilter, DecisionStatus, Job, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
-type JobTab = 'candidates' | 'criteria';
+type JobTab = 'candidates' | 'interviews' | 'criteria';
 
 function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean; onClose: () => void; onSaved: (j: Job) => void }) {
   const [roleTitle, setRoleTitle] = useState(job.roleTitle);
@@ -143,6 +145,21 @@ export default function JobDetail({ id }: { id: string }) {
   const [sort, setSort] = useState<ResumeSort>('match');
   // Duplicates are judged against this department's earlier screenings.
   const [novelty, setNovelty] = useState<NoveltyFilter>('all');
+  const [interviewVersion, setInterviewVersion] = useState(0);
+  const interviewsQ = useAsync(() => api.interviews.list({ jobId: id }), [id, interviewVersion]);
+  const interviews = useMemo(() => (interviewsQ.data?.items || []).filter((i) => i.status !== 'cancelled'), [interviewsQ.data]);
+  const cancelInterview = async (interviewId: string) => {
+    try {
+      const res = await api.interviews.cancel(interviewId);
+      if (res.calendarError) toast(res.calendarError, 'error');
+      else toast('جلسه لغو شد.');
+      setInterviewVersion((v) => v + 1);
+      emitChange('activity');
+    } catch (e: any) {
+      toast(e?.message || 'لغو جلسه ممکن نشد.', 'error');
+    }
+  };
+
   const [qInput, setQInput] = useState('');
   const q = useDebounced(qInput, 250);
   const [page, setPage] = useState(1);
@@ -468,9 +485,36 @@ export default function JobDetail({ id }: { id: string }) {
         onChange={setTab}
         items={[
           { id: 'candidates', label: 'کاندیداها', count: s.total },
+          { id: 'interviews', label: 'جلسه‌های مصاحبه', icon: CalendarClock, count: interviews.length || undefined },
           { id: 'criteria', label: 'معیارها و پرسش‌نامه', icon: ListChecks },
         ]}
       />
+
+      {tab === 'interviews' && (
+        <Card>
+          <CardHeader
+            icon={CalendarClock}
+            title="جلسه‌های مصاحبه"
+            subtitle="جلسه‌هایی که از داخل هویدا برای کاندیداهای این فرصت شغلی تعیین شده‌اند."
+            action={
+              <ButtonLink to={`/app/candidates?job=${id}`} variant="secondary" size="sm" icon={Users}>
+                انتخاب کاندیدا
+              </ButtonLink>
+            }
+          />
+          {interviewsQ.loading ? (
+            <Skeleton className="h-20" />
+          ) : interviews.length === 0 ? (
+            <EmptyState
+              icon={CalendarClock}
+              title="هنوز جلسه‌ای تعیین نشده است"
+              description="از پنل هر کاندیدا دکمهٔ «تعیین جلسهٔ مصاحبه» را بزنید؛ تاریخ، ساعت، مصاحبه‌گر و لینک جلسه در یک فرم ثبت می‌شود."
+            />
+          ) : (
+            <InterviewList items={interviews} onCancel={(iid) => void cancelInterview(iid)} />
+          )}
+        </Card>
+      )}
 
       {tab === 'criteria' && (
         <div className="grid lg:grid-cols-2 gap-5">

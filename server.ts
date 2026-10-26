@@ -17,6 +17,7 @@ import { orgRoutes } from './server/routes/org';
 import { jobRoutes } from './server/routes/jobs';
 import { fileRoutes, resumeRoutes } from './server/routes/resumes';
 import { insightRoutes } from './server/routes/insights';
+import { integrationPublicRoutes, integrationRoutes } from './server/routes/integrations';
 import { backupPublicRoutes } from './server/routes/backup';
 
 dotenv.config({ override: true });
@@ -77,6 +78,7 @@ async function startServer() {
   app.use('/api/auth', authRoutes());
   app.use('/api', fileRoutes()); // HMAC-signed, no bearer token needed
   app.use('/api', backupPublicRoutes()); // signed backup download + restore progress
+  app.use('/api', integrationPublicRoutes()); // Google Calendar OAuth callback
 
   // ---------------- Authenticated API ----------------
   app.use('/api', requireAuth);
@@ -86,6 +88,7 @@ async function startServer() {
   app.use('/api', jobRoutes());
   app.use('/api', resumeRoutes());
   app.use('/api', insightRoutes());
+  app.use('/api', integrationRoutes());
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------

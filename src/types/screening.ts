@@ -229,6 +229,18 @@ export interface AnalysisHistoryEntry {
   mode?: AnalysisMode;
 }
 
+/** Where a candidate came from — set for sourced profiles, null for uploads. */
+export interface ResumeSource {
+  kind: 'linkedin';
+  profileUrl: string;
+  headline: string;
+  company: string | null;
+  location: string;
+  openToWork: boolean;
+  /** The sourcing search that found this profile. */
+  searchId: string | null;
+}
+
 export interface ResumeRecord {
   id: string;
   jobId: string;
@@ -243,6 +255,8 @@ export interface ResumeRecord {
   filePath: string | null;
   fileSize: number | null;
   extractedText: string;
+  /** Present when the candidate was added from a sourcing search. */
+  source?: ResumeSource | null;
   unjudgeableReason: string | null;
   errorMessage: string | null;
 

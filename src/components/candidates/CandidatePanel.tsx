@@ -5,6 +5,7 @@ import {
   ArchiveX,
   BadgeCheck,
   Briefcase,
+  CalendarClock,
   CheckCircle2,
   Clock3,
   Columns3,
@@ -16,6 +17,7 @@ import {
   History,
   Info,
   Lightbulb,
+  Link2,
   Mail,
   MapPin,
   MessageSquareText,
@@ -57,6 +59,7 @@ import {
   toast,
 } from '../ui';
 import { MessageModal, RejectModal, TalentModal } from './CandidateModals';
+import { InterviewModal } from './InterviewModal';
 
 type PanelTab = 'summary' | 'skills' | 'experience' | 'more';
 
@@ -263,6 +266,8 @@ export function DecisionBar({ record, onChange, compact, short }: { record: Resu
 export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted, onClose, variant = 'panel' }: CandidatePanelProps) {
   const [tab, setTab] = useState<PanelTab>('summary');
   const [messageOpen, setMessageOpen] = useState(false);
+  const [interviewOpen, setInterviewOpen] = useState(false);
+  const [interviews, setInterviews] = useState<Array<{ id: string; startsAtISO: string; status: string; meetLink: string | null }>>([]);
   const [talentOpen, setTalentOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [rerunning, setRerunning] = useState<'standard' | 'deep' | null>(null);
@@ -277,6 +282,15 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
   // Opened outside its job page (رزومه‌ها، بانک استعداد): fetch the opening's
   // criteria so weights and «الزامی» marks still show.
   const [fetchedCriteria, setFetchedCriteria] = useState<Criterion[] | undefined>(undefined);
+  const loadInterviews = () =>
+    api.interviews
+      .list({ resumeId: record.id })
+      .then((r) => setInterviews(r.items.filter((i) => i.status !== 'cancelled')))
+      .catch(() => setInterviews([]));
+  useEffect(() => {
+    void loadInterviews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record.id]);
   useEffect(() => {
     if (criteria) return;
     let alive = true;
@@ -419,7 +433,50 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
             از این رزومه فایل، متن یا راه ارتباطی معتبری استخراج نشد؛ بنابراین نه «جدید» و نه «تکراری» برچسب خورده است.
           </Callout>
         )}
+        {record.source?.kind === 'linkedin' && (
+          <div className="mt-3 rounded-[10px] border border-line-2 bg-canvas px-3 py-2">
+            <p className="text-[12px] font-semibold text-ink-2 flex flex-wrap items-center gap-1.5">
+              <Link2 className="w-3.5 h-3.5" />
+              افزوده‌شده از جست‌وجوی LinkedIn
+              {record.source.openToWork && <Chip tone="brand">Open to work</Chip>}
+            </p>
+            <p className="text-[11.5px] text-ink-3 mt-0.5 leading-relaxed" dir="auto">
+              {[record.source.headline, record.source.company, record.source.location].filter(Boolean).join(' · ') || '—'}
+            </p>
+            {record.source.profileUrl && (
+              <a
+                href={record.source.profileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-brand-ink mt-1 hover:underline"
+              >
+                مشاهدهٔ پروفایل لینکدین <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-2 mt-4">
+          <Button size="sm" icon={CalendarClock} onClick={() => setInterviewOpen(true)} className="flex-1">
+            تعیین جلسهٔ مصاحبه
+          </Button>
+          <Button variant="secondary" size="sm" icon={MessageSquareText} onClick={() => setMessageOpen(true)}>
+            پیام
+          </Button>
+        </div>
+        {interviews.length > 0 && (
+          <div className="mt-3 rounded-[10px] border border-brand/20 bg-brand-tint px-3 py-2">
+            <p className="text-[12px] font-semibold text-brand-stronger flex items-center gap-1.5">
+              <CalendarClock className="w-3.5 h-3.5" /> جلسهٔ مصاحبه
+            </p>
+            {interviews.map((it) => (
+              <p key={it.id} className="text-[12px] text-brand-stronger mt-0.5">
+                {faDate(it.startsAtISO)}
+                {it.meetLink ? ' · آنلاین (Meet)' : ''}
+              </p>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2 mt-2">
           <Button variant={inCompare ? 'soft' : 'secondary'} size="sm" icon={Columns3} onClick={compareClick} className="flex-1">
             {inCompare ? 'در فهرست مقایسه' : 'افزودن به مقایسه'}
           </Button>
@@ -752,6 +809,18 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
       </div>
 
       {messageOpen && <MessageModal record={record} onClose={() => setMessageOpen(false)} onSent={onChange} />}
+      {interviewOpen && (
+        <InterviewModal
+          record={record}
+          jobId={record.jobId}
+          jobTitle={jobTitle || record.roleTitle || record.departmentName}
+          onClose={() => setInterviewOpen(false)}
+          onScheduled={(_it, updated) => {
+            if (updated) onChange?.(updated);
+            void loadInterviews();
+          }}
+        />
+      )}
       {talentOpen && <TalentModal record={record} onClose={() => setTalentOpen(false)} onSaved={onChange} />}
       <ConfirmDialog
         open={confirmDelete}

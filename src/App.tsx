@@ -56,6 +56,7 @@ const CandidatePage = lazyPage(() => import('./pages/CandidatePage'));
 const Compare = lazyPage(() => import('./pages/Compare'));
 const Talent = lazyPage(() => import('./pages/Talent'));
 const Reports = lazyPage(() => import('./pages/Reports'));
+const Sourcing = lazyPage(() => import('./pages/Sourcing'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
@@ -112,6 +113,7 @@ function appPage(pathname: string): React.ReactNode {
   if (m) return RECORD_ID.test(m.id) ? <CandidatePage key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/compare') return <Compare />;
   if (pathname === '/app/talent') return <Talent />;
+  if (pathname === '/app/sourcing') return <Sourcing />;
   m = matchPath('/app/talent/:dept', pathname);
   if (m) return <Talent dept={m.dept} />;
   if (pathname === '/app/reports') return <Reports />;

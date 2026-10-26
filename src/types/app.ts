@@ -81,8 +81,14 @@ export type ActivityType =
   | 'decision'
   | 'talent.added'
   | 'message.sent'
+  | 'message.failed'
   | 'deep.review'
-  | 'resume.deleted';
+  | 'resume.deleted'
+  | 'sourcing.search'
+  | 'sourcing.imported'
+  | 'interview.scheduled'
+  | 'interview.cancelled'
+  | 'settings.changed';
 
 export interface ActivityItem {
   id: string;

@@ -52,6 +52,7 @@ import type {
 } from '../src/types/app';
 import { cloneDefaultDepartments } from '../src/shared/departments';
 import { tehranJalaliOf, tehranNow, tehranWallDate } from './tehran-time';
+import type { InterviewRecord, SentEmail, SourcingSearch } from '../src/types/integrations';
 import {
   JALALI_MONTH_NAMES,
   compareJalali,
@@ -104,6 +105,44 @@ export interface StoreSnapshot {
   platform?: unknown;
   audit?: AuditItem[];
   aiStats?: unknown;
+  /** Talent sourcing searches + their results (LinkedIn-compatible provider). */
+  sourcing?: SourcingSearchRecord[];
+  /** Scheduled interviews, with their Google Calendar event when one was created. */
+  interviews?: InterviewRecordRow[];
+  /** What the workspace sent from its own mailbox. */
+  emails?: SentEmailRow[];
+  /**
+   * Per-workspace connection secrets (SMTP password, Google refresh token —
+   * always encrypted). Never part of the org object, so it can never be
+   * serialised to a client by accident.
+   */
+  orgSecrets?: Record<string, OrgSecrets>;
+}
+
+/** Encrypted connection material for one workspace. */
+export interface OrgSecrets {
+  email?: {
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    passwordEnc: string;
+    fromName: string;
+    fromAddress: string;
+    replyTo: string | null;
+    lastTestAtISO: string | null;
+    lastTestOk: boolean | null;
+    lastError: string | null;
+  };
+  calendar?: {
+    accountEmail: string;
+    refreshTokenEnc: string;
+    accessTokenEnc: string | null;
+    expiresAt: number;
+    calendarId: string;
+    connectedAtISO: string;
+    connectedByName: string | null;
+  };
 }
 
 const orgs = new Map<string, OrgRecord>();
@@ -111,6 +150,15 @@ const users = new Map<string, UserRecord>();
 const sessions = new Map<string, SessionRecord>();
 const jobs = new Map<string, Job>();
 const resumes = new Map<string, ResumeRecord>();
+/** Stored shapes add the owning workspace; API responses drop it again. */
+export type SourcingSearchRecord = SourcingSearch & { orgId: string };
+export type InterviewRecordRow = InterviewRecord & { orgId: string };
+export type SentEmailRow = SentEmail & { orgId: string };
+
+const sourcingSearches = new Map<string, SourcingSearchRecord>();
+const interviews = new Map<string, InterviewRecordRow>();
+const sentEmails = new Map<string, SentEmailRow>();
+const orgSecrets = new Map<string, OrgSecrets>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -145,6 +193,10 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   // Duplicate flags are derived, not owned by the client: rebuild them from the
   // stored history once per start so older snapshots get labelled too.
   refreshDuplicates(resumes.values());
+  snap.sourcing?.forEach((x) => sourcingSearches.set(x.id, x));
+  snap.interviews?.forEach((x) => interviews.set(x.id, x));
+  snap.emails?.forEach((x) => sentEmails.set(x.id, x));
+  for (const [k, v] of Object.entries(snap.orgSecrets || {})) orgSecrets.set(k, v);
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -162,6 +214,10 @@ function clearMemory() {
   sessions.clear();
   jobs.clear();
   resumes.clear();
+  sourcingSearches.clear();
+  interviews.clear();
+  sentEmails.clear();
+  orgSecrets.clear();
   activity = [];
   platformBlob = null;
   auditLog = [];
@@ -267,6 +323,10 @@ function snapshot(): StoreSnapshot {
     platform: platformBlob ?? undefined,
     audit: auditLog,
     aiStats: aiStatsBlob ?? undefined,
+    sourcing: Array.from(sourcingSearches.values()),
+    interviews: Array.from(interviews.values()),
+    emails: Array.from(sentEmails.values()),
+    orgSecrets: Object.fromEntries(orgSecrets),
   };
 }
 
@@ -469,6 +529,7 @@ function normalizeResume(r: ResumeRecord): ResumeRecord {
     bankTags: Array.isArray(r.bankTags) ? r.bankTags : [],
     deepFindings: r.deepFindings ?? null,
     fileHash: r.fileHash ?? null,
+    source: r.source ?? null,
     novelty: r.novelty === 'new' || r.novelty === 'duplicate' || r.novelty === 'unknown' ? r.novelty : 'unknown',
     duplicateOf: r.duplicateOf ?? null,
     analysisHistory: Array.isArray(r.analysisHistory) ? r.analysisHistory : [],
@@ -653,6 +714,10 @@ export function deleteOrg(id: string) {
   for (const j of Array.from(jobs.values())) if (j.orgId === id) deleteJobRecord(j.id);
   for (const u of Array.from(users.values())) if (u.orgId === id) deleteUserRecord(u.id);
   activity = activity.filter((a) => a.orgId !== id);
+  for (const [k, v] of sourcingSearches) if (v.orgId === id) sourcingSearches.delete(k);
+  for (const [k, v] of interviews) if (v.orgId === id) interviews.delete(k);
+  for (const [k, v] of sentEmails) if (v.orgId === id) sentEmails.delete(k);
+  orgSecrets.delete(id);
   orgs.delete(id);
   deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`);
   scheduleSave();
@@ -929,7 +994,10 @@ function deleteJobRecord(id: string) {
       resumes.delete(rid);
     }
   }
-  if (j) refreshDuplicateScope(j.orgId, j.departmentId);
+  if (j) {
+    refreshDuplicateScope(j.orgId, j.departmentId);
+    dropJobIntegrations(j);
+  }
   if (j?.orgId) deletePrefixQuietly(`${RESUMES_PREFIX}${j.orgId}/${id}/`);
   deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`); // legacy layout
   jobs.delete(id);
@@ -1044,6 +1112,8 @@ export async function saveEvaluation(input: {
   fileName: string;
   extractedText: string;
   unjudgeableReason: string | null;
+  /** Set when the candidate came from a sourcing search instead of an upload. */
+  source?: ResumeRecord['source'];
   fileBase64?: string;
   evaluation?: CandidateEvaluation;
   errorMessage?: string;
@@ -1082,6 +1152,7 @@ export async function saveEvaluation(input: {
     filePath: file?.relPath || null,
     fileSize: file?.size ?? null,
     extractedText: (input.extractedText || '').slice(0, 20000),
+    source: input.source ?? null,
     unjudgeableReason: input.unjudgeableReason,
     errorMessage: isError ? input.errorMessage || 'خطا در تحلیل' : null,
     candidateName: ev?.candidateName || null,
@@ -1293,6 +1364,95 @@ export function removeFromTalent(rec: ResumeRecord): ResumeRecord {
 }
 
 // ---------------------------------------------------------------- queries ----
+
+// ------------------------------------------------- external connections ----
+
+/** Drops the tenant id before a record is sent to a client. */
+export function withoutOrg<T extends { orgId: string }>(row: T): Omit<T, 'orgId'> {
+  const { orgId: _o, ...rest } = row;
+  return rest;
+}
+
+export function listSearches(orgId: string): SourcingSearchRecord[] {
+  return Array.from(sourcingSearches.values())
+    .filter((x) => x.orgId === orgId)
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getSearch(orgId: string, id: string): SourcingSearchRecord | null {
+  const x = sourcingSearches.get(id);
+  return x && x.orgId === orgId ? x : null;
+}
+
+export function saveSearch(record: SourcingSearchRecord): SourcingSearchRecord {
+  sourcingSearches.set(record.id, record);
+  scheduleSave();
+  return record;
+}
+
+export function deleteSearch(orgId: string, id: string): boolean {
+  const x = getSearch(orgId, id);
+  if (!x) return false;
+  sourcingSearches.delete(id);
+  scheduleSave();
+  return true;
+}
+
+/** Newest first; filtered by candidate/opening when asked. */
+export function listInterviews(orgId: string, filter: { jobId?: string; resumeId?: string } = {}): InterviewRecordRow[] {
+  return Array.from(interviews.values())
+    .filter((x) => x.orgId === orgId)
+    .filter((x) => (!filter.jobId || x.jobId === filter.jobId) && (!filter.resumeId || x.resumeId === filter.resumeId))
+    .sort((a, b) => a.startsAtISO.localeCompare(b.startsAtISO));
+}
+
+export function getInterview(orgId: string, id: string): InterviewRecordRow | null {
+  const x = interviews.get(id);
+  return x && x.orgId === orgId ? x : null;
+}
+
+export function saveInterview(record: InterviewRecordRow): InterviewRecordRow {
+  interviews.set(record.id, record);
+  scheduleSave();
+  return record;
+}
+
+export function deleteInterview(orgId: string, id: string): boolean {
+  if (!getInterview(orgId, id)) return false;
+  interviews.delete(id);
+  scheduleSave();
+  return true;
+}
+
+export function listEmails(orgId: string, resumeId?: string): SentEmailRow[] {
+  return Array.from(sentEmails.values())
+    .filter((x) => x.orgId === orgId && (!resumeId || x.resumeId === resumeId))
+    .sort((a, b) => b.sentAtISO.localeCompare(a.sentAtISO));
+}
+
+export function saveEmail(record: SentEmailRow): SentEmailRow {
+  sentEmails.set(record.id, record);
+  scheduleSave();
+  return record;
+}
+
+export function getOrgSecrets(orgId: string): OrgSecrets {
+  return orgSecrets.get(orgId) || {};
+}
+
+export function patchOrgSecrets(orgId: string, patch: Partial<OrgSecrets>): OrgSecrets {
+  const next: OrgSecrets = { ...getOrgSecrets(orgId), ...patch };
+  orgSecrets.set(orgId, next);
+  scheduleSave();
+  return next;
+}
+
+/** Interviews and sourcing history of a deleted opening go with it. */
+function dropJobIntegrations(job: { id: string; orgId: string | null }) {
+  if (!job.orgId) return;
+  for (const [k, v] of interviews) if (v.orgId === job.orgId && v.jobId === job.id) interviews.delete(k);
+  for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
+}
 
 function orgResumes(orgId: string): ResumeRecord[] {
   const out: ResumeRecord[] = [];

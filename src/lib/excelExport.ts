@@ -64,6 +64,7 @@ export async function exportJobToExcel(job: Job) {
     'تاریخ تصمیم': r.decidedAtISO ? faDate(r.decidedAtISO) : '—',
     'یادداشت تصمیم': r.decisionNote || '—',
     'بانک استعداد': r.inBank ? 'بله' : 'خیر',
+    منبع: r.source?.kind === 'linkedin' ? `LinkedIn (${r.source.profileUrl})` : 'بارگذاری رزومه',
     فایل: r.fileName,
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);

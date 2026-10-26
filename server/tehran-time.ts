@@ -5,7 +5,7 @@
  * date filters of lists and reports must follow Iranian local time, not the
  * host clock.
  */
-import { JalaliDate, formatJalaliDate, gregorianToJalali, toPersianDigits } from '../src/utils/jalali';
+import { JalaliDate, formatJalaliDate, gregorianToJalali, jalaliToGregorian, parseJalaliDateString, toEnglishDigits, toPersianDigits } from '../src/utils/jalali';
 
 export interface TehranNow {
   jalali: JalaliDate;
@@ -60,4 +60,40 @@ export function tehranWallDate(d: Date): Date {
 export function tehranJalaliOf(d: Date): JalaliDate {
   const w = tehranWallDate(d);
   return gregorianToJalali(w.getFullYear(), w.getMonth() + 1, w.getDate());
+}
+
+/**
+ * Iran dropped daylight saving in 2022, so Tehran is a fixed +03:30 offset.
+ * Used when a recruiter picks a Jalali date + HH:MM for an interview: the
+ * stored instant must mean that wall-clock time in Tehran regardless of the
+ * server's own timezone.
+ */
+export const TEHRAN_OFFSET_MINUTES = 3 * 60 + 30;
+
+/** «۱۴۰۴/۰۷/۱۲» + «۱۰:۳۰» → UTC ISO instant, or null when either is invalid. */
+export function tehranIsoFromJalali(dateJalali: string, time: string): string | null {
+  const date = parseJalaliDateString(dateJalali);
+  if (!date) return null;
+  const digits = toEnglishDigits(String(time || '')).trim();
+  const m = digits.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour > 23 || minute > 59) return null;
+  const g = jalaliToGregorian(date.year, date.month, date.day);
+  const utcMs = Date.UTC(g.year, g.month - 1, g.day, hour, minute) - TEHRAN_OFFSET_MINUTES * 60_000;
+  const iso = new Date(utcMs).toISOString();
+  return iso === 'Invalid Date' ? null : iso;
+}
+
+/** Jalali date + HH:MM (Tehran) of an instant, for prefilled forms. */
+export function jalaliAndTehranTime(iso: string): { date: string; time: string } {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return { date: '', time: '' };
+  const shifted = new Date(d.getTime() + TEHRAN_OFFSET_MINUTES * 60_000);
+  const jalali = gregorianToJalali(shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate());
+  return {
+    date: formatJalaliDate(jalali, false),
+    time: `${String(shifted.getUTCHours()).padStart(2, '0')}:${String(shifted.getUTCMinutes()).padStart(2, '0')}`,
+  };
 }

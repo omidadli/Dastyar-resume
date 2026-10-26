@@ -1,0 +1,179 @@
+/**
+ * Unit tests for the three outside connections (no network, no SMTP server):
+ *  - e-mail settings validation/encryption, header-injection guard, error hints
+ *  - Google Calendar OAuth state signing, redirect URIs, ICS invitations, Tehran time
+ *  - sourcing: provider response mapping, local brief, boolean query sanitising
+ * Run with: npx tsx scripts/integrations.test.ts
+ */
+process.env.APP_SECRET = 'integration-test-secret-0123456789';
+
+import { cleanSubject, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings } from '../server/mailer';
+import { buildInviteIcs, CALENDAR_TIMEZONE, redirectUriFor, signState, verifyState } from '../server/gcal';
+import { buildLocalBrief, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
+import { tehranIsoFromJalali, jalaliAndTehranTime } from '../server/tehran-time';
+import type { OrgSecrets } from '../server/db';
+
+let failures = 0;
+function assert(cond: boolean, label: string, extra = '') {
+  console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}${extra ? ' — ' + extra : ''}`);
+  if (!cond) failures++;
+}
+
+// --------------------------------------------------------------- e-mail ----
+
+{
+  const email = prepareEmailSettings(
+    {
+      host: 'SMTP.Company.IR',
+      port: 465,
+      secure: true,
+      username: 'hr@company.ir',
+      password: 'app-password-123',
+      fromName: 'واحد منابع انسانی',
+      fromAddress: 'HR@Company.ir',
+      replyTo: null,
+    },
+    undefined
+  );
+  const secrets: OrgSecrets = { email };
+  assert(email.host === 'smtp.company.ir' && email.fromAddress === 'hr@company.ir', 'host/address are normalised');
+  assert(email.passwordEnc.startsWith('v1:') && !email.passwordEnc.includes('app-password-123'), 'the SMTP password is stored encrypted');
+  assert(isEmailConfigured(secrets) && emailStatus(secrets).configured, 'a complete configuration reports «configured»');
+  assert(!JSON.stringify(emailStatus(secrets)).includes('app-password-123'), 'the public status never contains the password');
+
+  // Editing without retyping the password keeps the stored one.
+  const again = prepareEmailSettings(
+    { host: 'smtp.company.ir', port: 587, secure: false, username: 'hr@company.ir', password: '', fromName: 'منابع انسانی', fromAddress: 'hr@company.ir', replyTo: 'jobs@company.ir' },
+    email
+  );
+  assert(again.passwordEnc === email.passwordEnc && again.replyTo === 'jobs@company.ir', 'saving again without a new password keeps it');
+
+  const rejects: Array<[string, () => unknown]> = [
+    ['invalid host', () => prepareEmailSettings({ host: 'not a host', port: 587, secure: false, username: 'u', password: 'p', fromName: '', fromAddress: 'a@b.ir', replyTo: null }, undefined)],
+    ['invalid port', () => prepareEmailSettings({ host: 'smtp.a.ir', port: 99999, secure: false, username: 'u', password: 'p', fromName: '', fromAddress: 'a@b.ir', replyTo: null }, undefined)],
+    ['invalid sender', () => prepareEmailSettings({ host: 'smtp.a.ir', port: 587, secure: false, username: 'u', password: 'p', fromName: '', fromAddress: 'nope', replyTo: null }, undefined)],
+    ['missing password on first save', () => prepareEmailSettings({ host: 'smtp.a.ir', port: 587, secure: false, username: 'u', password: '', fromName: '', fromAddress: 'a@b.ir', replyTo: null }, undefined)],
+  ];
+  for (const [label, fn] of rejects) {
+    let threw = false;
+    try {
+      fn();
+    } catch {
+      threw = true;
+    }
+    assert(threw, `${label} is refused`);
+  }
+
+  assert(cleanSubject('سلام\r\nBcc: evil@example.com') === 'سلام Bcc: evil@example.com', 'newlines are stripped from the subject (no header injection)');
+  assert(friendlySmtpError({ code: 'EAUTH', response: '535 5.7.8 Username and Password not accepted' }).includes('App Password'), 'auth failures point at App Passwords');
+  assert(friendlySmtpError({ code: 'ENOTFOUND' }).includes('پیدا نشد'), 'DNS failures are explained in Persian');
+}
+
+// ------------------------------------------------------------- calendar ----
+
+{
+  const state = signState({ orgId: 'org_1', userId: 'usr_1', redirectUri: 'https://hr.example.com/api/integrations/calendar/callback', exp: Date.now() + 60_000 });
+  const parsed = verifyState(state);
+  assert(parsed?.orgId === 'org_1' && parsed.userId === 'usr_1', 'a signed OAuth state round-trips the workspace');
+  assert(verifyState(state.slice(0, -2) + 'xx') === null, 'a tampered state is rejected');
+  const expired = signState({ orgId: 'org_1', userId: 'usr_1', redirectUri: 'x', exp: Date.now() - 1 });
+  assert(verifyState(expired) === null, 'an expired state is rejected');
+
+  delete process.env.GOOGLE_REDIRECT_URI;
+  assert(
+    redirectUriFor('https://hr.example.com/') === 'https://hr.example.com/api/integrations/calendar/callback',
+    'the redirect URI is derived from the request origin',
+    redirectUriFor('https://hr.example.com/')
+  );
+  process.env.GOOGLE_REDIRECT_URI = 'https://fixed.example.com/cb';
+  assert(redirectUriFor('https://other.example.com') === 'https://fixed.example.com/cb', 'GOOGLE_REDIRECT_URI overrides the origin');
+  delete process.env.GOOGLE_REDIRECT_URI;
+
+  const ics = buildInviteIcs({
+    interview: {
+      id: 'itv_1',
+      title: 'مصاحبهٔ سارا محمدی — کارشناس فروش',
+      notes: 'مصاحبهٔ فنی؛ لطفاً نمونه‌کار همراه داشته باشید.',
+      startsAtISO: '2026-10-27T06:30:00.000Z',
+      durationMin: 45,
+      location: 'دفتر مرکزی، اتاق ۳',
+      candidateName: 'سارا محمدی',
+      jobTitle: 'کارشناس فروش',
+    },
+    organizer: { name: 'واحد منابع انسانی', email: 'hr@company.ir' },
+    attendeeEmails: ['sara@example.com', 'manager@company.ir'],
+  });
+  assert(ics.startsWith('BEGIN:VCALENDAR') && ics.trim().endsWith('END:VCALENDAR'), 'ICS opens and closes correctly');
+  assert(ics.includes(`DTSTART;TZID=${CALENDAR_TIMEZONE}:20261027T100000`), 'the start time is Tehran wall-clock (06:30Z → 10:00)', ics.split('\r\n').find((l) => l.startsWith('DTSTART')) || '');
+  assert(ics.includes(`DTEND;TZID=${CALENDAR_TIMEZONE}:20261027T104500`), 'the end time honours the 45-minute duration');
+  assert(ics.includes('ATTENDEE;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:sara@example.com'), 'the candidate is an attendee');
+  assert(ics.includes('ORGANIZER;CN=واحد منابع انسانی:mailto:hr@company.ir'), 'the organizer is the workspace mailbox');
+  assert(!ics.includes('\n\n'), 'no bare blank lines (invalid ICS)');
+}
+
+// ------------------------------------------------------ Tehran wall clock ----
+
+{
+  assert(tehranIsoFromJalali('۱۴۰۵/۰۸/۰۵', '۱۰:۳۰') === '2026-10-27T07:00:00.000Z', 'Jalali date + time becomes the right UTC instant', String(tehranIsoFromJalali('۱۴۰۵/۰۸/۰۵', '۱۰:۳۰')));
+  assert(tehranIsoFromJalali('1405/08/05', '9:05') === '2026-10-27T05:35:00.000Z', 'English digits and a single-digit hour are accepted');
+  assert(tehranIsoFromJalali('۱۴۰۵/۱۳/۰۱', '۱۰:۳۰') === null, 'an impossible month is refused');
+  assert(tehranIsoFromJalali('۱۴۰۵/۰۸/۰۵', '۲۵:۰۰') === null, 'an impossible hour is refused');
+  assert(tehranIsoFromJalali('۱۴۰۵/۰۸/۰۵', '۱۰') === null, 'a time without minutes is refused');
+  const back = jalaliAndTehranTime('2026-10-27T07:00:00.000Z');
+  assert(back.date === '1405/08/05' && back.time === '10:30', 'the round-trip returns the same Jalali date/time', `${back.date} ${back.time}`);
+}
+
+// -------------------------------------------------------------- sourcing ----
+
+{
+  const profile = normalizeProfile(
+    {
+      id: 'li-42',
+      fullName: 'مریم کاظمی',
+      headline: 'کارشناس ارشد حسابداری صنعتی | SAP',
+      location: 'تهران، ایران',
+      profileUrl: 'https://www.linkedin.com/in/maryam-kazemi',
+      openToWork: true,
+      currentCompany: 'گروه صنعتی البرز',
+      experiences: [
+        { title: 'کارشناس حسابداری صنعتی', company: 'گروه صنعتی البرز', period: '۱۴۰۰ – اکنون', description: 'بهای تمام‌شده و گزارش‌های مدیریتی' },
+        { role: 'حسابدار', companyName: 'شرکت تولیدی', dates: '۱۳۹۷ – ۱۴۰۰' },
+      ],
+      education: ['کارشناسی ارشد حسابداری — دانشگاه تهران'],
+      skills: ['SAP', 'اکسل پیشرفته', { name: 'بهای تمام‌شده' }],
+    },
+    0
+  )!;
+  assert(profile.fullName === 'مریم کاظمی' && profile.openToWork === true, 'a profile is mapped with its open-to-work flag');
+  assert(profile.experiences.length === 2 && profile.experiences[1].title === 'حسابدار' && profile.experiences[1].period === '۱۳۹۷ – ۱۴۰۰', 'experience aliases (role/companyName/dates) are understood');
+  assert(profile.skills.length === 3 && profile.skills[2] === 'بهای تمام‌شده', 'skills as strings or objects both work');
+  assert(normalizeProfile({ id: 'x' }, 0) === null, 'an entry without a name or URL is dropped (never invented)');
+  const noFlag = normalizeProfile({ fullName: 'علی', profileUrl: 'https://l/in/x' }, 1)!;
+  assert(noFlag.openToWork === false && noFlag.experiences.length === 0, 'missing fields stay empty, not fabricated');
+
+  const text = profileToResumeText(profile);
+  assert(text.includes('سابقهٔ کاری') && text.includes('SAP') && text.includes('LinkedIn'), 'the profile becomes readable resume text');
+  assert(text.includes('آمادهٔ همکاری'), 'the open-to-work status travels with the text');
+
+  const brief = buildLocalBrief('دنبال کارشناس ارشد حسابداری صنعتی با ۵ سال سابقه در تهران، مسلط به SAP', 'کارشناس حسابداری صنعتی', true);
+  assert(brief.engine === 'local' && brief.locations.includes('تهران'), 'the local parser finds the city', brief.locations.join(','));
+  assert(Boolean(brief.seniority?.includes('ارشد')), 'the local parser reads seniority', String(brief.seniority));
+  assert(brief.skills.includes('SAP') && !brief.skills.includes('آماده'), 'the local parser keeps meaningful keywords and drops filler', brief.skills.join(','));
+  assert(brief.booleanQuery.includes(' AND ') && brief.booleanQuery.includes('"کارشناس حسابداری صنعتی"'), 'the boolean query quotes multi-word roles', brief.booleanQuery);
+  assert(!/دنبال|میگردم/.test(brief.booleanQuery), 'filler words never reach the query');
+
+  const cleaned = sanitizeBrief({ roleTitle: 'مدیر مالی', locations: ['تهران', '', 42], skills: ['IFRS'], booleanQuery: '', openToWorkOnly: 'yes' }, brief);
+  assert(cleaned.roleTitle === 'مدیر مالی' && cleaned.locations.join(',') === 'تهران' && cleaned.skills.join(',') === 'IFRS', 'model output is cleaned into usable lists');
+  assert(cleaned.openToWorkOnly === true && cleaned.engine === 'ai', 'a non-boolean openToWorkOnly keeps the request value');
+
+  delete process.env.LINKEDIN_API_URL;
+  delete process.env.LINKEDIN_ACCESS_TOKEN;
+  const status = sourcingStatus();
+  assert(status.configured === false && status.setupHint.includes('LINKEDIN_API_URL'), 'without credentials the status says exactly what is missing');
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} integration test(s) failed.`);
+  process.exit(1);
+}
+console.log('\nAll integration unit tests passed.');

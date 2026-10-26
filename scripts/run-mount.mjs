@@ -100,5 +100,40 @@ assert(await waitFor(() => text().includes('مقایسه کاندیداها') &&
 navigate('/app/settings/ai');
 assert(await waitFor(() => text().includes('وضعیت هوش مصنوعی')), 'AI settings render');
 
+// 7. Talent sourcing page (honest about a missing provider too)
+navigate('/app/sourcing');
+assert(await waitFor(() => text().includes('دنبال چه کسی هستید؟'), 10000), 'sourcing page renders its brief form');
+assert(
+  text().includes('جست‌وجو در LinkedIn') || text().includes('در این نصب فعال نیست'),
+  'sourcing shows the search action or an honest «not configured» note'
+);
+
+// 8. Settings › connections (e-mail + calendar)
+navigate('/app/settings/integrations');
+assert(await waitFor(() => text().includes('ایمیل سازمان') && text().includes('Google Calendar')), 'connection settings render both cards');
+assert(text().includes('اتصال‌ها'), 'the connections tab is reachable from settings');
+
+// 9. Interview modal opens from the candidate panel
+const clickByText = (needle) => {
+  const el = Array.from(window.document.querySelectorAll('button, a')).find((b) => (b.textContent || '').includes(needle));
+  if (!el) return false;
+  el.click();
+  return true;
+};
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('تصمیم شما'), 10000), 'candidate panel is back for the interview step');
+assert(clickByText('تعیین جلسهٔ مصاحبه'), 'the interview button exists in the candidate panel');
+assert(await waitFor(() => text().includes('مدت جلسه') && text().includes('مصاحبه‌گران')), 'the interview form opens with its fields');
+assert(text().includes('تاریخ (شمسی)') && text().includes('ساعت (تهران)'), 'the interview form asks for a Jalali date and Tehran time');
+
+// 10. Message modal explains how the message leaves HOVIDA
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('تصمیم شما'), 10000), 'candidate panel is back for the message step');
+assert(clickByText('پیام'), 'the message action exists in the candidate panel');
+assert(
+  await waitFor(() => text().includes('ارسال با ایمیل سازمان') || text().includes('ایمیل سازمان را در «تنظیمات'), 12000),
+  'the message modal offers organizational e-mail or explains how to connect it'
+);
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

@@ -32,6 +32,15 @@ import type {
   UserPublic,
 } from '../types/app';
 import type {
+  CalendarStatusPublic,
+  EmailSettingsPublic,
+  IntegrationsStatus,
+  InterviewRecord,
+  SentEmail,
+  SourcingBrief,
+  SourcingSearch,
+} from '../types/integrations';
+import type {
   AdminMe,
   AdminOrgRow,
   AdminOverview,
@@ -323,6 +332,58 @@ export const api = {
   messages: {
     draft: (resumeId: string, kind: MessageKind, opts?: RequestOptions) =>
       post<DraftMessage>('/api/messages/draft', { resumeId, kind }, { timeoutMs: 40_000, ...opts }),
+  },
+  integrations: {
+    status: () => get<IntegrationsStatus>('/api/integrations/status'),
+    saveEmail: (b: {
+      host: string;
+      port: number;
+      secure: boolean;
+      username: string;
+      password?: string;
+      fromName: string;
+      fromAddress: string;
+      replyTo?: string | null;
+    }) => put<{ email: EmailSettingsPublic }>('/api/integrations/email', b, { timeoutMs: 60_000 }),
+    disconnectEmail: () => del<{ email: EmailSettingsPublic }>('/api/integrations/email'),
+    testEmail: () => post<{ ok: boolean; error: string | null }>('/api/integrations/email/test', {}, { timeoutMs: 60_000 }),
+    sendEmail: (b: { resumeId?: string | null; to?: string; subject: string; body: string }) =>
+      post<{ email: SentEmail; record: ResumeListItem | null }>('/api/integrations/email/send', b, { timeoutMs: 60_000 }),
+    emails: (resumeId?: string) => get<{ items: SentEmail[] }>(`/api/integrations/emails${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
+    calendarConnectUrl: () => get<{ url: string; redirectUri: string }>('/api/integrations/calendar/connect-url'),
+    disconnectCalendar: () => del<{ calendar: CalendarStatusPublic }>('/api/integrations/calendar'),
+  },
+  interviews: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: InterviewRecord[] }>(`/api/interviews${qs(p)}`),
+    create: (b: {
+      jobId: string;
+      resumeId?: string | null;
+      candidateName?: string;
+      candidateEmail?: string | null;
+      title: string;
+      date: string;
+      time: string;
+      durationMin: number;
+      interviewerIds: string[];
+      location: string;
+      notes: string;
+      withMeet: boolean;
+      sendInvite: boolean;
+    }) => post<{ interview: InterviewRecord; calendarError: string | null; emailError: string | null; record: ResumeListItem | null }>('/api/interviews', b, { timeoutMs: 90_000 }),
+    cancel: (id: string) => del<{ interview: InterviewRecord; calendarError: string | null }>(`/api/interviews/${encodeURIComponent(id)}`),
+    icsUrl: (id: string) => `/api/interviews/${encodeURIComponent(id)}/ics`,
+  },
+  sourcing: {
+    status: () => get<{ sourcing: IntegrationsStatus['sourcing']; docPath: string }>('/api/sourcing/status'),
+    brief: (b: { departmentId: string; jobId?: string | null; prompt: string; roleTitle?: string; openToWorkOnly: boolean }) =>
+      post<{ brief: SourcingBrief }>('/api/sourcing/brief', b, { timeoutMs: 90_000 }),
+    list: () => get<{ items: Array<SourcingSearch & { resultCount: number }> }>('/api/sourcing/searches'),
+    get: (id: string) => get<{ search: SourcingSearch }>(`/api/sourcing/searches/${encodeURIComponent(id)}`),
+    run: (b: { departmentId: string; jobId?: string | null; prompt: string; roleTitle?: string; openToWorkOnly: boolean; limit?: number; brief?: SourcingBrief }) =>
+      post<{ search: SourcingSearch }>('/api/sourcing/searches', b, { timeoutMs: 120_000 }),
+    remove: (id: string) => del<{ ok: boolean }>(`/api/sourcing/searches/${encodeURIComponent(id)}`),
+    import: (searchId: string, profileId: string, jobId: string) =>
+      post<{ record: ResumeListItem; alreadyImported: boolean }>(`/api/sourcing/searches/${encodeURIComponent(searchId)}/import`, { profileId, jobId }, { timeoutMs: 180_000 }),
   },
   talent: {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),

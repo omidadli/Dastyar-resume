@@ -1,0 +1,22 @@
+name: admin setup (one-off)
+on: workflow_dispatch
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    env:
+      PW: ${{ secrets.ADMIN_SETUP_PASSWORD }}
+    steps:
+      - run: |
+          U=https://hovida.omidadli.workers.dev
+          E=omidadli78@gmail.com
+          m() { echo "::notice title=$1::$2"; }
+          # wait until the API answers (free Render may be asleep / redeploying)
+          for i in $(seq 1 12); do c=$(curl -s -o /dev/null -w "%{http_code}" $U/api/health); [ "$c" = 200 ] && break; sleep 10; done
+          S=$(curl -s -w " HTTP:%{http_code}" -X POST $U/api/auth/signup -H 'content-type: application/json' \
+            -d "$(python3 -c "import json,os;print(json.dumps({'orgName':'HOVIDA Admin','name':'Omid Adli','email':'$E','password':os.environ['PW']}))")")
+          m signup "$(echo "$S" | python3 -c "import sys,re;t=sys.stdin.read();print(re.sub(r'\"token\":\"[^\"]+\"','\"token\":\"…\"',t)[:400])")"
+          L=$(curl -s -X POST $U/api/auth/login -H 'content-type: application/json' \
+            -d "$(python3 -c "import json,os;print(json.dumps({'email':'$E','password':os.environ['PW']}))")")
+          T=$(echo "$L" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
+          m login "$(echo "$L" | python3 -c "import sys,json;d=json.load(sys.stdin);u=d.get('user') or {};print('ok' if d.get('token') else d, 'platformAdmin=',u.get('platformAdmin'), 'role=',u.get('role'))")"
+          A=$(curl -s -o /tmp/a -w "%{http_code}" $U/api/admin/me -H "authorization: Bearer $T"); m admin_api "$A $(head -c 150 /tmp/a)"

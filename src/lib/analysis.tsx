@@ -89,7 +89,7 @@ export function AnalysisProvider({ children }: { children: React.ReactNode }) {
           toast(
             `تحلیل ${result.total.toLocaleString('fa-IR')} رزومه برای «${job.roleTitle}» کامل شد${
               result.localCount ? ` (${result.localCount.toLocaleString('fa-IR')} مورد با موتور محلی)` : ''
-            }.`,
+            }${result.duplicates ? `؛ ${result.duplicates.toLocaleString('fa-IR')} رزومه پیش‌تر در این دپارتمان ثبت شده بود` : ''}.`,
             analysed || result.unjudgeable ? 'success' : 'info',
             window.location.pathname.startsWith(`/app/jobs/${job.id}`)
               ? undefined

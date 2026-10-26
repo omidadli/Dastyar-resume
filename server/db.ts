@@ -61,6 +61,7 @@ import {
   toPersianDigits,
 } from '../src/utils/jalali';
 import { matchesSearch } from '../src/lib/normalizeFa';
+import { refreshDuplicates, resumeFileHash } from './duplicates';
 
 export const DATA_DIR = STORAGE_DATA_DIR;
 const STORE_KEY = 'hovida-store.json';
@@ -141,6 +142,9 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.sessions?.forEach((s) => sessions.set(s.tokenHash, s));
   snap.jobs?.forEach((j) => jobs.set(j.id, normalizeJob(j)));
   snap.resumes?.forEach((r) => resumes.set(r.id, normalizeResume(r)));
+  // Duplicate flags are derived, not owned by the client: rebuild them from the
+  // stored history once per start so older snapshots get labelled too.
+  refreshDuplicates(resumes.values());
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -464,6 +468,9 @@ function normalizeResume(r: ResumeRecord): ResumeRecord {
     tags: Array.isArray(r.tags) ? r.tags : [],
     bankTags: Array.isArray(r.bankTags) ? r.bankTags : [],
     deepFindings: r.deepFindings ?? null,
+    fileHash: r.fileHash ?? null,
+    novelty: r.novelty === 'new' || r.novelty === 'duplicate' || r.novelty === 'unknown' ? r.novelty : 'unknown',
+    duplicateOf: r.duplicateOf ?? null,
     analysisHistory: Array.isArray(r.analysisHistory) ? r.analysisHistory : [],
     addedToBankAtISO: r.addedToBankAtISO ?? null,
     decisionStatus: r.decisionStatus || 'none',
@@ -922,6 +929,7 @@ function deleteJobRecord(id: string) {
       resumes.delete(rid);
     }
   }
+  if (j) refreshDuplicateScope(j.orgId, j.departmentId);
   if (j?.orgId) deletePrefixQuietly(`${RESUMES_PREFIX}${j.orgId}/${id}/`);
   deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`); // legacy layout
   jobs.delete(id);
@@ -1007,6 +1015,16 @@ export function getResumeUnsafe(id: string): ResumeRecord | null {
   return resumes.get(id) || null;
 }
 
+/**
+ * Re-derives «جدید / تکراری» for one workspace+department. Earlier records keep
+ * their status; only the scope being written is re-indexed.
+ */
+function refreshDuplicateScope(orgId: string | null, departmentId: string) {
+  refreshDuplicates(
+    [...resumes.values()].filter((r) => (r.orgId ?? null) === orgId && r.departmentId === departmentId)
+  );
+}
+
 export function toListItem(r: ResumeRecord): ResumeListItem {
   const { extractedText: _t, ...rest } = r;
   return rest;
@@ -1060,6 +1078,7 @@ export async function saveEvaluation(input: {
     departmentName: job.departmentName,
     roleTitle: job.roleTitle || null,
     fileName: input.fileName.slice(0, 200),
+    fileHash: resumeFileHash(input.fileBase64) ?? null,
     filePath: file?.relPath || null,
     fileSize: file?.size ?? null,
     extractedText: (input.extractedText || '').slice(0, 20000),
@@ -1108,6 +1127,7 @@ export async function saveEvaluation(input: {
     updatedAtISO: stamp.iso,
   };
   resumes.set(id, record);
+  refreshDuplicateScope(record.orgId, record.departmentId);
   job.updatedAtISO = stamp.iso;
   recomputeJob(job.id);
   return record;
@@ -1170,6 +1190,8 @@ export function updateResumeEvaluation(rec: ResumeRecord, ev: CandidateEvaluatio
   };
   rec.analysisHistory.push(entry);
   if (mode === 'deep' && ev.engine === 'ai') rec.deepAnalysisAtJalali = stamp.jalali;
+  // A rerun can newly extract a phone/email: re-check this candidate's scope.
+  refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
   return rec;
 }
@@ -1196,6 +1218,8 @@ export async function attachResumeFile(rec: ResumeRecord, fileName: string, base
   if (rec.filePath && rec.filePath !== file.relPath) deleteFileQuietly(rec.filePath);
   rec.filePath = file.relPath;
   rec.fileSize = file.size;
+  rec.fileHash = resumeFileHash(base64) ?? rec.fileHash ?? null;
+  refreshDuplicateScope(rec.orgId, rec.departmentId);
   scheduleSave();
   return true;
 }
@@ -1204,6 +1228,8 @@ export async function attachResumeFile(rec: ResumeRecord, fileName: string, base
 export function deleteResume(rec: ResumeRecord) {
   deleteFileQuietly(rec.filePath);
   resumes.delete(rec.id);
+  // The original may itself have been a duplicate, so the whole scope is rebuilt.
+  refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
 }
 
@@ -1330,6 +1356,9 @@ export function queryResumes(orgId: string, q: ResumeQuery): ResumePage {
 
   const counts: ResumeCounts = {
     all: pool.length,
+    novel: pool.filter((r) => r.novelty === 'new').length,
+    duplicate: pool.filter((r) => r.novelty === 'duplicate').length,
+    unknownNovelty: pool.filter((r) => r.novelty !== 'new' && r.novelty !== 'duplicate').length,
     high: pool.filter(isHigh).length,
     review: pool.filter(isReviewCat).length,
     low: pool.filter(isLow).length,
@@ -1341,6 +1370,13 @@ export function queryResumes(orgId: string, q: ResumeQuery): ResumePage {
     reviewDecision: pool.filter((r) => r.decisionStatus === 'review').length,
   };
 
+  // Counts above always describe the whole (searched) pool; the novelty filter
+  // narrows the list afterwards, exactly like the match/decision filters.
+  switch (q.novelty) {
+    case 'new': pool = pool.filter((r) => r.novelty === 'new'); break;
+    case 'duplicate': pool = pool.filter((r) => r.novelty === 'duplicate'); break;
+    case 'unknown': pool = pool.filter((r) => r.novelty !== 'new' && r.novelty !== 'duplicate'); break;
+  }
   switch (q.match) {
     case 'high': pool = pool.filter(isHigh); break;
     case 'review': pool = pool.filter(isReviewCat); break;

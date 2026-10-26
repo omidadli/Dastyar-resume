@@ -14,6 +14,7 @@ import {
   FileText,
   GraduationCap,
   History,
+  Info,
   Lightbulb,
   Mail,
   MapPin,
@@ -49,6 +50,7 @@ import {
   IconButton,
   MatchPill,
   Menu,
+  NoveltyPill,
   Monogram,
   ScoreBadge,
   Tabs,
@@ -379,6 +381,7 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-3.5">
           <MatchPill category={record.category} />
+          <NoveltyPill novelty={record.novelty} duplicateOf={record.duplicateOf} size="md" />
           <EngineBadge engine={record.engine} />
           <ConfidenceBadge confidence={record.confidence} />
           {record.inBank && <Chip tone="brand" icon={Archive}>بانک استعداد</Chip>}
@@ -388,6 +391,34 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
             </Chip>
           )}
         </div>
+        {record.novelty === 'duplicate' && record.duplicateOf && (
+          <Callout
+            tone="warning"
+            className="mt-4"
+            icon={Copy}
+            title="این رزومه تکراری است"
+            action={
+              <ButtonLink to={`/app/candidates/${record.duplicateOf.resumeId}`} variant="secondary" size="sm" icon={ExternalLink}>
+                رزومهٔ قبلی
+              </ButtonLink>
+            }
+          >
+            همین رزومه پیش‌تر در «{record.duplicateOf.roleTitle || 'همین دپارتمان'}» ({faDate(record.duplicateOf.createdAtISO)}) ثبت شده بود
+            {record.duplicateOf.reason === 'file'
+              ? ' با فایل یکسان'
+              : record.duplicateOf.reason === 'text'
+              ? ' با متن یکسان'
+              : record.duplicateOf.reason === 'email'
+              ? ' با ایمیل یکسان'
+              : ' با شماره تماس یکسان'}
+            . برای جلوگیری از بررسی دوباره، آن رزومه را باز کنید.
+          </Callout>
+        )}
+        {record.novelty === 'unknown' && (
+          <Callout tone="info" className="mt-4" icon={Info} title="امکان تطبیق تکرار نبود">
+            از این رزومه فایل، متن یا راه ارتباطی معتبری استخراج نشد؛ بنابراین نه «جدید» و نه «تکراری» برچسب خورده است.
+          </Callout>
+        )}
         <div className="flex items-center gap-2 mt-4">
           <Button variant={inCompare ? 'soft' : 'secondary'} size="sm" icon={Columns3} onClick={compareClick} className="flex-1">
             {inCompare ? 'در فهرست مقایسه' : 'افزودن به مقایسه'}

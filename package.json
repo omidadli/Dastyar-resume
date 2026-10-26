@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "tsx scripts/unit.test.ts && tsx scripts/ingest.test.ts && tsx scripts/behavior.test.ts && tsx scripts/keypool.test.ts && tsx scripts/server.test.ts && tsx scripts/api-timeout.test.ts && tsx scripts/storage.test.ts",
+    "test": "tsx scripts/unit.test.ts && tsx scripts/duplicates.test.ts && tsx scripts/ingest.test.ts && tsx scripts/behavior.test.ts && tsx scripts/keypool.test.ts && tsx scripts/server.test.ts && tsx scripts/api-timeout.test.ts && tsx scripts/storage.test.ts",
     "test:api": "node scripts/smoke.mjs",
     "test:mount": "vite build --config vite.mount.config.ts && node scripts/run-mount.mjs",
     "brand": "python3 scripts/brand/make_logo.py",

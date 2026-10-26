@@ -306,6 +306,18 @@ const JOBS: DemoJob[] = [
         tags: ['فروش حضوری', 'چیدمان', 'آرایشی‌بهداشتی'],
       },
       {
+        // Same person, same department, sent again a week later with a new file:
+        // the demo shows «تکراری» and points back to the first screening.
+        name: 'سعید جعفری', file: 'saeed-jafari-cv-1404.pdf', role: 'کارشناس فروش', years: 4, edu: 'کارشناسی مدیریت',
+        city: 'تهران', phone: '۰۹۱۲۸۸۸۹۹۰۰', email: 'saeed.jafari@example.com',
+        skills: ['فروش حضوری', 'چیدمان فروشگاهی', 'اکسل'], salary: '۳۴ میلیون تومان', score: 75, rec: 'REVIEW',
+        summary: 'نسخهٔ به‌روزشدهٔ همان رزومهٔ قبلی است (حقوق درخواستی تغییر کرده) و برای همین دپارتمان دوباره ارسال شده؛ کاندید تازه‌ای نیست.',
+        why: 'سابقه و مهارت‌ها همان رزومهٔ ثبت‌شده در غربالگری قبلی این دپارتمان است.',
+        s: [['سابقه فروش حضوری', '«چهار سال فروش حضوری»']],
+        w: [['تکرار درخواست برای همین دپارتمان', '«همین رزومه پیش‌تر ثبت شده بود»', 'minor']],
+        tags: ['فروش حضوری', 'تکراری'],
+      },
+      {
         name: 'مهدی قربانی', file: 'mahdi-ghorbani.txt', role: 'ویزیتور', years: 7, edu: 'دیپلم بازرگانی',
         city: 'اصفهان', phone: '09131112244', email: null, skills: ['ویزیت', 'پخش مویرگی', 'مسیربندی'], salary: '۳۰ میلیون تومان',
         score: 72, rec: 'REVIEW',

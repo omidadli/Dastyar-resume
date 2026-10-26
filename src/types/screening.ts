@@ -238,6 +238,8 @@ export interface ResumeRecord {
   departmentName: string;
   roleTitle: string | null;
   fileName: string;
+  /** SHA-256 of the uploaded file — one of the duplicate signals. */
+  fileHash?: string | null;
   filePath: string | null;
   fileSize: number | null;
   extractedText: string;
@@ -266,6 +268,14 @@ export interface ResumeRecord {
   category: ResumeCategory;
   rankInCategory: number | null;
   analysisHistory: AnalysisHistoryEntry[];
+
+  /**
+   * Duplicate screening: compared only against earlier resumes of the same
+   * workspace and department («اولین غربالگری»). `unknown` = no identifying
+   * signal yet (e.g. unreadable file), so neither «تکراری» nor «جدید».
+   */
+  novelty?: ResumeNovelty;
+  duplicateOf?: DuplicateLink | null;
 
   /** Talent pool («بانک استعداد») */
   inBank: boolean;
@@ -302,6 +312,18 @@ export interface PagedResult<T> {
   totalPages: number;
 }
 
+export type ResumeNovelty = 'new' | 'duplicate' | 'unknown';
+export type DuplicateReason = 'file' | 'text' | 'email' | 'phone';
+export type NoveltyFilter = 'all' | 'new' | 'duplicate' | 'unknown';
+
+export interface DuplicateLink {
+  resumeId: string;
+  jobId: string;
+  roleTitle: string | null;
+  createdAtISO: string;
+  reason: DuplicateReason;
+}
+
 export type MatchFilter = 'all' | 'high' | 'review' | 'low' | 'insufficient';
 export type DecisionFilter = 'all' | 'undecided' | 'pending' | 'approved' | 'rejected' | 'review';
 export type ResumeSort = 'match' | 'newest' | 'oldest' | 'experience' | 'name' | 'decided';
@@ -317,12 +339,17 @@ export interface ResumeQuery {
   fromJalali?: string;
   toJalali?: string;
   sort?: ResumeSort;
+  /** «جدید»، «تکراری» یا فاقد اطلاعات کافی برای تطبیق. */
+  novelty?: NoveltyFilter;
   page?: number;
   pageSize?: number;
 }
 
 export interface ResumeCounts {
   all: number;
+  novel: number;
+  duplicate: number;
+  unknownNovelty: number;
   high: number;
   review: number;
   low: number;

@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   Clock3,
   Columns3,
+  CopyCheck,
   Download,
   FileStack,
   ListChecks,
@@ -64,7 +65,7 @@ import { candidateName, faDate, faNumber, toPersianDigits } from '../lib/format'
 import { navigate, setQuery, useLocation } from '../lib/router';
 import { useAsync, useDebounced, useMediaQuery } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import type { DecisionFilter, DecisionStatus, Job, MatchFilter, ResumeListItem, ResumeSort } from '../types/screening';
+import type { DecisionFilter, DecisionStatus, Job, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
 type JobTab = 'candidates' | 'criteria';
 
@@ -140,14 +141,16 @@ export default function JobDetail({ id }: { id: string }) {
   const [decision, setDecision] = useState<DecisionFilter>('all');
   const [minYears, setMinYears] = useState(0);
   const [sort, setSort] = useState<ResumeSort>('match');
+  // Duplicates are judged against this department's earlier screenings.
+  const [novelty, setNovelty] = useState<NoveltyFilter>('all');
   const [qInput, setQInput] = useState('');
   const q = useDebounced(qInput, 250);
   const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [match, decision, minYears, sort, q]);
+  useEffect(() => setPage(1), [match, decision, minYears, sort, q, novelty]);
 
   const listQ = useAsync(
-    (signal) => api.resumes.list({ jobId: id, match, decision, minYears: minYears || undefined, sort, q, page, pageSize: 10 }, { signal }),
-    [id, match, decision, minYears, sort, q, page]
+    (signal) => api.resumes.list({ jobId: id, match, decision, minYears: minYears || undefined, sort, novelty, q, page, pageSize: 10 }, { signal }),
+    [id, match, decision, minYears, sort, novelty, q, page]
   );
   const items = listQ.data?.items || [];
   const counts = listQ.data?.counts;
@@ -522,6 +525,19 @@ export default function JobDetail({ id }: { id: string }) {
                   />
                   <Select
                     compact
+                    aria-label="وضعیت تکرار"
+                    title="نسبت به رزومه‌هایی که پیش‌تر در همین دپارتمان غربال شده‌اند"
+                    value={novelty}
+                    onChange={(e) => setNovelty(e.target.value as NoveltyFilter)}
+                    options={[
+                      { value: 'all', label: `همه (${toPersianDigits(counts?.novel ?? 0)} تازه، ${toPersianDigits(counts?.duplicate ?? 0)} تکراری)` },
+                      { value: 'new', label: `فقط تازه‌ها (${toPersianDigits(counts?.novel ?? 0)})` },
+                      { value: 'duplicate', label: `فقط تکراری‌ها (${toPersianDigits(counts?.duplicate ?? 0)})` },
+                      { value: 'unknown', label: `نامشخص (${toPersianDigits(counts?.unknownNovelty ?? 0)})` },
+                    ]}
+                  />
+                  <Select
+                    compact
                     aria-label="سابقه کار"
                     value={String(minYears)}
                     onChange={(e) => setMinYears(Number(e.target.value))}
@@ -553,6 +569,20 @@ export default function JobDetail({ id }: { id: string }) {
                 items={MATCH_FILTERS.map((m) => ({ id: m.id, label: m.label, count: counts ? counts[m.id === 'all' ? 'all' : m.id] : undefined }))}
               />
             </div>
+
+            {/* Screening against this department's own history: say it out loud. */}
+            {novelty === 'all' && (counts?.duplicate ?? 0) > 0 && (
+              <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-2.5 bg-review-soft border-b border-review/20">
+                <CopyCheck className="w-4 h-4 text-review-ink shrink-0" strokeWidth={2} />
+                <span className="text-[12.5px] text-review-ink font-medium">
+                  {toPersianDigits(counts?.duplicate ?? 0)} رزومه در غربالگری‌های قبلی «{job?.departmentName}» ثبت شده بود؛
+                  {toPersianDigits(counts?.novel ?? 0)} رزومه تازه است.
+                </span>
+                <Button size="sm" variant="secondary" className="mr-auto" onClick={() => setNovelty('duplicate')}>
+                  نمایش تکراری‌ها
+                </Button>
+              </div>
+            )}
 
             {sel.size > 0 && (
               <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-2.5 bg-brand-tint border-b border-brand/15 animate-fade-in">

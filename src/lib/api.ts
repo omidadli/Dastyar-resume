@@ -296,6 +296,7 @@ export const api = {
           from: q.fromJalali,
           to: q.toJalali,
           sort: q.sort,
+          novelty: q.novelty,
           page: q.page,
           pageSize: q.pageSize,
         })}`,

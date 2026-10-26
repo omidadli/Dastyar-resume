@@ -14,6 +14,7 @@ import type {
   MessageKind,
   ResumeRecord,
   ResumeSort,
+  NoveltyFilter,
 } from '../../src/types/screening';
 import { h, int, oneOf, str } from './util';
 import { systemSettings } from '../platform';
@@ -89,6 +90,7 @@ export function resumeRoutes(): express.Router {
         fromJalali: str(q.from, 10) || undefined,
         toJalali: str(q.to, 10) || undefined,
         sort: oneOf<ResumeSort>(q.sort, ['match', 'newest', 'oldest', 'experience', 'name', 'decided'], 'match'),
+        novelty: oneOf<NoveltyFilter>(q.novelty, ['all', 'new', 'duplicate', 'unknown'], 'all'),
         page: q.page ? int(q.page, 1) : 1,
         pageSize: q.pageSize ? int(q.pageSize, 10) : 10,
       })

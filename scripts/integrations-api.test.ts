@@ -13,6 +13,8 @@ import http from 'http';
 import net from 'net';
 import os from 'os';
 import path from 'path';
+import { formatJalaliDate } from '../src/utils/jalali';
+import { tehranIsoFromJalali, tehranJalaliOf } from '../server/tehran-time';
 
 let failures = 0;
 function assert(cond: boolean, label: string, extra = '') {
@@ -122,6 +124,19 @@ function mockSmtp(): Promise<{ server: net.Server; messages: string[] }> {
 
 // ------------------------------------------------------------------ server ----
 
+/**
+ * A Jalali date some days ahead, computed from «now» — never a fixed date, so
+ * the suite does not start failing simply because time has passed.
+ */
+function futureJalali(daysAhead: number): { date: string; iso: string; icsStart: string } {
+  const when = new Date(Date.now() + daysAhead * 24 * 3600 * 1000);
+  const date = formatJalaliDate(tehranJalaliOf(when), true);
+  const iso = tehranIsoFromJalali(date, '۱۰:۳۰')!;
+  // 10:30 Tehran = 07:00 UTC; the ICS carries the local Tehran time.
+  const ymd = iso.slice(0, 10).replace(/-/g, '');
+  return { date, iso, icsStart: `DTSTART;TZID=Asia/Tehran:${ymd}T103000` };
+}
+
 async function main() {
   const dist = path.join(process.cwd(), 'dist', 'server.cjs');
   if (!fs.existsSync(dist)) throw new Error('Run `npm run build` first.');
@@ -166,6 +181,7 @@ async function main() {
   };
 
   try {
+    const future = futureJalali(7);
     const signup = async (orgName: string, email: string) => {
       const r = await call('POST', '/api/auth/signup', null, { orgName, name: 'مدیر', email, password: 'Password12345' });
       return r.json.token as string;
@@ -261,7 +277,7 @@ async function main() {
       resumeId: imported.json.record.id,
       candidateEmail: 'maryam@example.com',
       title: 'مصاحبهٔ فنی',
-      date: '۱۴۰۵/۰۸/۰۵',
+      date: future.date,
       time: '۱۰:۳۰',
       durationMin: 45,
       interviewerIds: [],
@@ -272,7 +288,8 @@ async function main() {
     });
     assert(created.status === 200 && created.json.interview?.id, 'an interview is scheduled inside HOVIDA', `${created.status} ${JSON.stringify(created.json?.error || '')}`);
     const interview = created.json.interview;
-    assert(interview.startsAtISO === '2026-10-27T07:00:00.000Z', 'the Jalali date + time is stored as the right instant', interview.startsAtISO);
+    assert(interview.startsAtISO === future.iso, 'the Jalali date + time is stored as the right instant', interview.startsAtISO);
+    assert(interview.startsAtISO.endsWith('T07:00:00.000Z'), '10:30 Tehran is 07:00 UTC (Asia/Tehran = +03:30)', interview.startsAtISO);
     assert(interview.calendarEventId === null && interview.meetLink === null, 'no Google event is claimed when Google is not connected');
     assert(created.json.calendarError === null && created.json.emailError === null, 'no error is reported for features that were not requested');
 
@@ -283,11 +300,11 @@ async function main() {
 
     const ics = await call('GET', `/api/interviews/${interview.id}/ics`, A);
     assert(String(ics.headers.get('content-type')).startsWith('text/calendar'), 'the ICS download has the calendar content type');
-    assert(typeof ics.json === 'string' && ics.json.includes('SUMMARY:مصاحبهٔ فنی') && ics.json.includes('10:30') === false && ics.json.includes('DTSTART;TZID=Asia/Tehran:20261027T103000'), 'the ICS carries the Tehran start time', String(ics.json).split('\r\n').find((l: string) => l.startsWith('DTSTART')));
+    assert(typeof ics.json === 'string' && ics.json.includes('SUMMARY:مصاحبهٔ فنی') && ics.json.includes('10:30') === false && ics.json.includes(future.icsStart), 'the ICS carries the Tehran start time', String(ics.json).split('\r\n').find((l: string) => l.startsWith('DTSTART')));
 
     const past = await call('POST', '/api/interviews', A, { jobId: job.id, title: 'گذشته', date: '۱۴۰۰/۰۱/۰۱', time: '۱۰:۰۰' });
     assert(past.status === 400, 'an interview in the past is refused');
-    const badTime = await call('POST', '/api/interviews', A, { jobId: job.id, title: 'بد', date: '۱۴۰۵/۰۸/۰۵', time: '۲۵:۹۹' });
+    const badTime = await call('POST', '/api/interviews', A, { jobId: job.id, title: 'بد', date: future.date, time: '۲۵:۹۹' });
     assert(badTime.status === 400, 'an impossible time is refused');
 
     const cancelled = await call('DELETE', `/api/interviews/${interview.id}`, A);

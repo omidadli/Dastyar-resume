@@ -38,6 +38,9 @@ import type {
   InterviewRecord,
   SentEmail,
   SourcingBrief,
+  SourcingCsvPreview,
+  SourcingCsvSummary,
+  SourcingProfile,
   SourcingSearch,
 } from '../types/integrations';
 import type {
@@ -385,6 +388,12 @@ export const api = {
     run: (b: { departmentId: string; jobId?: string | null; prompt: string; roleTitle?: string; openToWorkOnly: boolean; limit?: number; brief?: SourcingBrief }) =>
       post<{ search: SourcingSearch }>('/api/sourcing/searches', b, { timeoutMs: 120_000 }),
     remove: (id: string) => del<{ ok: boolean }>(`/api/sourcing/searches/${encodeURIComponent(id)}`),
+    /** Reads an uploaded CSV without saving anything (columns + a few names). */
+    csvPreview: (b: { csv: string; separator?: string }) =>
+      post<{ preview: SourcingCsvPreview; profiles: SourcingProfile[] }>('/api/sourcing/csv/preview', b, { timeoutMs: 45_000 }),
+    /** Turns the file into a normal search result (same screening + import path). */
+    csv: (b: { csv: string; fileName?: string; departmentId: string; jobId?: string | null; roleTitle?: string; openToWorkOnly?: boolean }) =>
+      post<{ search: SourcingSearch; summary: SourcingCsvSummary }>('/api/sourcing/csv', b, { timeoutMs: 60_000 }),
     import: (searchId: string, profileId: string, jobId: string) =>
       post<{ record: ResumeListItem; alreadyImported: boolean }>(`/api/sourcing/searches/${encodeURIComponent(searchId)}/import`, { profileId, jobId }, { timeoutMs: 180_000 }),
   },

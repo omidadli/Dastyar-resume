@@ -250,6 +250,53 @@ async function main() {
     assert((await call('POST', `/api/sourcing/searches/${searchId}/import`, A, { profileId: 'nope', jobId: job.id })).status === 404, 'an unknown profile is refused');
     assert((await call('POST', `/api/sourcing/searches/${searchId}/import`, B, { profileId: 'li-2', jobId: job.id })).status === 404, 'another workspace cannot import from it');
 
+    // --------------------------------------------------- import a CSV ----
+    const csv = [
+      'First Name,Last Name,Headline,Location,Current Company,Profile URL,Open to work,Skills,Email',
+      'مریم,کاظمی,"کارشناس ارشد حسابداری صنعتی | SAP",Tehran,گروه صنعتی البرز,https://www.linkedin.com/in/maryam-csv,Yes,"SAP، اکسل",maryam@example.com',
+      'حسین,رضایی,حسابدار,Karaj,شرکت آریا,https://www.linkedin.com/in/hossein-csv,No,اکسل,',
+      ',,بدون نام,Shiraz,,,Yes,,',
+    ].join('\r\n');
+    const csvPreview = await call('POST', '/api/sourcing/csv/preview', A, { csv });
+    assert(csvPreview.status === 200 && csvPreview.json.preview.profileCount === 2, 'a pasted CSV is read and previewed', `${csvPreview.status} ${JSON.stringify(csvPreview.json?.preview?.profileCount)}`);
+    assert(csvPreview.json.preview.hasOpenToWorkColumn === true && csvPreview.json.preview.skippedRows === 1, 'the preview reports the status column and the nameless row');
+    assert(csvPreview.json.profiles.length === 2 && csvPreview.json.profiles[0].fullName === 'مریم کاظمی', 'the preview shows who is inside');
+    assert((await call('POST', '/api/sourcing/csv/preview', A, { csv: '' })).status === 400, 'an empty file is refused with a message');
+    assert((await call('POST', '/api/sourcing/csv', A, { csv, departmentId: 'nope' })).status === 400, 'a CSV import needs a department');
+
+    const csvImport = await call('POST', '/api/sourcing/csv', A, {
+      csv,
+      fileName: 'recruiter-export.csv',
+      departmentId: dept.id,
+      jobId: job.id,
+      openToWorkOnly: true,
+    });
+    assert(csvImport.status === 200 && csvImport.json.search?.id, 'the file becomes a search result', `${csvImport.status} ${JSON.stringify(csvImport.json?.error || '')}`);
+    const csvSearch = csvImport.json.search;
+    assert(csvSearch.source === 'csv' && csvSearch.status === 'done', 'the result is marked as coming from a file');
+    assert(csvSearch.results.length === 1 && csvSearch.results[0].fullName === 'مریم کاظمی', 'only the person the file reports as open-to-work is kept');
+    assert(csvImport.json.summary.filteredOut === 1 && csvImport.json.summary.skippedRows === 1, 'what was dropped is counted, not hidden');
+    assert(/از ۳ ردیف فایل/.test(csvSearch.message), 'the stored message summarises the file', String(csvSearch.message));
+    assert((await call('GET', `/api/sourcing/searches/${csvSearch.id}`, B)).status === 404, 'another workspace cannot read the imported file');
+
+    // The file without a status column: no filtering, honest note.
+    const noStatusCsv = await call('POST', '/api/sourcing/csv', A, {
+      csv: 'Name,Headline,Location\nسارا احمدی,Product Manager,Tehran',
+      departmentId: dept.id,
+      openToWorkOnly: true,
+    });
+    assert(noStatusCsv.status === 200 && noStatusCsv.json.search.results.length === 1, 'a file without the status column is not emptied by the filter');
+    assert(/ستون «آمادهٔ همکاری» در فایل نبود/.test(noStatusCsv.json.search.message), 'the note says the filter was not applied', String(noStatusCsv.json.search.message));
+
+    // A profile from the file goes through the same screening + import path.
+    const csvResume = await call('POST', `/api/sourcing/searches/${csvSearch.id}/import`, A, {
+      profileId: csvSearch.results[0].id,
+      jobId: job.id,
+    });
+    assert(csvResume.status === 200 && csvResume.json.record?.source?.kind === 'linkedin', 'a file profile becomes a screened candidate', `${csvResume.status} ${JSON.stringify(csvResume.json?.error || '')}`);
+    assert(csvResume.json.record.category !== 'ERROR', 'the file profile is analysed by the normal engine', csvResume.json.record.category);
+    assert(csvResume.json.record.contact?.email === 'maryam@example.com', 'the e-mail column is kept for the invitation flow', String(csvResume.json.record.contact?.email));
+
     // ------------------------------------------------ email: not set up ----
     assert((await call('GET', '/api/integrations/emails', A)).json.items.length === 0, 'the e-mail log starts empty');
     const noMail = await call('POST', '/api/integrations/email/send', A, { resumeId: imported.json.record.id, subject: 'سلام', body: 'متن' });

@@ -25,6 +25,7 @@ import {
   startSearch,
 } from '../linkedin';
 import { buildSearchBrief } from '../sourcing';
+import { csvSummary, profilesFromCsv } from '../csv-import';
 import {
   CalendarError,
   accessTokenFor,
@@ -576,6 +577,138 @@ export function integrationRoutes(): express.Router {
         job,
       });
       res.json({ brief });
+    })
+  );
+
+  // ------------------------------------------------------ import a file ----
+
+  /** Uploaded text is bounded: a Recruiter export is a few hundred KB at most. */
+  const MAX_CSV_CHARS = 3_000_000;
+
+  /** Returns the pasted/uploaded text, or answers with the reason and null. */
+  function csvTextOf(req: express.Request, res: express.Response): string | null {
+    const raw = req.body?.csv;
+    if (typeof raw !== 'string' || !raw.trim()) {
+      res.status(400).json({ error: 'محتوای فایل خالی است؛ فایل CSV یا متن جدول را بچسبانید.' });
+      return null;
+    }
+    if (raw.length > MAX_CSV_CHARS) {
+      res.status(413).json({ error: 'فایل بزرگ‌تر از حد مجاز است (۳ مگابایت)؛ آن را به چند فایل کوچک‌تر تقسیم کنید.' });
+      return null;
+    }
+    return raw;
+  }
+
+  /**
+   * Reads the file without saving anything, so the recruiter sees which columns
+   * were understood *before* candidates are created.
+   */
+  r.post(
+    '/sourcing/csv/preview',
+    h(async (req, res) => {
+      const text = csvTextOf(req, res);
+      if (text === null) return;
+      const result = profilesFromCsv(text, str(req.body?.separator, 1) || undefined);
+      res.json({
+        preview: {
+          headers: result.headers,
+          recognised: result.recognised,
+          separator: result.separator === '\t' ? 'tab' : result.separator,
+          totalRows: result.totalRows,
+          skippedRows: result.skippedRows,
+          profileCount: result.profiles.length,
+          hasOpenToWorkColumn: result.hasOpenToWorkColumn,
+          warnings: result.warnings,
+        },
+        // Enough to recognise the people; the full list comes from the import.
+        profiles: result.profiles.slice(0, 5),
+      });
+    })
+  );
+
+  /**
+   * Turns the file into a normal search result: the same profile cards, the
+   * same «افزودن به فرصت» button (and therefore the same screening and
+   * duplicate detection as an API result). Nothing is sent anywhere.
+   */
+  r.post(
+    '/sourcing/csv',
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const departmentId = str(req.body?.departmentId, 80);
+      const department = org.departments.find((d) => d.id === departmentId);
+      if (!department) return res.status(400).json({ error: 'دپارتمان را انتخاب کنید.' });
+      const jobId = str(req.body?.jobId, 80) || null;
+      const job = jobId ? db.getJob(org.id, jobId) : null;
+      if (jobId && !job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+
+      const text = csvTextOf(req, res);
+      if (text === null) return;
+      const parsed = profilesFromCsv(text, str(req.body?.separator, 1) || undefined);
+      if (!parsed.profiles.length) {
+        return res.status(400).json({
+          error: parsed.warnings.at(-1) || 'در این فایل پروفایلی پیدا نشد.',
+          warnings: parsed.warnings,
+        });
+      }
+
+      const openToWorkOnly = req.body?.openToWorkOnly === true && parsed.hasOpenToWorkColumn;
+      const kept = (openToWorkOnly ? parsed.profiles.filter((p) => p.openToWork) : parsed.profiles).slice(0, MAX_RESULTS);
+      const filteredOut = openToWorkOnly ? parsed.profiles.filter((p) => !p.openToWork).length : 0;
+      const fileName = str(req.body?.fileName, 200);
+
+      const stamp = new Date();
+      const row: db.SourcingSearchRecord = {
+        id: db.uid('src'),
+        orgId: org.id,
+        departmentId: department.id,
+        departmentName: department.name,
+        jobId: job?.id ?? null,
+        jobTitle: job?.roleTitle ?? null,
+        prompt: fileName ? `ورود از فایل: ${fileName}` : 'ورود از فایل CSV',
+        brief: {
+          roleTitle: job?.roleTitle || str(req.body?.roleTitle, 120) || '',
+          seniority: null,
+          locations: [],
+          skills: [],
+          mustHave: [],
+          keywords: [],
+          booleanQuery: '',
+          openToWorkOnly,
+          notes: 'این فهرست از فایلی که خودتان بارگذاری کردید ساخته شده است؛ هیچ سرویس بیرونی فراخوانی نشد.',
+          engine: 'local',
+        },
+        status: 'done',
+        message: csvSummary(parsed, kept.length, filteredOut, openToWorkOnly),
+        results: kept,
+        imported: {},
+        source: 'csv',
+        createdBy: user.id,
+        createdByName: user.name,
+        createdAtISO: stamp.toISOString(),
+        createdAtJalali: formatJalaliDate(tehranJalaliOf(stamp), true),
+      };
+      db.saveSearch(row);
+      db.logActivity(
+        org.id,
+        actorOf(req),
+        'sourcing.search',
+        `فهرستی از فایل «${fileName || 'CSV'}» خوانده شد (${toPersianDigits(kept.length)} پروفایل)`,
+        { jobId: job?.id }
+      );
+      res.json({
+        search: publicSearch(row),
+        summary: {
+          totalRows: parsed.totalRows,
+          profileCount: parsed.profiles.length,
+          kept: kept.length,
+          filteredOut,
+          skippedRows: parsed.skippedRows,
+          hasOpenToWorkColumn: parsed.hasOpenToWorkColumn,
+          recognised: parsed.recognised,
+          warnings: parsed.warnings,
+        },
+      });
     })
   );
 

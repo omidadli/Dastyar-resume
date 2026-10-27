@@ -36,18 +36,22 @@ export interface SourcingExperience {
 }
 
 export interface SourcingProfile {
-  /** Stable id at the provider (never invented by HOVIDA). */
+  /** Stable id at the provider (or the row position for a CSV import). */
   id: string;
   fullName: string;
   headline: string;
   location: string;
   profileUrl: string;
-  /** «Open to work» as reported by the provider (never inferred). */
+  /** «Open to work» as reported by the provider/file (never inferred). */
   openToWork: boolean;
   currentCompany: string | null;
   experiences: SourcingExperience[];
   education: string[];
   skills: string[];
+  /** Only present when the source provided it (CSV column, provider field). */
+  email?: string | null;
+  /** Free-text summary from the source (CSV «Notes»/«About» column). */
+  notes?: string | null;
 }
 
 export type SourcingStatus = 'running' | 'done' | 'error' | 'not_configured';
@@ -66,10 +70,40 @@ export interface SourcingSearch {
   results: SourcingProfile[];
   /** Profile id → resume id created when the candidate was added to an opening. */
   imported: Record<string, string>;
+  /** Where the profiles came from: the connected service, or an uploaded file. */
+  source?: 'provider' | 'csv';
   createdBy: string | null;
   createdByName: string | null;
   createdAtISO: string;
   createdAtJalali: string;
+}
+
+/** What an uploaded CSV looks like before anything is created. */
+export interface SourcingCsvPreview {
+  /** Header cells as they appear in the file (empty when there was no header). */
+  headers: string[];
+  /** The fields that were understood, in Persian. */
+  recognised: string[];
+  separator: string;
+  totalRows: number;
+  /** Rows without a usable name. */
+  skippedRows: number;
+  profileCount: number;
+  /** The file itself reports «open to work» for some people. */
+  hasOpenToWorkColumn: boolean;
+  warnings: string[];
+}
+
+/** The result of turning a file into a search result. */
+export interface SourcingCsvSummary {
+  totalRows: number;
+  profileCount: number;
+  kept: number;
+  filteredOut: number;
+  skippedRows: number;
+  hasOpenToWorkColumn: boolean;
+  recognised: string[];
+  warnings: string[];
 }
 
 /** Read-only status of the deployment's sourcing credential. */

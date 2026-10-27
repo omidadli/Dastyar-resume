@@ -10,6 +10,7 @@ process.env.APP_SECRET = 'integration-test-secret-0123456789';
 import { cleanSubject, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings } from '../server/mailer';
 import { accessTokenFor, buildInviteIcs, CALENDAR_TIMEZONE, googleClient, redirectUriFor, signState, verifyState } from '../server/gcal';
 import { apifyInput, buildLocalBrief, finishProfiles, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
+import { csvSummary, parseCsv, profilesFromCsv, readCsv } from '../server/csv-import';
 import { tehranIsoFromJalali, jalaliAndTehranTime } from '../server/tehran-time';
 import type { OrgSecrets } from '../server/db';
 
@@ -232,6 +233,57 @@ function assert(cond: boolean, label: string, extra = '') {
     'without credentials the status says exactly where to set them (admin panel)',
     status.setupHint
   );
+}
+
+// -------------------------------------------------- import a CSV file ----
+
+{
+  // Quoted cells with a comma, an escaped quote and an embedded newline.
+  const tricky = parseCsv('a,b\r\n"x, y","he said ""hi""\nsecond line"\r\n');
+  assert(tricky.rows.length === 2 && tricky.rows[1][0] === 'x, y', 'a quoted comma stays inside one cell', JSON.stringify(tricky.rows[1]?.[0]));
+  assert(tricky.rows[1][1] === 'he said "hi"\nsecond line', 'escaped quotes and embedded newlines survive');
+  assert(parseCsv('a;b;c\n1;2;3').separator === ';', 'a semicolon file is detected (Excel in fa-IR)');
+  assert(parseCsv('a\tb\n1\t2').separator === '\t', 'a tab-separated file is detected');
+
+  const fa = profilesFromCsv(
+    '\uFEFFنام و نام خانوادگی,عنوان شغلی,شهر,شرکت,مهارت‌ها,تحصیلات,وضعیت همکاری,ایمیل\n' +
+      'مریم کاظمی,کارشناس ارشد حسابداری صنعتی,تهران,گروه صنعتی البرز,"SAP، اکسل پیشرفته",کارشناسی ارشد حسابداری,بله,maryam@example.com\n' +
+      'حسین رضایی,حسابدار,کرج,شرکت آریا,اکسل,کارشناسی حسابداری,خیر,\n' +
+      ',بدون نام,شیراز,,,,\n'
+  );
+  assert(fa.profiles.length === 2 && fa.skippedRows === 1, 'Persian headers are understood and a nameless row is skipped', `${fa.profiles.length}/${fa.skippedRows}`);
+  assert(fa.recognised.includes('نام') && fa.recognised.includes('مهارت‌ها') && fa.recognised.includes('وضعیت همکاری'), 'the recognised columns are reported in Persian', fa.recognised.join('، '));
+  assert(fa.hasOpenToWorkColumn === true, 'the file reports the open-to-work status');
+  assert(fa.profiles[0].openToWork === true && fa.profiles[1].openToWork === false, 'the status is read per person (بله/خیر)');
+  assert(fa.profiles[0].skills.length === 2 && fa.profiles[0].skills[0] === 'SAP', 'a skills cell is split into a list', fa.profiles[0].skills.join('|'));
+  assert(fa.profiles[0].email === 'maryam@example.com' && fa.profiles[1].email === null, 'a valid e-mail is kept, an empty cell is not invented');
+  assert(fa.profiles[0].experiences[0].title === 'کارشناس ارشد حسابداری صنعتی' && fa.profiles[0].currentCompany === 'گروه صنعتی البرز', 'title and company become the experience row');
+
+  const en = profilesFromCsv(
+    'First Name,Last Name,Headline,Location,Current Company,Profile URL,Open to work,Skills\n' +
+      'Sara,Ahmadi,Product Manager,Tehran,Acme,https://www.linkedin.com/in/sara-ahmadi,YES,roadmap; discovery\n' +
+      'Sara,Ahmadi,Product Manager,Tehran,Acme,https://www.linkedin.com/in/sara-ahmadi,YES,roadmap\n' +
+      'Reza,Karimi,Backend Developer,Isfahan,Behsazan,https://www.linkedin.com/in/reza-karimi,,Node.js\n'
+  );
+  assert(en.profiles.length === 2, 'a repeated person in the file is counted once', String(en.profiles.length));
+  assert(en.profiles[0].fullName === 'Sara Ahmadi' && en.profiles[1].fullName === 'Reza Karimi', 'first + last name are joined');
+  assert(en.profiles[1].openToWork === false, 'an empty status cell is not treated as «open to work»');
+  assert(en.warnings.some((w) => w.includes('تکرار')), 'the duplicate is mentioned in the warnings', en.warnings.join(' | '));
+
+  const noHeader = readCsv('مریم کاظمی,کارشناس حسابداری,تهران\nحسین رضایی,حسابدار,کرج');
+  assert(noHeader.mapping.fullName === 0 && noHeader.mapping.headline === 1, 'a header-less file falls back to positions');
+  assert(noHeader.warnings.some((w) => w.includes('عنوان ستون')), 'the fallback is disclosed, not silent');
+
+  const noStatus = profilesFromCsv('Name,Headline\nمریم کاظمی,حسابدار');
+  assert(noStatus.hasOpenToWorkColumn === false, 'a file without the status column is reported as such');
+  assert(/ستون «آمادهٔ همکاری» در فایل نبود/.test(csvSummary(noStatus, 1, 0, true)), 'the summary explains why the filter was not applied');
+
+  const filtered = profilesFromCsv('Name,Open to work\nمریم کاظمی,yes\nحسین رضایی,no');
+  const summary = csvSummary(filtered, 1, 1, true);
+  assert(/از ۲ ردیف فایل/.test(summary) && /۱ نفر در فایل «آمادهٔ همکاری» نبودند/.test(summary), 'the summary counts what was filtered out', summary);
+
+  const empty = profilesFromCsv('');
+  assert(empty.profiles.length === 0 && empty.warnings.length > 0, 'an empty file explains itself');
 }
 
 // ------------------------------------------- Google access-token refresh ----

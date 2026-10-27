@@ -7,6 +7,7 @@ import {
   Clock3,
   Copy,
   ExternalLink,
+  FileText,
   Filter,
   Link2,
   Loader2,
@@ -14,6 +15,7 @@ import {
   Search,
   Sparkles,
   Trash2,
+  UploadCloud,
   UserPlus,
   Users,
   Wand2,
@@ -44,7 +46,7 @@ import { faDate, toPersianDigits } from '../lib/format';
 import { navigate, useLocation } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import type { SourcingBrief, SourcingProfile, SourcingSearch } from '../types/integrations';
+import type { SourcingBrief, SourcingCsvPreview, SourcingProfile, SourcingSearch } from '../types/integrations';
 
 /**
  * «جست‌وجوی استعداد» — describe the specialist you need; the AI turns it into
@@ -72,6 +74,13 @@ export default function Sourcing() {
   const [error, setError] = useState<string | null>(null);
   const [targetJobId, setTargetJobId] = useState('');
   const [importing, setImporting] = useState<string | null>(null);
+  // «فهرستی که خودتان دارید» — a Recruiter export brought in as a file.
+  const [csvName, setCsvName] = useState('');
+  const [csvText, setCsvText] = useState('');
+  const [csvPreview, setCsvPreview] = useState<SourcingCsvPreview | null>(null);
+  const [csvProfiles, setCsvProfiles] = useState<SourcingProfile[]>([]);
+  const [csvBusy, setCsvBusy] = useState(false);
+  const [csvError, setCsvError] = useState<string | null>(null);
 
   const departments = org?.departments || [];
   const jobs = jobsQ.data?.items || [];
@@ -209,6 +218,70 @@ export default function Sourcing() {
       if ((e as any)?.data?.search) setSearch((e as any).data.search);
     } finally {
       setSearching(false);
+    }
+  };
+
+  // ------------------------------------------------- import a file (CSV) ----
+
+  const readCsvFile = async (file: File) => {
+    setCsvError(null);
+    setCsvPreview(null);
+    setCsvProfiles([]);
+    setCsvName(file.name);
+    try {
+      const text = await file.text();
+      if (!text.trim()) {
+        setCsvError('فایل خالی است.');
+        return;
+      }
+      setCsvText(text);
+      await previewCsv(text);
+    } catch {
+      setCsvError('خواندن فایل ممکن نشد؛ فایل متنی CSV (UTF-8) انتخاب کنید.');
+    }
+  };
+
+  const previewCsv = async (text?: string) => {
+    const payload = (text ?? csvText).trim();
+    if (!payload) return;
+    setCsvBusy(true);
+    setCsvError(null);
+    try {
+      const res = await api.sourcing.csvPreview({ csv: payload });
+      setCsvPreview(res.preview);
+      setCsvProfiles(res.profiles);
+    } catch (e: any) {
+      setCsvError(e?.message || 'این فایل خوانده نشد.');
+    } finally {
+      setCsvBusy(false);
+    }
+  };
+
+  const importCsv = async () => {
+    const payload = csvText.trim();
+    if (!payload) return toast('اول فایل CSV را انتخاب یا متن جدول را بچسبانید.', 'error');
+    if (!departmentId) return toast('ابتدا دپارتمان را انتخاب کنید.', 'error');
+    setCsvBusy(true);
+    setCsvError(null);
+    try {
+      const res = await api.sourcing.csv({
+        csv: payload,
+        fileName: csvName || undefined,
+        departmentId,
+        jobId: jobId || null,
+        roleTitle: roleTitle || undefined,
+        openToWorkOnly,
+      });
+      setSearch(res.search);
+      setBrief(res.search.brief);
+      setTargetJobId(res.search.jobId || targetJobId);
+      historyQ.refresh();
+      navigate(`/app/sourcing?search=${res.search.id}`, { keepScroll: false, replace: true });
+      toast(`${toPersianDigits(res.summary.kept)} پروفایل از فایل آماده شد.`, 'success');
+    } catch (e: any) {
+      setCsvError(e?.message || 'ساخت فهرست از فایل ممکن نشد.');
+    } finally {
+      setCsvBusy(false);
     }
   };
 
@@ -355,6 +428,95 @@ export default function Sourcing() {
             </div>
           </Card>
 
+          {/* ---------- bring in a list you already have ---------- */}
+          <Card>
+            <CardHeader
+              icon={FileText}
+              title="فهرستی از قبل دارید؟ (CSV)"
+              subtitle="خروجی LinkedIn Recruiter یا هر فایل جدولی: ستون‌های نام، عنوان، شهر، شرکت، مهارت و وضعیت همکاری شناسایی می‌شوند."
+            />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  id="sourcing-csv-file"
+                  type="file"
+                  accept=".csv,.tsv,.txt,text/csv,text/plain"
+                  className="sr-only"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void readCsvFile(file);
+                    e.target.value = '';
+                  }}
+                />
+                <label
+                  htmlFor="sourcing-csv-file"
+                  className="inline-flex items-center gap-2 h-10 px-3.5 rounded-[10px] border border-line bg-surface text-[13px] font-semibold text-ink cursor-pointer hover:bg-canvas"
+                >
+                  <UploadCloud className="w-4 h-4" /> انتخاب فایل CSV
+                </label>
+                {csvName && <span className="text-[12px] text-ink-3" dir="auto">{csvName}</span>}
+                {csvBusy && <Loader2 className="w-4 h-4 animate-spin text-brand-strong" />}
+              </div>
+
+              <TextArea
+                label="یا متن جدول را بچسبانید"
+                rows={3}
+                value={csvText}
+                onChange={(e) => {
+                  setCsvText(e.target.value);
+                  setCsvPreview(null);
+                  setCsvProfiles([]);
+                }}
+                placeholder={'First Name,Last Name,Location,Current Company,Skills\nمریم,کاظمی,Tehran,گروه البرز,SAP؛ بهای تمام‌شده'}
+                hint="سرستون‌ها به فارسی یا انگلیسی، با کاما، نقطه‌ویرگول یا Tab — هر ترتیبی."
+              />
+
+              {csvPreview && (
+                <div className="rounded-[10px] border border-line-2 bg-canvas p-3 flex flex-col gap-2">
+                  <p className="text-[12.5px] text-ink-2">
+                    {toPersianDigits(csvPreview.totalRows)} ردیف خوانده شد · {toPersianDigits(csvPreview.profileCount)} پروفایل
+                    {csvPreview.skippedRows > 0 ? ` · ${toPersianDigits(csvPreview.skippedRows)} ردیف بی‌نام` : ''}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {csvPreview.recognised.map((f) => (
+                      <Chip key={f} tone="outline">{f}</Chip>
+                    ))}
+                    {csvPreview.hasOpenToWorkColumn ? (
+                      <Chip tone="brand">ستون «آمادهٔ همکاری» دارد</Chip>
+                    ) : (
+                      <Chip tone="warning">وضعیت همکاری در فایل نیست</Chip>
+                    )}
+                  </div>
+                  {csvProfiles.length > 0 && (
+                    <p className="text-[12px] text-ink-3" dir="auto">
+                      نمونه: {csvProfiles.map((p) => p.fullName).join('، ')}
+                      {csvPreview.profileCount > csvProfiles.length ? ' و …' : ''}
+                    </p>
+                  )}
+                  {csvPreview.warnings.map((w) => (
+                    <p key={w} className="text-[11.5px] text-low-ink">{w}</p>
+                  ))}
+                </div>
+              )}
+
+              {csvError && (
+                <Callout tone="warning" icon={AlertTriangle}>
+                  {csvError}
+                </Callout>
+              )}
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="secondary" onClick={() => void previewCsv()} loading={csvBusy} disabled={!csvText.trim() || csvBusy}>
+                  بررسی فایل
+                </Button>
+                <Button icon={Users} onClick={() => void importCsv()} loading={csvBusy} disabled={!csvText.trim() || csvBusy || !departmentId}>
+                  ساخت فهرست و غربال
+                </Button>
+                <span className="text-[11.5px] text-ink-4">هیچ سرویس بیرونی فراخوانی نمی‌شود؛ فایل فقط روی سرور خودتان خوانده می‌شود.</span>
+              </div>
+            </div>
+          </Card>
+
           {brief && (
             <Card>
               <CardHeader
@@ -411,13 +573,19 @@ export default function Sourcing() {
             <Card padded={false}>
               <div className="p-4 sm:p-5 border-b border-line-2 flex flex-wrap items-center gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-[14px] font-bold text-ink">نتایج جست‌وجو</p>
+                  <p className="text-[14px] font-bold text-ink flex flex-wrap items-center gap-2">
+                    {search.source === 'csv' ? 'پروفایل‌های فایل' : 'نتایج جست‌وجو'}
+                    {search.source === 'csv' && <Chip tone="neutral" icon={FileText}>از فایل</Chip>}
+                  </p>
                   <p className="text-[12.5px] text-ink-3 mt-0.5">
                     {search.departmentName}
                     {search.jobTitle ? ` · ${search.jobTitle}` : ''}، {faDate(search.createdAtISO)}،{' '}
                     {toPersianDigits(results.length)} پروفایل
                     {search.message && search.status !== 'done' ? ` · ${search.message}` : ''}
                   </p>
+                  {search.source === 'csv' && search.message && (
+                    <p className="text-[12px] text-ink-3 mt-1 leading-relaxed">{search.message}</p>
+                  )}
                 </div>
                 <Select
                   compact
@@ -453,7 +621,11 @@ export default function Sourcing() {
                 <EmptyState
                   icon={Users}
                   title="پروفایلی پیدا نشد"
-                  description="شرایط را کمی بازتر کنید: یک شهر یا یک مهارت را بردارید، یا گزینهٔ «فقط Open to work» را موقتاً خاموش کنید."
+                  description={
+                    search.source === 'csv'
+                      ? 'در این فایل ردیف قابل‌استفاده‌ای نبود؛ مطمئن شوید ستون «نام» دارد و فایل با UTF-8 ذخیره شده است.'
+                      : 'شرایط را کمی بازتر کنید: یک شهر یا یک مهارت را بردارید، یا گزینهٔ «فقط Open to work» را موقتاً خاموش کنید.'
+                  }
                 />
               )}
 

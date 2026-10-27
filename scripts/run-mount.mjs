@@ -107,6 +107,9 @@ assert(
   text().includes('جست‌وجو در LinkedIn') || text().includes('در این نصب فعال نیست'),
   'sourcing shows the search action or an honest «not configured» note'
 );
+// The file path works with no provider at all, so it must always be on the page.
+assert(text().includes('فهرستی از قبل دارید؟'), 'the CSV import card is available without any provider');
+assert(text().includes('انتخاب فایل CSV') && text().includes('ساخت فهرست و غربال'), 'the CSV card offers choosing a file and building the list');
 
 // 8. Settings › connections (e-mail + calendar)
 navigate('/app/settings/integrations');

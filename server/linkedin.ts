@@ -515,8 +515,10 @@ export function profileToResumeText(p: SourcingProfile): string {
   }
   if (p.education.length) lines.push(`تحصیلات: ${p.education.join('؛ ')}`);
   if (p.skills.length) lines.push(`مهارت‌ها: ${p.skills.join('، ')}`);
+  if (p.email) lines.push(`ایمیل: ${p.email}`);
+  if (p.notes) lines.push(`درباره: ${p.notes}`);
   if (p.profileUrl) lines.push(`پروفایل: ${p.profileUrl}`);
-  lines.push(`منبع: نمایهٔ LinkedIn${p.openToWork ? ' (وضعیت: آمادهٔ همکاری)' : ''}`);
+  lines.push(`منبع: ${p.id.startsWith('csv-') ? 'خروجی LinkedIn (فایل)' : 'نمایهٔ LinkedIn'}${p.openToWork ? ' (وضعیت: آمادهٔ همکاری)' : ''}`);
   return lines.join('\n').slice(0, 20_000);
 }
 

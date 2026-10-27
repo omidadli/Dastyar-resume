@@ -174,6 +174,26 @@ export interface ConnectionsPayload {
   docs: { sourcing: string; google: string };
 }
 
+/**
+ * One row of «همه را بررسی کن»: `ok` is null when the check could not be made
+ * (nothing configured, no route to the provider, or a per-workspace secret that
+ * needs a real send). Null is never displayed as «سالم».
+ */
+export interface ConnectionHealthCheck {
+  key: 'sourcing' | 'google' | 'email' | 'calendar';
+  title: string;
+  configured: boolean;
+  ok: boolean | null;
+  message: string;
+  detail: string | null;
+}
+
+export interface ConnectionsHealth {
+  atISO: string;
+  checks: ConnectionHealthCheck[];
+  adoption: { orgs: number; email: number; calendar: number };
+}
+
 export interface SourcingConnectionInput {
   kind?: SourcingProviderKind;
   endpointUrl?: string;

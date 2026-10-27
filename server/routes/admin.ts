@@ -66,6 +66,7 @@ import type {
   SystemSettings,
 } from '../../src/types/admin';
 import { probeProvider } from '../linkedin';
+import { toPersianDigits } from '../../src/utils/jalali';
 import { verifyGoogleClient } from '../gcal';
 import type { Role } from '../../src/types/app';
 import type { Job } from '../../src/types/screening';
@@ -695,6 +696,86 @@ export function adminRoutes(): express.Router {
       markSourcingProbe(probe.ok, probe.error); // no-op when the value comes from the environment
       log(req, 'connections.sourcing.test', conn.endpointUrl, probe.ok ? 'موفق' : String(probe.error));
       res.json({ result: probe, connections: connectionsPublic(requestOrigin(req)) });
+    })
+  );
+
+  /**
+   * «همه را بررسی کن» — one page that answers «آیا اتصال‌ها واقعاً کار می‌کنند؟»
+   * without opening four cards. Every check is read-only and, for Apify, free:
+   * the token is verified with /users/me, no actor run is started.
+   */
+  r.post(
+    '/connections/health',
+    h(async (req, res) => {
+      const atISO = new Date().toISOString();
+      const adoption = db.connectionAdoption();
+      const sourcing = sourcingConnection();
+      const google = googleOAuthConnection();
+      const origin = requestOrigin(req);
+
+      const [sourcingCheck, googleCheck] = await Promise.all([
+        sourcing
+          ? probeProvider({ kind: sourcing.kind, endpoint: sourcing.endpointUrl, token: sourcing.token, actorId: sourcing.actorId })
+          : Promise.resolve(null),
+        google ? verifyGoogleClient(google.clientId, google.clientSecret, google.redirectUri || `${origin}/api/integrations/calendar/callback`) : Promise.resolve(null),
+      ]);
+      if (sourcingCheck) markSourcingProbe(sourcingCheck.ok, sourcingCheck.error);
+      if (googleCheck) markGoogleProbe(googleCheck.ok, googleCheck.error);
+
+      const checks = [
+        {
+          key: 'sourcing' as const,
+          title: 'سرویس جست‌وجوی LinkedIn',
+          configured: Boolean(sourcing),
+          // null = could not be checked (nothing configured, or no route out).
+          ok: sourcingCheck ? sourcingCheck.ok : null,
+          message: !sourcing
+            ? 'تنظیم نشده؛ جست‌وجوی API غیرفعال است (وارد کردن فایل CSV همچنان کار می‌کند).'
+            : sourcingCheck!.ok
+              ? sourcingCheck!.detail || 'سرویس پاسخ داد و توکن معتبر است.'
+              : sourcingCheck!.error || 'آزمایش ناموفق بود.',
+          detail: sourcing ? `${sourcing.providerLabel}${sourcing.kind === 'apify' ? ' (اپافی)' : ''}` : null,
+        },
+        {
+          key: 'google' as const,
+          title: 'کلید OAuth گوگل',
+          configured: Boolean(google),
+          ok: googleCheck ? googleCheck.ok : null,
+          message: !google
+            ? 'تنظیم نشده؛ دکمهٔ «اتصال حساب گوگل» در تنظیمات هر فضای کاری کار نمی‌کند.'
+            : googleCheck!.ok === true
+              ? 'گوگل همین Client ID/Secret را شناخت.'
+              : googleCheck!.ok === false
+                ? googleCheck!.error || 'گوگل کلید را نپذیرفت.'
+                : googleCheck!.error || 'بررسی آنلاین ممکن نشد (دسترسی سرور به گوگل؟).',
+          detail: google ? `${adoption.calendar} از ${adoption.orgs} فضای کاری حساب گوگل وصل کرده‌اند` : null,
+        },
+        {
+          key: 'email' as const,
+          title: 'صندوق ایمیل سازمان‌ها',
+          configured: adoption.email > 0,
+          // Per-workspace secrets cannot be tested from here without a real send.
+          ok: null,
+          message:
+            adoption.email > 0
+              ? `${toPersianDigits(adoption.email)} فضای کاری صندوق ایمیل خود را وصل کرده‌اند؛ آزمایش واقعی از «تنظیمات ← اتصال‌ها ← آزمایش» همان فضای کاری انجام می‌شود.`
+              : 'هیچ فضای کاری صندوق ایمیل وصل نکرده است؛ دکمهٔ «ارسال» با پیام روشن غیرفعال می‌ماند.',
+          detail: `${adoption.email} / ${adoption.orgs}`,
+        },
+        {
+          key: 'calendar' as const,
+          title: 'تقویم گوگل فضای کاری‌ها',
+          configured: adoption.calendar > 0,
+          ok: null,
+          message:
+            adoption.calendar > 0
+              ? `${toPersianDigits(adoption.calendar)} فضای کاری حساب گوگل را وصل کرده‌اند؛ مصاحبه‌ها در تقویم خودشان ثبت می‌شود.`
+              : 'هنوز هیچ فضای کاری حساب گوگل را وصل نکرده است؛ مصاحبه‌ها فقط داخل هویدا و با فایل ICS ذخیره می‌شوند.',
+          detail: `${adoption.calendar} / ${adoption.orgs}`,
+        },
+      ];
+      log(req, 'connections.health', '', checks.map((c) => `${c.key}:${c.ok === true ? 'ok' : c.ok === false ? 'bad' : 'n/a'}`).join(' '));
+      res.json({ atISO, checks, adoption });
     })
   );
 

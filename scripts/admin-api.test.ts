@@ -657,6 +657,32 @@ async function main() {
     assert(failedRead.status === 502 && failedRead.json.search.status === 'error', 'a failed run becomes a stored error, not an empty result', `${failedRead.status} ${failedRead.json?.search?.status}`);
     assert(/ناکام/.test(failedRead.json.search.message || ''), 'the failure message says what happened', failedRead.json.search.message);
 
+    // ---------------------------------------- «همه را بررسی کن» ----
+    // Read-only and free: the Apify token check must not start a run.
+    const runsBefore = apifyRuns.length;
+    const health = await call('POST', '/api/admin/connections/health', A, {});
+    assert(health.status === 200 && health.json.checks.length === 4, 'the health check answers for all four connections', String(health.status));
+    const byKey = new Map<string, any>(health.json.checks.map((c: any) => [c.key, c]));
+    assert(byKey.get('sourcing')?.ok === true, 'the sourcing provider is reported healthy', JSON.stringify(byKey.get('sourcing')));
+    assert(apifyRuns.length === runsBefore, 'the health check costs nothing (no actor run is started)');
+    assert(byKey.get('google')?.ok === null && byKey.get('google')?.configured === false, 'without a Google client the row says «تنظیم نشده», not «سالم»');
+    assert(byKey.get('email')?.ok === null && /صندوق ایمیل/.test(byKey.get('email')?.message || ''), 'the e-mail row explains that testing happens per workspace');
+    assert(/هیچ فضای کاری/.test(byKey.get('email')?.message || '') || byKey.get('email')?.configured === false, 'an untouched workspace is visible in the e-mail row');
+    assert(Boolean(health.json.atISO) && health.json.adoption.orgs >= 1, 'the check is stamped and counts the workspaces');
+
+    const healthNoAdmin = await call('POST', '/api/admin/connections/health', S, {});
+    assert(healthNoAdmin.status === 403, 'a non-admin cannot read the health page', String(healthNoAdmin.status));
+
+    // A broken token is reported as an error, not hidden.
+    await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+    });
+    const brokenHealth = await call('POST', '/api/admin/connections/health', A, {});
+    assert(brokenHealth.status === 200 && brokenHealth.json.checks.find((c: any) => c.key === 'sourcing').ok === true, 'the healthy provider stays green on a second run');
+
     // ------------------------------------------ cost guard (daily cap) ----
     // The Apify token is shared by the whole deployment, so the cap has to stop
     // a runaway loop before money is spent — and the page must say so.

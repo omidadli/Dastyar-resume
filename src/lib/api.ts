@@ -45,6 +45,7 @@ import type {
 } from '../types/integrations';
 import type {
   AdminMe,
+  ConnectionsHealth,
   AdminOrgRow,
   AdminOverview,
   AdminUserRow,
@@ -473,6 +474,8 @@ export const adminApi = {
       { timeoutMs: 60_000 }
     ),
   removeSourcingConnection: () => del<ConnectionsPayload>('/api/admin/connections/sourcing'),
+  /** «همه را بررسی کن» — read-only, free checks of every outside connection. */
+  connectionsHealth: () => post<ConnectionsHealth>('/api/admin/connections/health', {}, { timeoutMs: 90_000 }),
   saveGoogleConnection: (b: GoogleConnectionInput) =>
     put<{ connections: ConnectionsPayload; check: { ok: boolean | null; error: string | null } }>('/api/admin/connections/google', b, { timeoutMs: 40_000 }),
   removeGoogleConnection: () => del<ConnectionsPayload>('/api/admin/connections/google'),

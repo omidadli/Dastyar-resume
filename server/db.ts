@@ -1465,6 +1465,21 @@ export function saveEmail(record: SentEmailRow): SentEmailRow {
   return record;
 }
 
+/**
+ * How many workspaces have connected their own mailbox / Google account. The
+ * deployment-level health page reports this so «همه‌چیز وصل است» is not claimed
+ * from the OAuth client alone.
+ */
+export function connectionAdoption(): { orgs: number; email: number; calendar: number } {
+  let email = 0;
+  let calendar = 0;
+  for (const secrets of orgSecrets.values()) {
+    if (secrets.email) email += 1;
+    if (secrets.calendar?.refreshTokenEnc) calendar += 1;
+  }
+  return { orgs: orgs.size, email, calendar };
+}
+
 export function getOrgSecrets(orgId: string): OrgSecrets {
   return orgSecrets.get(orgId) || {};
 }

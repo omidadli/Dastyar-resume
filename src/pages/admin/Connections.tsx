@@ -7,6 +7,7 @@ import {
   Globe2,
   Hourglass,
   KeyRound,
+  Stethoscope,
   PlugZap,
   Save,
   ShieldCheck,
@@ -17,7 +18,7 @@ import { Button, Callout, Card, CardHeader, Chip, ConfirmDialog, ErrorState, Ske
 import { adminApi } from '../../lib/api';
 import { faDate } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
-import type { ConnectionsPayload } from '../../types/admin';
+import type { ConnectionsHealth, ConnectionsPayload } from '../../types/admin';
 import { AdminHeader } from './shared';
 
 function copy(text: string, what: string) {
@@ -426,8 +427,77 @@ function GoogleCard({ data, setData }: { data: ConnectionsPayload; setData: (d: 
   );
 }
 
+/**
+ * «همه را بررسی کن» — four honest rows: green only when the provider really
+ * answered; «بررسی نشد» when the check itself was impossible.
+ */
+function HealthPanel({ health, loading, onRun }: { health: ConnectionsHealth | null; loading: boolean; onRun: () => void }) {
+  return (
+    <Card>
+      <CardHeader
+        icon={Stethoscope}
+        title="بررسی سلامت اتصال‌ها"
+        subtitle="یک دکمه، همهٔ اتصال‌ها: هر بررسی فقط‌خواندنی است و اپافی برای بررسی توکن هزینه‌ای نمی‌گیرد."
+        action={
+          <Button size="sm" variant="secondary" onClick={onRun} loading={loading} icon={Stethoscope}>
+            همه را بررسی کن
+          </Button>
+        }
+      />
+      {!health ? (
+        <p className="text-[12.5px] text-ink-3">
+          هنوز بررسی‌ای اجرا نشده است؛ دکمهٔ «همه را بررسی کن» وضعیت سرویس جست‌وجو، کلید گوگل، صندوق ایمیل و
+          تقویم فضای کاری‌ها را یک‌جا نشان می‌دهد.
+        </p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {health.checks.map((c) => (
+            <div key={c.key} className="rounded-[10px] border border-line-2 bg-canvas p-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[13px] font-semibold text-ink">{c.title}</span>
+                {c.ok === true ? (
+                  <Chip tone="brand">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> سالم
+                  </Chip>
+                ) : c.ok === false ? (
+                  <Chip tone="danger">
+                    <AlertTriangle className="w-3.5 h-3.5" /> خطا
+                  </Chip>
+                ) : (
+                  <Chip tone="warning">
+                    <Hourglass className="w-3.5 h-3.5" /> {c.configured ? 'بررسی نشد' : 'تنظیم نشده'}
+                  </Chip>
+                )}
+                {c.detail && <span className="text-[11.5px] text-ink-4">{c.detail}</span>}
+              </div>
+              <p className="text-[12.5px] text-ink-2 mt-1 leading-relaxed">{c.message}</p>
+            </div>
+          ))}
+          <p className="text-[11.5px] text-ink-4">زمان بررسی: {faDate(health.atISO)}</p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 export default function ConnectionsPage() {
   const { data, error, reload, setData } = useAsync(() => adminApi.connections(), []);
+  const [health, setHealth] = useState<ConnectionsHealth | null>(null);
+  const [healthBusy, setHealthBusy] = useState(false);
+
+  const runHealth = async () => {
+    setHealthBusy(true);
+    try {
+      const result = await adminApi.connectionsHealth();
+      setHealth(result);
+      const bad = result.checks.filter((c) => c.ok === false).length;
+      toast(bad ? `${bad} اتصال مشکل دارد؛ جزئیات را در همان کارت ببینید.` : 'بررسی انجام شد؛ جزئیات در کارت «بررسی سلامت» است.', bad ? 'error' : 'success');
+    } catch (err: any) {
+      toast(err?.message || 'بررسی اتصال‌ها ممکن نشد.', 'error');
+    } finally {
+      setHealthBusy(false);
+    }
+  };
 
   if (error && !data) {
     return (
@@ -448,6 +518,7 @@ export default function ConnectionsPage() {
         subtitle="کلیدهایی که یک‌بار برای کل سامانه ثبت می‌شوند: سرویس جست‌وجوی LinkedIn و Google Calendar."
       />
       <div className="space-y-5">
+        <HealthPanel health={health} loading={healthBusy} onRun={() => void runHealth()} />
         <Callout tone="info" icon={KeyRound}>
           دو اتصال دیگر — «ایمیل سازمان» و «حساب گوگل هر فضای کاری» — عمداً اینجا نیستند: هر فضای کاری از
           «تنظیمات ← اتصال‌ها» صندوق ایمیل و حساب تقویم خودش را وصل می‌کند. کلیدهای هوش مصنوعی هم در بخش

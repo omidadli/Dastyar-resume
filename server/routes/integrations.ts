@@ -26,6 +26,7 @@ import {
   startSearch,
 } from '../linkedin';
 import { buildSearchBrief } from '../sourcing';
+import { reminderHours, remindersEnabled, sendInterviewReminders } from '../reminders';
 import { sourcingConnection } from '../platform';
 import { csvSummary, profilesFromCsv } from '../csv-import';
 import {
@@ -369,6 +370,31 @@ export function integrationRoutes(): express.Router {
     res.json({ items: db.listInterviews(org.id, { jobId, resumeId }).map(publicInterview) });
   });
 
+  /**
+   * «یادآوری مصاحبه» — sends the reminders that are due now and reports exactly
+   * what happened. The same runner is called by a timer in server.ts; this route
+   * exists so an admin (or an external cron) can run it on demand.
+   */
+  r.post(
+    '/interviews/reminders',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      // Scoped to this workspace: a workspace admin can never send another
+      // tenant's reminder.
+      const result = await sendInterviewReminders(new Date(), org.id);
+      res.json({ reminders: result, hours: reminderHours() });
+    })
+  );
+
+  r.get('/interviews/reminders', requireRole('admin'), (req, res) => {
+    const { org } = ctxOf(req);
+    const dueNow = db
+      .listInterviewsForReminder(new Date().toISOString(), new Date(Date.now() + reminderHours() * 3600_000).toISOString())
+      .filter((row) => row.orgId === org.id).length;
+    res.json({ hours: reminderHours(), enabled: remindersEnabled(), dueNow });
+  });
+
   r.post(
     '/interviews',
     h(async (req, res) => {
@@ -425,12 +451,14 @@ export function integrationRoutes(): express.Router {
         timezone: 'Asia/Tehran',
         interviewerIds: interviewers.map((m) => m.id),
         interviewerNames: interviewers.map((m) => m.name),
+        interviewerEmails: interviewers.map((m) => m.email).filter(Boolean),
         location,
         notes,
         calendarEventId: null,
         calendarHtmlLink: null,
         meetLink: null,
         inviteSentTo: null,
+        reminderSentAtISO: null,
         status: 'scheduled',
         createdBy: user.id,
         createdByName: user.name,

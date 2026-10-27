@@ -378,6 +378,14 @@ export const api = {
       sendInvite: boolean;
     }) => post<{ interview: InterviewRecord; calendarError: string | null; emailError: string | null; record: ResumeListItem | null }>('/api/interviews', b, { timeoutMs: 90_000 }),
     cancel: (id: string) => del<{ interview: InterviewRecord; calendarError: string | null }>(`/api/interviews/${encodeURIComponent(id)}`),
+    /** «یادآوری»: sends the reminders that are due right now (one day before). */
+    sendReminders: () =>
+      post<{ reminders: { due: number; sent: number; skipped: unknown[]; failed: unknown[]; atISO: string }; hours: number }>(
+        '/api/interviews/reminders',
+        {},
+        { timeoutMs: 60_000 }
+      ),
+    reminderInfo: () => get<{ hours: number; enabled: boolean; dueNow: number }>('/api/interviews/reminders'),
     icsUrl: (id: string) => `/api/interviews/${encodeURIComponent(id)}/ics`,
   },
   sourcing: {

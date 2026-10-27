@@ -88,6 +88,7 @@ export type ActivityType =
   | 'sourcing.imported'
   | 'interview.scheduled'
   | 'interview.cancelled'
+  | 'interview.reminder'
   | 'settings.changed';
 
 export interface ActivityItem {

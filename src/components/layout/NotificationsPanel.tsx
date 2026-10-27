@@ -42,6 +42,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'sourcing.imported': UserPlus,
   'interview.scheduled': CalendarClock,
   'interview.cancelled': CalendarClock,
+  'interview.reminder': MailCheck,
   'settings.changed': SlidersHorizontal,
   'deep.review': FileSearch2,
   'resume.deleted': Trash2,

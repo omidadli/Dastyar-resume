@@ -155,6 +155,11 @@ async function main() {
     APP_SECRET: 'integration-api-secret-0123456789',
     LINKEDIN_API_URL: providerUrl,
     LINKEDIN_ACCESS_TOKEN: 'test-linkedin-token',
+    // The reminder window is 10 days here so the interview created below lands
+    // inside it (the production default is 24 hours).
+    INTERVIEW_REMINDER_HOURS: '240',
+    // The hourly timer would race with the manual trigger; the route is tested.
+    INTERVIEW_REMINDERS: 'off',
   } as NodeJS.ProcessEnv;
   for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'AI_PROVIDER', 'ADMIN_EMAILS', 'GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET', 'GOOGLE_REDIRECT_URI']) delete env[k];
   const child = spawn(process.execPath, [dist], { env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -404,6 +409,46 @@ async function main() {
     assert((await call('GET', '/api/integrations/emails', B)).json.items.length === 0, 'the e-mail log is tenant-isolated');
     const noRecipient = await call('POST', '/api/integrations/email/send', A, { subject: 'x', body: 'y' });
     assert(noRecipient.status === 400, 'a message without a valid recipient is refused');
+    // ------------------------------------------- interview reminders ----
+    // The reminder goes out one day before (window configurable), from the same
+    // mailbox, exactly once. This server runs with INTERVIEW_REMINDER_HOURS=240,
+    // which the code caps at seven days.
+    const soon = futureJalali(5);
+    const reminderInterview = await call('POST', '/api/interviews', A, {
+      jobId: job.id,
+      resumeId: imported.json.record.id,
+      candidateEmail: 'maryam@example.com',
+      title: 'مصاحبهٔ فروش',
+      date: soon.date,
+      time: '۱۰:۳۰',
+      durationMin: 30,
+      sendInvite: false,
+      withMeet: false,
+    });
+    assert(reminderInterview.status === 200, 'a second interview is scheduled for the reminder test', String(reminderInterview.status));
+
+    const reminderInfo = await call('GET', '/api/interviews/reminders', A);
+    assert(reminderInfo.status === 200 && reminderInfo.json.hours === 168, 'the reminder window is configurable (capped at seven days)', JSON.stringify(reminderInfo.json));
+    assert(reminderInfo.json.dueNow >= 1, 'the upcoming interview is seen as due', String(reminderInfo.json.dueNow));
+
+    const beforeCount = smtp.messages.length;
+    const reminders = await call('POST', '/api/interviews/reminders', A, {});
+    assert(reminders.status === 200 && reminders.json.reminders.sent === 1, 'the reminder is sent', JSON.stringify(reminders.json?.reminders));
+    assert(smtp.messages.length === beforeCount + 1, 'exactly one reminder message reached the mailbox', String(smtp.messages.length - beforeCount));
+    const reminderRaw = smtp.messages.at(-1) || '';
+    assert(/To: maryam@example\.com/i.test(reminderRaw), 'the reminder goes to the candidate');
+    assert(/Subject:/i.test(reminderRaw.split('\r\n\r\n')[0] || ''), 'the reminder has a subject');
+    const afterReminder = await call('GET', `/api/interviews?jobId=${job.id}`, A);
+    const reminded = afterReminder.json.items.find((i: any) => i.id === reminderInterview.json.interview.id);
+    assert(Boolean(reminded?.reminderSentAtISO), 'the interview remembers the reminder');
+    const cancelledRow = afterReminder.json.items.find((i: any) => i.id === interview.id);
+    assert(!cancelledRow?.reminderSentAtISO, 'a cancelled interview is never reminded');
+
+    const again2 = await call('POST', '/api/interviews/reminders', A, {});
+    assert(again2.status === 200 && again2.json.reminders.sent === 0 && smtp.messages.length === beforeCount + 1, 'the same reminder is never sent twice');
+    const otherOrgRun = await call('POST', '/api/interviews/reminders', B, {});
+    assert(otherOrgRun.status === 200 && otherOrgRun.json.reminders.due === 0, 'another workspace cannot trigger (or see) these reminders', JSON.stringify(otherOrgRun.json?.reminders));
+
     smtp.server.close();
 
     // ------------------------------------------------------- persistence ----

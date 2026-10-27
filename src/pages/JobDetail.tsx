@@ -12,6 +12,7 @@ import {
   Pause,
   Pencil,
   Play,
+  MailCheck,
   SearchX,
   Sparkles,
   ThumbsDown,
@@ -147,6 +148,27 @@ export default function JobDetail({ id }: { id: string }) {
   const [novelty, setNovelty] = useState<NoveltyFilter>('all');
   const [interviewVersion, setInterviewVersion] = useState(0);
   const interviewsQ = useAsync(() => api.interviews.list({ jobId: id }), [id, interviewVersion]);
+  const [reminderBusy, setReminderBusy] = useState(false);
+  /**
+   * The automatic timer sends these hourly; this button exists for the moments a
+   * recruiter wants them out now (and so the result is never a silent guess).
+   */
+  const sendReminders = async () => {
+    setReminderBusy(true);
+    try {
+      const res = await api.interviews.sendReminders();
+      const { sent, due, skipped, failed } = res.reminders;
+      if (sent > 0) toast(`${toPersianDigits(sent)} یادآوری فرستاده شد.`, 'success');
+      else if (failed.length) toast(`ارسال ناموفق بود؛ در «تنظیمات ← اتصال‌ها» صندوق ایمیل را بررسی کنید.`, 'error');
+      else if (due === 0) toast(`جلسه‌ای در ${toPersianDigits(res.hours)} ساعت آینده نیست.`, 'info');
+      else toast(`${toPersianDigits(skipped.length)} جلسه یادآوری نشد (بدون ایمیل کارجو یا بدون صندوق ایمیل).`, 'info');
+      setInterviewVersion((v) => v + 1);
+    } catch (err: any) {
+      toast(err?.message || 'ارسال یادآوری ممکن نشد.', 'error');
+    } finally {
+      setReminderBusy(false);
+    }
+  };
   const interviews = useMemo(() => (interviewsQ.data?.items || []).filter((i) => i.status !== 'cancelled'), [interviewsQ.data]);
   const cancelInterview = async (interviewId: string) => {
     try {
@@ -497,9 +519,21 @@ export default function JobDetail({ id }: { id: string }) {
             title="جلسه‌های مصاحبه"
             subtitle="جلسه‌هایی که از داخل هویدا برای کاندیداهای این فرصت شغلی تعیین شده‌اند."
             action={
-              <ButtonLink to={`/app/candidates?job=${id}`} variant="secondary" size="sm" icon={Users}>
-                انتخاب کاندیدا
-              </ButtonLink>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={MailCheck}
+                  loading={reminderBusy}
+                  onClick={() => void sendReminders()}
+                  title="یادآوری یک روز قبل از هر جلسه، از صندوق ایمیل همین فضای کاری"
+                >
+                  ارسال یادآوری‌های سررسید
+                </Button>
+                <ButtonLink to={`/app/candidates?job=${id}`} variant="secondary" size="sm" icon={Users}>
+                  انتخاب کاندیدا
+                </ButtonLink>
+              </div>
             }
           />
           {interviewsQ.loading ? (

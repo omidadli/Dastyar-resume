@@ -188,6 +188,8 @@ export interface InterviewRecord {
   timezone: string;
   interviewerIds: string[];
   interviewerNames: string[];
+  /** E-mail addresses of the interviewers (used for the reminder). */
+  interviewerEmails?: string[];
   location: string;
   notes: string;
   /** Google Calendar result (null when the event was only kept in HOVIDA). */
@@ -195,6 +197,8 @@ export interface InterviewRecord {
   calendarHtmlLink: string | null;
   meetLink: string | null;
   inviteSentTo: string | null;
+  /** When the «یادآوری مصاحبه» e-mail went out (null = not yet). */
+  reminderSentAtISO?: string | null;
   status: 'scheduled' | 'cancelled';
   createdBy: string | null;
   createdByName: string | null;

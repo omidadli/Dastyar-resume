@@ -312,6 +312,9 @@ export function InterviewList({ items, onCancel }: { items: InterviewRecord[]; o
               {faDate(it.startsAtISO)}، {toPersianDigits(it.durationMin)} دقیقه
               {it.status === 'cancelled' ? ' · لغو شده' : ''}
             </p>
+            {it.status !== 'cancelled' && it.reminderSentAtISO && (
+              <p className="text-[11.5px] text-brand-strong mt-0.5">یادآوری برای کارجو فرستاده شد</p>
+            )}
           </div>
           {it.meetLink && it.status !== 'cancelled' && (
             <ButtonLink to={it.meetLink} target="_blank" rel="noreferrer" variant="secondary" size="sm">

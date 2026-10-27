@@ -19,6 +19,7 @@ import { fileRoutes, resumeRoutes } from './server/routes/resumes';
 import { insightRoutes } from './server/routes/insights';
 import { integrationPublicRoutes, integrationRoutes } from './server/routes/integrations';
 import { backupPublicRoutes } from './server/routes/backup';
+import { remindersEnabled, runRemindersQuietly } from './server/reminders';
 
 dotenv.config({ override: true });
 
@@ -150,6 +151,13 @@ async function startServer() {
 
   // Housekeeping: expired sessions and demo workspaces.
   setInterval(() => db.purgeExpired(), 15 * 60_000).unref();
+
+  // «یادآوری مصاحبه»: once an hour, one day before each interview, from the
+  // workspace's own mailbox. Every interview is reminded at most once.
+  if (remindersEnabled()) {
+    setTimeout(() => void runRemindersQuietly(), 60_000).unref();
+    setInterval(() => void runRemindersQuietly(), 60 * 60_000).unref();
+  }
 
   const PORT = Number(process.env.PORT) || 3000;
   const server = app.listen(PORT, '0.0.0.0', () => {

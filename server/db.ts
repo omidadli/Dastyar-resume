@@ -1435,6 +1435,18 @@ export function listInterviews(orgId: string, filter: { jobId?: string; resumeId
     .sort((a, b) => a.startsAtISO.localeCompare(b.startsAtISO));
 }
 
+/**
+ * Interviews that need their «یادآوری» now: scheduled, not yet reminded, and
+ * starting between the two instants. Used by the reminder runner, which is why
+ * it is deliberately not per-workspace.
+ */
+export function listInterviewsForReminder(fromISO: string, toISO: string): InterviewRecordRow[] {
+  return Array.from(interviews.values())
+    .filter((x) => x.status === 'scheduled' && !x.reminderSentAtISO)
+    .filter((x) => x.startsAtISO > fromISO && x.startsAtISO <= toISO)
+    .sort((a, b) => a.startsAtISO.localeCompare(b.startsAtISO));
+}
+
 export function getInterview(orgId: string, id: string): InterviewRecordRow | null {
   const x = interviews.get(id);
   return x && x.orgId === orgId ? x : null;

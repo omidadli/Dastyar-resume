@@ -77,6 +77,7 @@ NODE_ENV=production npm start
 - **ایمیل سازمان (SMTP):** راهنما: [`docs/CONNECT-EMAIL.md`](docs/CONNECT-EMAIL.md).
 - **Google Calendar:** راهنما: [`docs/CONNECT-GOOGLE-CALENDAR.md`](docs/CONNECT-GOOGLE-CALENDAR.md).
 - **چه کلیدی از کجا و کجای سایت؟** پرامپت آماده برای گرفتن راهنمای گام‌به‌گام: [`docs/PROMPT-API-KEYS.md`](docs/PROMPT-API-KEYS.md).
+- **پرامپت‌های آماده برای Manus** (ساخت حساب Apify، OAuth گوگل، SMTP، کلید AI و آزمون نهایی): [`docs/PROMPT-MANUS.md`](docs/PROMPT-MANUS.md).
 - **دسترسی LinkedIn را چطور بخرم و چه چیزی واقعاً قابل خرید است؟** [`docs/LINKEDIN-ACCESS-OPTIONS.md`](docs/LINKEDIN-ACCESS-OPTIONS.md).
 - **بدون هیچ API: وارد کردن فهرست پروفایل از فایل CSV** (خروجی Recruiter یا هر جدول) → [`docs/IMPORT-CSV.md`](docs/IMPORT-CSV.md).
 

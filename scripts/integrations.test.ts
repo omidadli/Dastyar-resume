@@ -8,7 +8,7 @@
 process.env.APP_SECRET = 'integration-test-secret-0123456789';
 
 import { cleanSubject, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings } from '../server/mailer';
-import { buildInviteIcs, CALENDAR_TIMEZONE, googleClient, redirectUriFor, signState, verifyState } from '../server/gcal';
+import { accessTokenFor, buildInviteIcs, CALENDAR_TIMEZONE, googleClient, redirectUriFor, signState, verifyState } from '../server/gcal';
 import { apifyInput, buildLocalBrief, finishProfiles, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
 import { tehranIsoFromJalali, jalaliAndTehranTime } from '../server/tehran-time';
 import type { OrgSecrets } from '../server/db';
@@ -233,6 +233,96 @@ function assert(cond: boolean, label: string, extra = '') {
     status.setupHint
   );
 }
+
+// ------------------------------------------- Google access-token refresh ----
+
+/**
+ * The stored access token lives one hour; after that the refresh token must be
+ * used silently. A throwaway HTTP server stands in for Google's token endpoint
+ * so this contract is checked without any real account.
+ */
+async function refreshBlock() {
+  const http = await import('http');
+  const seen: string[] = [];
+  const server = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      const params = new URLSearchParams(raw);
+      seen.push(String(params.get('grant_type')));
+      if (params.get('client_id') !== 'unit-client' || params.get('client_secret') !== 'unit-secret') {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'invalid_client' }));
+      }
+      if (params.get('refresh_token') !== 'refresh-ok') {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: 'invalid_grant', error_description: 'Token has been expired or revoked.' }));
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ access_token: 'fresh-access', expires_in: 3599, token_type: 'Bearer' }));
+    });
+  });
+  const port = await new Promise<number>((resolve) => server.listen(0, '127.0.0.1', () => resolve((server.address() as any).port)));
+
+  process.env.GOOGLE_CLIENT_ID = 'unit-client';
+  process.env.GOOGLE_CLIENT_SECRET = 'unit-secret';
+  process.env.GOOGLE_TOKEN_URL = `http://127.0.0.1:${port}/token`;
+  const decrypt = (v: string) => (v.startsWith('plain:') ? v.slice(6) : null);
+  const encrypt = (v: string) => `plain:${v}`;
+
+  const expired: OrgSecrets = {
+    calendar: {
+      accountEmail: 'hr@example.com',
+      refreshTokenEnc: 'plain:refresh-ok',
+      accessTokenEnc: 'plain:stale-access',
+      expiresAt: Date.now() - 1000,
+      calendarId: 'primary',
+      connectedAtISO: new Date().toISOString(),
+    },
+  } as OrgSecrets;
+  const token = await accessTokenFor(expired, decrypt, encrypt);
+  assert(token === 'fresh-access', 'an expired access token is refreshed silently', token);
+  assert(expired.calendar!.accessTokenEnc === 'plain:fresh-access', 'the new access token is stored encrypted');
+  assert(expired.calendar!.expiresAt > Date.now() + 3_000_000, 'the new expiry is recorded');
+
+  const stillValid: OrgSecrets = {
+    calendar: {
+      accountEmail: 'hr@example.com',
+      refreshTokenEnc: 'plain:refresh-ok',
+      accessTokenEnc: 'plain:live-access',
+      expiresAt: Date.now() + 3600_000,
+      calendarId: 'primary',
+      connectedAtISO: new Date().toISOString(),
+    },
+  } as OrgSecrets;
+  const before = seen.length;
+  assert((await accessTokenFor(stillValid, decrypt, encrypt)) === 'live-access' && seen.length === before, 'a valid access token is reused without calling Google');
+
+  const revoked: OrgSecrets = { calendar: { ...expired.calendar!, refreshTokenEnc: 'plain:revoked', accessTokenEnc: null, expiresAt: 0 } } as OrgSecrets;
+  let message = '';
+  try {
+    await accessTokenFor(revoked, decrypt, encrypt);
+  } catch (err: any) {
+    message = err?.message || '';
+  }
+  assert(/دسترسی را نداد/.test(message), 'a revoked refresh token is reported in Persian, not swallowed', message);
+
+  const missing: OrgSecrets = {} as OrgSecrets;
+  let missingMessage = '';
+  try {
+    await accessTokenFor(missing, decrypt, encrypt);
+  } catch (err: any) {
+    missingMessage = err?.message || '';
+  }
+  assert(/وصل نیست/.test(missingMessage), 'without a connected account the error says so', missingMessage);
+
+  server.close();
+  delete process.env.GOOGLE_TOKEN_URL;
+  delete process.env.GOOGLE_CLIENT_ID;
+  delete process.env.GOOGLE_CLIENT_SECRET;
+}
+
+await refreshBlock();
 
 if (failures > 0) {
   console.error(`\n${failures} integration test(s) failed.`);

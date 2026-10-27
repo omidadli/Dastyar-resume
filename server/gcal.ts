@@ -16,10 +16,18 @@ import type { OrgSecrets } from './db';
 import { deriveKey } from './secret';
 import { googleOAuthConnection } from './platform';
 
-const AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
-const TOKEN_URL = 'https://oauth2.googleapis.com/token';
-const USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
-const EVENTS_URL = 'https://www.googleapis.com/calendar/v3/calendars';
+/**
+ * Google endpoints. They are constants in production and overridable through
+ * the environment only so the whole OAuth + event flow can be exercised against
+ * a local stand-in (scripts/mock-google.mjs) — a deployment never sets these.
+ */
+function endpoint(envName: string, fallback: string): string {
+  return (process.env[envName] || '').trim() || fallback;
+}
+const AUTH_URL = () => endpoint('GOOGLE_OAUTH_AUTH_URL', 'https://accounts.google.com/o/oauth2/v2/auth');
+const TOKEN_URL = () => endpoint('GOOGLE_TOKEN_URL', 'https://oauth2.googleapis.com/token');
+const USERINFO_URL = () => endpoint('GOOGLE_USERINFO_URL', 'https://www.googleapis.com/oauth2/v3/userinfo');
+const EVENTS_URL = () => endpoint('GOOGLE_CALENDAR_API_BASE', 'https://www.googleapis.com/calendar/v3') + '/calendars';
 
 export const GOOGLE_SCOPES = [
   'openid',
@@ -73,7 +81,7 @@ export async function verifyGoogleClient(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 12_000);
   try {
-    const res = await fetch(TOKEN_URL, {
+    const res = await fetch(TOKEN_URL(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -155,7 +163,7 @@ export function authUrl(input: { redirectUri: string; state: string }): string {
     include_granted_scopes: 'true',
     state: input.state,
   });
-  return `${AUTH_URL}?${params.toString()}`;
+  return `${AUTH_URL()}?${params.toString()}`;
 }
 
 interface TokenResponse {
@@ -166,7 +174,7 @@ interface TokenResponse {
 }
 
 async function tokenRequest(body: Record<string, string>): Promise<TokenResponse> {
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetch(TOKEN_URL(), {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(body).toString(),
@@ -200,7 +208,7 @@ export async function exchangeCode(code: string, redirectUri: string) {
 }
 
 async function userEmail(accessToken: string): Promise<string | null> {
-  const res = await fetch(USERINFO_URL, { headers: { Authorization: `Bearer ${accessToken}` } });
+  const res = await fetch(USERINFO_URL(), { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!res.ok) return null;
   const json: any = await res.json().catch(() => null);
   return typeof json?.email === 'string' ? json.email : null;
@@ -270,7 +278,7 @@ export async function createEvent(accessToken: string, calendarId: string, input
         }
       : {}),
   };
-  const url = `${EVENTS_URL}/${encodeURIComponent(calendarId)}/events?sendUpdates=all&conferenceDataVersion=1`;
+  const url = `${EVENTS_URL()}/${encodeURIComponent(calendarId)}/events?sendUpdates=all&conferenceDataVersion=1`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -290,7 +298,7 @@ export async function createEvent(accessToken: string, calendarId: string, input
 }
 
 export async function deleteEvent(accessToken: string, calendarId: string, eventId: string): Promise<void> {
-  const res = await fetch(`${EVENTS_URL}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`, {
+  const res = await fetch(`${EVENTS_URL()}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?sendUpdates=all`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${accessToken}` },
   });

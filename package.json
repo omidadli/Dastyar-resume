@@ -20,7 +20,11 @@
     "test:backup": "tsx scripts/backup.test.ts",
     "test:cloudflare": "tsx scripts/cloudflare.test.ts",
     "cf:typecheck": "tsc -p cloudflare/tsconfig.json",
-    "cf:deploy": "wrangler deploy"
+    "cf:deploy": "wrangler deploy",
+    "test:google": "npm run build && tsx scripts/google-calendar.test.ts",
+    "mock:google": "node scripts/mock-google.mjs --port 9933",
+    "mock:apify": "node scripts/mock-apify.mjs --port 9922",
+    "mock:smtp": "node scripts/mock-smtp.mjs --port 2525"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

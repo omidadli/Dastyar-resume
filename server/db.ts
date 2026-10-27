@@ -1393,6 +1393,21 @@ export function listSearches(orgId: string): SourcingSearchRecord[] {
     .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
 }
 
+/**
+ * How many provider searches were started since an instant, across every
+ * workspace: the Apify token (and its bill) is shared by the whole deployment,
+ * so a cap has to be counted the same way.
+ */
+export function countSearchesSince(isoStart: string): number {
+  let count = 0;
+  for (const row of sourcingSearches.values()) {
+    // A CSV import costs nothing and never touches the provider.
+    if (row.source === 'csv') continue;
+    if (row.createdAtISO >= isoStart) count += 1;
+  }
+  return count;
+}
+
 export function getSearch(orgId: string, id: string): SourcingSearchRecord | null {
   const x = sourcingSearches.get(id);
   return x && x.orgId === orgId ? x : null;

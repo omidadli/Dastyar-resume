@@ -44,6 +44,7 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
   const [actorId, setActorId] = useState(c.actorId);
   const [token, setToken] = useState('');
   const [providerLabel, setProviderLabel] = useState(c.providerLabel === 'LinkedIn' ? '' : c.providerLabel);
+  const [dailyLimit, setDailyLimit] = useState(String(c.dailyLimit ?? 20));
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
@@ -54,7 +55,8 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
     setEndpointUrl(c.source === 'admin' ? c.endpointUrl : '');
     setActorId(c.actorId);
     setProviderLabel(c.providerLabel === 'LinkedIn' ? '' : c.providerLabel);
-  }, [c.source, c.endpointUrl, c.kind, c.actorId, c.providerLabel]);
+    setDailyLimit(String(c.dailyLimit ?? 20));
+  }, [c.source, c.endpointUrl, c.kind, c.actorId, c.providerLabel, c.dailyLimit]);
 
   const save = async () => {
     setSaving(true);
@@ -66,6 +68,7 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
         actorId: actorId.trim() || undefined,
         token: token.trim() || undefined,
         providerLabel,
+        dailyLimit: Number(dailyLimit) || 0,
       });
       setData(next);
       setToken('');
@@ -197,6 +200,17 @@ function SourcingCard({ data, setData }: { data: ConnectionsPayload; setData: (d
           value={providerLabel}
           onChange={(e) => setProviderLabel(e.target.value)}
           hint="در صفحهٔ «جذب و منبع‌یابی» به کاربر نشان داده می‌شود."
+        />
+        <TextInput
+          label="سقف جست‌وجوی روزانه"
+          type="number"
+          inputMode="numeric"
+          min={0}
+          max={500}
+          value={dailyLimit}
+          onChange={(e) => setDailyLimit(e.target.value)}
+          error={error?.field === 'dailyLimit' ? error.message : undefined}
+          hint="عدد یعنی حداکثر جست‌وجوی پرداختی در شبانه‌روز (همهٔ فضاهای کاری با هم). صفر = بی‌سقف. پیش‌فرض ۲۰ است تا هزینهٔ ناخواسته پیش نیاید."
         />
 
         {c.lastTestAtISO && (

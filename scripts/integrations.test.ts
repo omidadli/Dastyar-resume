@@ -9,7 +9,7 @@ process.env.APP_SECRET = 'integration-test-secret-0123456789';
 
 import { cleanSubject, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings } from '../server/mailer';
 import { accessTokenFor, buildInviteIcs, CALENDAR_TIMEZONE, googleClient, redirectUriFor, signState, verifyState } from '../server/gcal';
-import { apifyInput, buildLocalBrief, finishProfiles, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
+import { apifyCostEstimate, apifyCostLine, apifyInput, buildLocalBrief, finishProfiles, normalizeProfile, profileToResumeText, sanitizeBrief, sourcingStatus } from '../server/linkedin';
 import { csvSummary, parseCsv, profilesFromCsv, readCsv } from '../server/csv-import';
 import { tehranIsoFromJalali, jalaliAndTehranTime } from '../server/tehran-time';
 import type { OrgSecrets } from '../server/db';
@@ -233,6 +233,18 @@ function assert(cond: boolean, label: string, extra = '') {
     'without credentials the status says exactly where to set them (admin panel)',
     status.setupHint
   );
+}
+
+// ----------------------------------------------------- Apify cost view ----
+
+{
+  const small = apifyCostEstimate(25);
+  assert(small.pages === 1 && small.usd === 0.2, '25 profiles = one page (0.10) + 0.10 of profiles', `${small.pages}/${small.usd}`);
+  const run = apifyCostEstimate(100);
+  assert(run.pages === 4 && run.usd === 0.8, 'the default run (100 profiles) is quoted at 0.80 dollars', `${run.pages}/${run.usd}`);
+  const line = apifyCostLine(100);
+  assert(/۰٫۸۰ دلار/.test(line) && /۴ صفحه/.test(line) && /۱۰۰ پروفایل/.test(line), 'the cost line is Persian with fa digits', line);
+  assert(apifyCostEstimate(0).pages === 1, 'a degenerate limit still costs one page');
 }
 
 // -------------------------------------------------- import a CSV file ----

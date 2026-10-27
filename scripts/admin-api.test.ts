@@ -611,6 +611,7 @@ async function main() {
     });
     assert(savedApify.status === 200 && savedApify.json.sourcing.kind === 'apify' && savedApify.json.sourcing.async === true, 'the Apify provider is saved as an asynchronous provider', `${savedApify.status} ${JSON.stringify(savedApify.json?.error || '')}`);
     assert(savedApify.json.sourcing.actorId === 'harvestapi~linkedin-profile-search', 'the actor id is normalised to user~actor', savedApify.json.sourcing.actorId);
+    assert(savedApify.json.sourcing.dailyLimit === 20, 'a new provider starts with a 20-search daily cap', String(savedApify.json.sourcing.dailyLimit));
     assert(!JSON.stringify(savedApify.json).includes('apify_api_token_123'), 'the Apify token is never returned');
     assert((await call('GET', '/api/integrations/status', A)).json.sourcing.configured === true, 'workspaces see the Apify provider as configured');
 
@@ -655,6 +656,46 @@ async function main() {
     const failedRead = await call('GET', `/api/sourcing/searches/${failing.json.search.id}`, A);
     assert(failedRead.status === 502 && failedRead.json.search.status === 'error', 'a failed run becomes a stored error, not an empty result', `${failedRead.status} ${failedRead.json?.search?.status}`);
     assert(/ناکام/.test(failedRead.json.search.message || ''), 'the failure message says what happened', failedRead.json.search.message);
+
+    // ------------------------------------------ cost guard (daily cap) ----
+    // The Apify token is shared by the whole deployment, so the cap has to stop
+    // a runaway loop before money is spent — and the page must say so.
+    const usageStatus = await call('GET', '/api/integrations/status', A);
+    const usedToday = usageStatus.json.sourcing.usage.today;
+    assert(usedToday >= 2 && usageStatus.json.sourcing.usage.dailyLimit === 20, 'today\'s runs are counted against the cap', JSON.stringify(usageStatus.json.sourcing.usage));
+
+    // Exactly at the cap: the very next paid search must be refused.
+    const capped = await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+      dailyLimit: usedToday,
+    });
+    assert(capped.status === 200 && capped.json.sourcing.dailyLimit === usedToday, 'the cap can be lowered from the admin panel', String(capped.json.sourcing.dailyLimit));
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.usage.remaining === 0, 'the page sees nothing left for today');
+    const blocked = await call('POST', '/api/sourcing/searches', A, { departmentId: deptForSearch.id, prompt: 'حسابدار', openToWorkOnly: true, brief: apifyBrief, limit: 5 });
+    assert(blocked.status === 429 && blocked.json.code === 'SOURCING_DAILY_LIMIT', 'a run over the cap is refused before anything is spent', `${blocked.status} ${blocked.json?.code}`);
+    assert(/سقف جست‌وجوی روزانه/.test(blocked.json.error) && /اتصال‌ها/.test(blocked.json.error), 'the refusal says where the cap is changed', blocked.json.error);
+    assert(apifyRuns.length === 2, 'no actor run was started for the refused search', String(apifyRuns.length));
+
+    // A CSV import is free, so it must not be blocked by the cap.
+    const csvUnderCap = await call('POST', '/api/sourcing/csv', A, {
+      csv: 'Name,Headline\nسارا احمدی,Product Manager',
+      departmentId: deptForSearch.id,
+    });
+    assert(csvUnderCap.status === 200, 'importing a file still works when the paid cap is reached', String(csvUnderCap.status));
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.usage.today === usedToday, 'a file import is not counted as a paid search');
+
+    const unlimited = await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+      dailyLimit: 0,
+    });
+    assert(unlimited.status === 200 && unlimited.json.sourcing.dailyLimit === 0, 'zero means no cap');
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.usage.remaining === null, 'without a cap there is no «remaining» to report');
 
     // ------------------------------------------------------- delete ----
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'اشتباه' })).status === 400, 'delete needs the exact workspace name');

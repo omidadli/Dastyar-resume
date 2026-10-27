@@ -347,8 +347,55 @@ export async function startApifySearch(brief: SourcingBrief, fetchLimit: number)
   };
 }
 
-/** A run that is still going after this long is treated as failed for the user. */
-const APIFY_MAX_WAIT_MS = 10 * 60_000;
+/**
+ * A run that is still going after this long is treated as failed for the user
+ * *and stopped at Apify*, so a forgotten browser tab cannot keep spending money.
+ * The environment override exists for tests only.
+ */
+const APIFY_MAX_WAIT_MS = Number(process.env.APIFY_MAX_WAIT_MS) || 10 * 60_000;
+
+/**
+ * What a run is expected to cost, from Apify's published prices for the
+ * HarvestAPI actor: $0.10 per result page (25 profiles) + $0.004 per full
+ * profile. Shown before/after starting a search — a run is never silently
+ * expensive.
+ */
+export function apifyCostEstimate(fetchLimit: number): { pages: number; usd: number } {
+  const pages = Math.max(1, Math.ceil(Math.max(1, fetchLimit) / 25));
+  const usd = pages * 0.1 + Math.max(0, fetchLimit) * 0.004;
+  return { pages, usd: Math.round(usd * 100) / 100 };
+}
+
+function faNum(n: number, digits = 0): string {
+  return Number(n)
+    .toFixed(digits)
+    .replace(/[0-9]/g, (d) => '۰۱۲۳۴۵۶۷۸۹'[Number(d)])
+    .replace('.', '٫');
+}
+
+/** Minutes the app waits before it stops a run (mirrors APIFY_MAX_WAIT_MS). */
+function maxWaitMinutes(): number {
+  return Math.max(1, Math.round(APIFY_MAX_WAIT_MS / 60_000));
+}
+
+/** «برآورد هزینه: ۰٫۸۰ دلار (۴ صفحه، ۱۰۰ پروفایل)» */
+export function apifyCostLine(fetchLimit: number): string {
+  const { pages, usd } = apifyCostEstimate(fetchLimit);
+  return `برآورد هزینهٔ این جست‌وجو در اپافی: ${faNum(usd, 2)} دلار (${faNum(pages)} صفحه، ${faNum(fetchLimit)} پروفایل)`;
+}
+
+/** Stops a run at Apify; a failure here must never hide the original problem. */
+async function abortApifyRun(runId: string): Promise<boolean> {
+  const cfg = config();
+  if (!cfg) return false;
+  try {
+    await apifyFetch(apifyApi(cfg, `/actor-runs/${encodeURIComponent(runId)}/abort`), { method: 'POST' });
+    return true;
+  } catch (err: any) {
+    console.error('[sourcing] abort failed:', err?.message || err);
+    return false;
+  }
+}
 
 /** Polls the run; returns the finished profiles (filtered) or «still running». */
 export async function pollApifySearch(job: ApifyJob, limit: number): Promise<JobState> {
@@ -359,7 +406,14 @@ export async function pollApifySearch(job: ApifyJob, limit: number): Promise<Job
   if (['READY', 'RUNNING', ''].includes(status)) {
     const age = Date.now() - new Date(job.startedAtISO).getTime();
     if (age > APIFY_MAX_WAIT_MS) {
-      throw new SourcingRequestError('جست‌وجو بیش از ۱۰ دقیقه در صف اپافی ماند؛ با تعداد نتیجهٔ کمتر یا شهر مشخص‌تر دوباره تلاش کنید.', 504);
+      // Stop it at Apify as well: an abandoned run keeps billing.
+      const stopped = await abortApifyRun(job.runId);
+      throw new SourcingRequestError(
+        stopped
+          ? `جست‌وجو بیش از ${faNum(maxWaitMinutes())} دقیقه طول کشید؛ اجرا در اپافی متوقف شد تا هزینهٔ بیشتری پرداخت نشود. با تعداد نتیجهٔ کمتر یا شهر مشخص‌تر دوباره تلاش کنید.`
+          : `جست‌وجو بیش از ${faNum(maxWaitMinutes())} دقیقه طول کشید و متوقف شد؛ اجرای آن در اپافی را از Console هم لغو کنید. با شرایط محدودتر دوباره تلاش کنید.`,
+        504
+      );
     }
     return { state: 'pending' };
   }

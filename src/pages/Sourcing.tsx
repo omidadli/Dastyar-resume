@@ -362,6 +362,13 @@ export default function Sourcing() {
             جست‌وجو از طریق {sourcing.providerLabel}
             {sourcing.endpointHost ? <span dir="ltr" className="font-mono"> ({sourcing.endpointHost})</span> : null} انجام می‌شود و فقط افرادی برمی‌گردند که
             سرویس شما آن‌ها را واجد شرایط می‌داند.
+            {sourcing.usage && sourcing.usage.dailyLimit > 0 && (
+              <span className={`block mt-1 text-[12px] tabular-nums ${sourcing.usage.remaining === 0 ? 'text-low-ink font-semibold' : 'text-ink-3'}`}>
+                {sourcing.usage.remaining === 0
+                  ? `سقف جست‌وجوی امروز (${toPersianDigits(sourcing.usage.dailyLimit)}) پر شده است؛ فردا دوباره تلاش کنید.`
+                  : `امروز ${toPersianDigits(sourcing.usage.today)} از ${toPersianDigits(sourcing.usage.dailyLimit)} جست‌وجو انجام شده؛ ${toPersianDigits(sourcing.usage.remaining || 0)} باقی مانده است.`}
+              </span>
+            )}
           </Callout>
         )
       )}

@@ -66,6 +66,8 @@ interface StoredSourcingConnection {
   tokenEnc: string;
   tokenHint: string;
   providerLabel: string;
+  /** «سقف جست‌وجوی روزانه» — 0 means no cap. Counted across all workspaces. */
+  dailyLimit: number;
   updatedAtISO: string;
   updatedBy: string;
   lastTestAtISO: string | null;
@@ -185,6 +187,7 @@ function normalizeSourcingConn(raw: any): StoredSourcingConnection | null {
     tokenEnc,
     tokenHint: text(raw.tokenHint, 40),
     providerLabel: text(raw.providerLabel, 80).trim() || 'LinkedIn Talent API',
+    dailyLimit: raw.dailyLimit === undefined ? DEFAULT_DAILY_LIMIT : clampLimit(raw.dailyLimit),
     updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
     updatedBy: text(raw.updatedBy, 120),
     lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
@@ -555,6 +558,8 @@ export interface SourcingConnection {
   actorId: string;
   token: string;
   providerLabel: string;
+  /** «سقف جست‌وجوی روزانه» (0 = بی‌سقف). */
+  dailyLimit: number;
   source: 'admin' | 'env';
 }
 
@@ -566,6 +571,15 @@ export interface GoogleOAuthConnection {
   redirectUri: string;
   source: 'admin' | 'env';
 }
+
+/** Default cap: a careless run should never turn into a surprise invoice. */
+export const DEFAULT_DAILY_LIMIT = 20;
+
+const clampLimit = (v: unknown, fallback = DEFAULT_DAILY_LIMIT) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(500, Math.round(n)));
+};
 
 export const GOOGLE_SCOPE_LIST = ['openid', 'email', 'https://www.googleapis.com/auth/calendar.events'];
 
@@ -580,6 +594,7 @@ function envSourcing(): SourcingConnection | null {
     actorId: kind === 'apify' ? (process.env.LINKEDIN_ACTOR_ID || '').trim() || APIFY_DEFAULT_ACTOR : '',
     token,
     providerLabel: (process.env.LINKEDIN_PROVIDER_LABEL || 'LinkedIn Talent API').trim() || 'LinkedIn Talent API',
+    dailyLimit: Number(process.env.LINKEDIN_DAILY_LIMIT) || 0,
     source: 'env',
   };
 }
@@ -609,6 +624,7 @@ export function sourcingConnection(): SourcingConnection | null {
         actorId: stored.actorId,
         token,
         providerLabel: stored.providerLabel,
+        dailyLimit: stored.dailyLimit ?? DEFAULT_DAILY_LIMIT,
         source: 'admin',
       };
     }
@@ -669,6 +685,7 @@ export function connectionsPublic(origin: string): ConnectionsPayload {
       endpointHost: src ? hostOfUrl(src.endpointUrl) : null,
       endpointUrl: src?.source === 'admin' ? src.endpointUrl : '',
       providerLabel: src?.providerLabel || 'LinkedIn',
+      dailyLimit: src?.dailyLimit ?? DEFAULT_DAILY_LIMIT,
       tokenHint: s.sourcing ? s.sourcing.tokenHint : src ? 'از متغیرهای محیطی سرور' : '',
       updatedAtISO: s.sourcing?.updatedAtISO ?? null,
       updatedBy: s.sourcing?.updatedBy ?? null,
@@ -748,6 +765,7 @@ export function saveSourcingConnection(input: SourcingConnectionInput, actor: st
       (input.providerLabel || '').trim() ||
       previous?.providerLabel ||
       (kind === 'apify' ? 'Apify · HarvestAPI' : 'LinkedIn Talent API'),
+    dailyLimit: input.dailyLimit === undefined ? previous?.dailyLimit ?? DEFAULT_DAILY_LIMIT : clampLimit(input.dailyLimit),
     updatedAtISO: now,
     updatedBy: actor,
     lastTestAtISO: previous?.lastTestAtISO ?? null,

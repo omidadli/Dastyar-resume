@@ -17,6 +17,7 @@ import { evaluateResume } from '../ai/screening';
 import { EmailNotConfiguredError, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings, sendMail, verifyEmail } from '../mailer';
 import {
   LINKEDIN_DOC_PATH,
+  apifyCostLine,
   SourcingNotConfiguredError,
   SourcingRequestError,
   pollApifySearch,
@@ -25,6 +26,7 @@ import {
   startSearch,
 } from '../linkedin';
 import { buildSearchBrief } from '../sourcing';
+import { sourcingConnection } from '../platform';
 import { csvSummary, profilesFromCsv } from '../csv-import';
 import {
   CalendarError,
@@ -42,12 +44,28 @@ import {
 } from '../gcal';
 import { decryptSecret, encryptSecret } from '../secret';
 import { formatJalaliDate, toPersianDigits } from '../../src/utils/jalali';
-import { tehranIsoFromJalali, tehranJalaliOf, tehranNow } from '../tehran-time';
+import { TEHRAN_OFFSET_MINUTES, tehranIsoFromJalali, tehranJalaliOf, tehranNow } from '../tehran-time';
 import type { SourcingBrief, SourcingProfile } from '../../src/types/integrations';
 
 const MAX_RESULTS = 50;
 const EMAIL_HOURLY_LIMIT = 120;
 const emailSendLog = new Map<string, number[]>();
+
+/**
+ * «مصرف امروز» — how many provider searches ran since Tehran midnight, against
+ * the cap saved with the connection. CSV imports never count: they cost nothing.
+ */
+function sourcingUsage(): { today: number; dailyLimit: number; remaining: number | null } {
+  const conn = sourcingConnection();
+  // Tehran midnight as a real instant (the host may run in any timezone).
+  const wall = tehranNow().date;
+  const midnight = new Date(
+    Date.UTC(wall.getFullYear(), wall.getMonth(), wall.getDate()) - TEHRAN_OFFSET_MINUTES * 60_000
+  );
+  const today = db.countSearchesSince(midnight.toISOString());
+  const limit = conn?.dailyLimit ?? 0;
+  return { today, dailyLimit: limit, remaining: limit > 0 ? Math.max(0, limit - today) : null };
+}
 
 function originOf(req: express.Request): string {
   const fixed = (process.env.PUBLIC_URL || '').trim();
@@ -170,7 +188,7 @@ export function integrationRoutes(): express.Router {
     const { org } = ctxOf(req);
     const secrets = db.getOrgSecrets(org.id);
     res.json({
-      sourcing: sourcingStatus(),
+      sourcing: { ...sourcingStatus(), usage: sourcingUsage() },
       email: emailStatus(secrets),
       calendar: {
         ...calendarStatus(secrets, redirectUriFor(originOf(req))),
@@ -797,6 +815,17 @@ export function integrationRoutes(): express.Router {
         return res.status(400).json({ error: 'توضیح دهید دنبال چه متخصصی هستید (نقش یا مهارت‌ها).' });
       }
 
+      // Cost guard: the Apify token is shared by the whole deployment, so the
+      // cap is counted across workspaces and refuses *before* anything is spent.
+      const usage = sourcingUsage();
+      if (usage.remaining !== null && usage.remaining <= 0) {
+        return res.status(429).json({
+          error: `سقف جست‌وجوی روزانه این نصب (${toPersianDigits(usage.dailyLimit)} جست‌وجو) پر شده است؛ فردا دوباره تلاش کنید یا مدیر سامانه سقف را در «پنل مدیریت ← اتصال‌ها» بالا ببرد.`,
+          code: 'SOURCING_DAILY_LIMIT',
+          usage,
+        });
+      }
+
       const stamp = new Date();
       const row: db.SourcingSearchRecord = {
         id: db.uid('src'),
@@ -824,7 +853,10 @@ export function integrationRoutes(): express.Router {
           // Asynchronous provider (Apify): answer now, finish on the next read.
           row.providerJob = started.job;
           row.status = 'running';
-          row.message = 'جست‌وجو در سرویس شروع شد و در حال انجام است؛ نتیجه به‌محض آماده شدن همین‌جا می‌آید.';
+          // The bill is shown up front, not after the fact.
+          row.message =
+            'جست‌وجو در سرویس شروع شد و در حال انجام است؛ نتیجه به‌محض آماده شدن همین‌جا می‌آید. ' +
+            `${apifyCostLine(started.job.fetchLimit)}.`;
           db.saveSearch(row);
           db.logActivity(org.id, actorOf(req), 'sourcing.search', `جست‌وجوی «${brief.roleTitle}» در سرویس را شروع کرد`, { jobId: job?.id });
           return res.status(202).json({ search: publicSearch(row) });
@@ -940,7 +972,7 @@ export function integrationRoutes(): express.Router {
 
   /** One-time info for the UI: where the LinkedIn contract is documented. */
   r.get('/sourcing/status', (_req, res) => {
-    res.json({ sourcing: sourcingStatus(), docPath: LINKEDIN_DOC_PATH });
+    res.json({ sourcing: { ...sourcingStatus(), usage: sourcingUsage() }, docPath: LINKEDIN_DOC_PATH });
   });
 
   return r;

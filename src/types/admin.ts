@@ -132,6 +132,8 @@ export interface SourcingConnectionPublic {
   endpointHost: string | null;
   endpointUrl: string;
   providerLabel: string;
+  /** «سقف جست‌وجوی روزانه» (0 = بی‌سقف) — protects against a surprise invoice. */
+  dailyLimit: number;
   /** Example: «AIza…9xQ2» — never the token itself. */
   tokenHint: string;
   updatedAtISO: string | null;
@@ -180,6 +182,8 @@ export interface SourcingConnectionInput {
   providerLabel?: string;
   /** Apify only, e.g. `harvestapi/linkedin-profile-search`. */
   actorId?: string;
+  /** Daily search cap (0 = unlimited). Omitted keeps the current value. */
+  dailyLimit?: number;
 }
 
 export interface GoogleConnectionInput {

@@ -113,6 +113,14 @@ export interface SourcingStatusPublic {
   endpointHost: string | null;
   setupHint: string;
   docPath: string;
+  /** Today's provider searches against the configured cap (CSV imports excluded). */
+  usage?: {
+    today: number;
+    /** 0 = no cap. */
+    dailyLimit: number;
+    /** null when there is no cap. */
+    remaining: number | null;
+  };
 }
 
 // ------------------------------------------------------------------- email ----

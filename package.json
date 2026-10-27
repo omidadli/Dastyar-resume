@@ -24,7 +24,8 @@
     "test:google": "npm run build && tsx scripts/google-calendar.test.ts",
     "mock:google": "node scripts/mock-google.mjs --port 9933",
     "mock:apify": "node scripts/mock-apify.mjs --port 9922",
-    "mock:smtp": "node scripts/mock-smtp.mjs --port 2525"
+    "mock:smtp": "node scripts/mock-smtp.mjs --port 2525",
+    "test:apify": "npm run build && tsx scripts/apify-guard.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

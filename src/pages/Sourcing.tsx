@@ -474,8 +474,8 @@ export default function Sourcing() {
               {csvPreview && (
                 <div className="rounded-[10px] border border-line-2 bg-canvas p-3 flex flex-col gap-2">
                   <p className="text-[12.5px] text-ink-2">
-                    {toPersianDigits(csvPreview.totalRows)} ردیف خوانده شد · {toPersianDigits(csvPreview.profileCount)} پروفایل
-                    {csvPreview.skippedRows > 0 ? ` · ${toPersianDigits(csvPreview.skippedRows)} ردیف بی‌نام` : ''}
+                    {toPersianDigits(csvPreview.totalRows)} ردیف خوانده شد، {toPersianDigits(csvPreview.profileCount)} پروفایل
+                    {csvPreview.skippedRows > 0 ? `، ${toPersianDigits(csvPreview.skippedRows)} ردیف بی‌نام` : ''}
                   </p>
                   <div className="flex flex-wrap items-center gap-1.5">
                     {csvPreview.recognised.map((f) => (

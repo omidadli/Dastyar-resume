@@ -8,6 +8,7 @@ import { safeExt } from '../server/db';
 import { matchesSearch, normalizeForSearch, normalizePersianText } from '../src/lib/normalizeFa';
 import { faRelative } from '../src/lib/format';
 import { assemblePageText, restoreZwnj, type PdfTextItem } from '../src/lib/pdfLayout';
+import { blindLabel, maskText, redactRecord } from '../server/blind';
 import { base32Decode, base32Encode, generateRecoveryCodes, generateSecret, hashRecoveryCode, hotp, otpauthUrl, secondsLeft, stepAt, verifyTotp } from '../server/totp';
 import fs from 'fs';
 import path from 'path';
@@ -199,6 +200,61 @@ const u: JobUnderstanding = {
   assert(hashRecoveryCode(codes[0]) === hashRecoveryCode(codes[0].toLowerCase().replace('-', '')), 'a typed code normalizes before hashing');
   assert(hashRecoveryCode(codes[0]) !== hashRecoveryCode(codes[1]), 'different codes hash differently');
   assert(secondsLeft(now) > 0 && secondsLeft(now) <= 30, 'the window countdown is within one step');
+}
+
+// ---- غربالگری بی‌طرف: masking never leaves the identity behind ----
+{
+  const names = ['مینا رضایی', 'Mina Rezaei'];
+  const masked = maskText('مینا رضایی — mina.rezaei@gmail.com — https://linkedin.com/in/mina — ۰۹۱۲۱۲۳۴۵۶۷ — ۰۲۱۸۸۷۷۶۶۵۵', names);
+  assert(!masked.includes('مینا') && !masked.includes('رضایی'), 'a Persian full name is masked, token by token');
+  assert(!masked.includes('mina.rezaei@') && masked.includes('«ایمیل»'), 'an e-mail becomes a placeholder');
+  assert(!/linkedin\.com/i.test(masked) && masked.includes('«پیوند»'), 'a profile link becomes a placeholder');
+  assert(!masked.includes('۰۹۱۲۱۲۳۴۵۶۷') && masked.includes('«تلفن»'), 'a mobile number in Persian digits is masked');
+  assert(!maskText('تماس: 0912 123 4567', names).includes('4567'), 'and so is one in Latin digits');
+  assert(masked.includes('«نام»'), 'the placeholder is the Persian word for the name');
+
+  // The mask must not eat ordinary words that merely share letters.
+  const kept = maskText('کارشناس شبکه با ۵ سال سابقه در مسیریابی', names);
+  assert(kept === 'کارشناس شبکه با ۵ سال سابقه در مسیریابی', 'unrelated text is untouched');
+
+  // A stuttered pair of placeholders reads as one.
+  const tidy = maskText('پروفایل «مینا رضایی» را دید', names);
+  assert(!/«نام»\s+«نام»/.test(tidy), 'the placeholders do not repeat', tidy);
+
+  // Labels are stable, distinct and carry nothing of the person.
+  const a = blindLabel('res_abc123');
+  assert(a === blindLabel('res_abc123'), 'the blind label is stable for one candidate');
+  assert(a !== blindLabel('res_xyz789'), 'and different for another');
+  assert(/^کارجوی [۰-۹]{4}$/.test(a), 'it looks like «کارجوی ۲۴۸۱»', a);
+
+  // The redacted copy keeps the decision material and drops the identity.
+  const rec = {
+    id: 'res_1',
+    fileName: 'Mina-Rezaei-CV.pdf',
+    filePath: 'resumes/res_1.pdf',
+    fileHash: 'abc',
+    candidateName: 'مینا رضایی',
+    contact: { phone: '09121234567', email: 'mina@example.ir', city: 'تهران' },
+    extractedText: 'مینا رضایی\nmina@example.ir',
+    summary: 'مینا رضایی سابقهٔ شبکه دارد',
+    whyCategory: 'امتیاز بالا',
+    strengths: [{ point: 'مسیریابی', evidence: 'مینا رضایی: OSPF در آلفا' }],
+    weaknesses: [],
+    criterionScores: [{ criterionId: 'c1', score: 80, rationale: 'شاهد دارد', evidence: 'مینا رضایی — OSPF' }],
+    knockoutMisses: [],
+    deepFindings: null,
+    bankNote: null,
+    decisionNote: null,
+    unjudgeableReason: null,
+    errorMessage: null,
+    source: null,
+  } as any;
+  const red = redactRecord(rec);
+  assert(red.fileName.endsWith('.pdf') && !red.fileName.includes('Mina'), 'the file name keeps its extension but loses the name');
+  assert(red.contact.email === null && red.contact.phone === null && red.contact.city === 'تهران', 'contact is null; the city (not identifying) stays');
+  const json = JSON.stringify(red);
+  assert(!json.includes('مینا') && !json.includes('mina@example.ir'), 'nothing identifying survives the redaction');
+  assert(red.strengths[0].point === 'مسیریابی' && red.criterionScores[0].score === 80, 'the evidence and the scores stay');
 }
 
 // ---- file extensions are preserved (bug #4) ----

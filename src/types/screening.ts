@@ -334,6 +334,12 @@ export interface ResumeRecord {
   updatedAtISO: string;
   /** Set when the retention policy stripped the personal data but kept the numbers. */
   anonymizedAtISO?: string | null;
+  /**
+   * The server removed the identity from this copy because «غربالگری بی‌طرف»
+   * is on. The record on disk still has it; `POST /resumes/:id/reveal` returns
+   * it once, and writes the reveal to the workspace history.
+   */
+  blindHidden?: boolean;
 }
 
 /** Lightweight list shape: the extracted resume text stays on the server. */

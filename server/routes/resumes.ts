@@ -1,6 +1,7 @@
 import express from 'express';
 import * as db from '../db';
 import { actorOf, ctxOf, signedFileUrl, verifyFileSignature } from '../auth';
+import { blindOn, blockedByBlind, redactList, redactRecord } from '../blind';
 import { draftMessage, evaluateResume, KIND_TITLES } from '../ai/screening';
 import type { AiFile } from '../ai/provider';
 import { ingestDocument } from '../ingest';
@@ -78,8 +79,7 @@ export function resumeRoutes(): express.Router {
   r.get('/resumes', (req, res) => {
     const { org } = ctxOf(req);
     const q = req.query;
-    res.json(
-      db.queryResumes(org.id, {
+    const page = db.queryResumes(org.id, {
         jobId: str(q.jobId, 80) || undefined,
         match: oneOf<MatchFilter>(q.match, ['all', 'high', 'review', 'low', 'insufficient'], 'all'),
         decision: oneOf<DecisionFilter>(q.decision, ['all', 'undecided', 'pending', 'approved', 'rejected', 'review'], 'all'),
@@ -93,8 +93,9 @@ export function resumeRoutes(): express.Router {
         novelty: oneOf<NoveltyFilter>(q.novelty, ['all', 'new', 'duplicate', 'unknown'], 'all'),
         page: q.page ? int(q.page, 1) : 1,
         pageSize: q.pageSize ? int(q.pageSize, 10) : 10,
-      })
-    );
+    });
+    // «غربالگری بی‌طرف»: the identity never leaves the server while it is on.
+    res.json(blindOn(org) ? { ...page, items: redactList(page.items) } : page);
   });
 
   r.get('/resumes/compare', (req, res) => {
@@ -108,9 +109,10 @@ export function resumeRoutes(): express.Router {
     const items = db.getComparable(org.id, wanted);
     if (!items.length) return res.status(404).json({ error: 'کاندیدی برای مقایسه پیدا نشد؛ ممکن است حذف شده باشند.' });
     const job = db.getJob(org.id, items[0].jobId);
+    const list = items.map(db.toListItem).map((c) => (blindOn(org) ? redactRecord(c) : c));
     res.json({
       job,
-      items: items.map(db.toListItem),
+      items: list,
       // Two different reasons for a shorter list — the page explains each one.
       droppedOtherJobs: found.length > items.length,
       missingIds: wanted.filter((id) => !found.some((r) => r.id === id)),
@@ -140,7 +142,24 @@ export function resumeRoutes(): express.Router {
     const { org } = ctxOf(req);
     const rec = db.getResume(org.id, req.params.id);
     if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
-    res.json({ record: rec, job: db.getJob(org.id, rec.jobId) });
+    res.json({ record: blindOn(org) ? redactRecord(rec) : rec, job: db.getJob(org.id, rec.jobId) });
+  });
+
+  /**
+   * «آشکارسازی هویت» — the one door out of blind mode, recorded by name. The
+   * reviewer says why (a sentence is enough), and the workspace keeps the trace.
+   */
+  r.post('/resumes/:id/reveal', (req, res) => {
+    const { org } = ctxOf(req);
+    const rec = db.getResume(org.id, req.params.id);
+    if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    if (!blindOn(org)) return res.status(409).json({ error: 'غربالگری بی‌طرف روشن نیست؛ هویت پنهان نشده است.', code: 'BLIND_OFF' });
+    const reason = str(req.body?.reason, 300) || 'بدون توضیح';
+    db.logActivity(org.id, actorOf(req), 'candidate.revealed', `هویت «${rec.candidateName || rec.fileName}» را آشکار کرد — ${reason}`, {
+      jobId: rec.jobId,
+      resumeId: rec.id,
+    });
+    res.json({ record: rec });
   });
 
   r.patch('/resumes/:id', (req, res) => {
@@ -294,6 +313,10 @@ export function resumeRoutes(): express.Router {
     if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
     const ext = fileExt(rec);
     const inline = str(req.query.inline, 2) === '1';
+    // The PDF has the person's name and photo on it: no link to it in blind mode.
+    if (blindOn(org) && rec.filePath) {
+      return res.status(409).json({ error: 'غربالگری بی‌طرف روشن است؛ فایل اصلی با آشکارسازی هویت باز می‌شود.', code: 'BLIND_REVEAL_REQUIRED', blocked: true });
+    }
     if (!rec.filePath) {
       return res.json({ hasFile: false, url: null, expiresAt: null, fileName: rec.fileName, ext, mimeType: null, previewable: false });
     }
@@ -316,6 +339,7 @@ export function resumeRoutes(): express.Router {
       const kind = oneOf<MessageKind>(req.body?.kind, ['INTERVIEW_INVITE', 'INFO_REQUEST', 'BANK_NOTICE', 'REJECTION'], 'INTERVIEW_INVITE');
       const rec = db.getResume(org.id, str(req.body?.resumeId, 80));
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByBlind(org, res)) return;
       res.json(await draftMessage(rec, kind, org));
     })
   );
@@ -337,6 +361,10 @@ export function fileRoutes(): express.Router {
       }
       const rec = db.getResumeUnsafe(id);
       if (!rec || !rec.filePath) return res.status(404).json({ error: 'فایل در دسترس نیست.' });
+      // A link minted before blind mode was switched on must stop working too.
+      if (blindOn(db.getOrg(rec.orgId))) {
+        return res.status(403).json({ error: 'غربالگری بی‌طرف روشن است؛ برای دیدن فایل، هویت را آشکار کنید.', code: 'BLIND_REVEAL_REQUIRED' });
+      }
       const file = await db.openResumeFile(rec);
       if (!file) return res.status(404).json({ error: 'فایل روی سرور موجود نیست.' });
       const ext = fileExt(rec);

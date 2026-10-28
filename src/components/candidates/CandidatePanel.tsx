@@ -11,6 +11,8 @@ import {
   Columns3,
   Copy,
   Download,
+  Eye,
+  EyeOff,
   ExternalLink,
   FileSignature,
   FileText,
@@ -59,10 +61,12 @@ import {
   IconButton,
   MatchPill,
   Menu,
+  Modal,
   NoveltyPill,
   Monogram,
   ScoreBadge,
   Tabs,
+  TextInput,
   toast,
 } from '../ui';
 import { MessageModal, RejectModal, TalentModal } from './CandidateModals';
@@ -294,11 +298,32 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
   const [offerOpen, setOfferOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [surveyOpen, setSurveyOpen] = useState(false);
+  /** «آشکارسازی هویت» — blind mode is on and this copy hides the person. */
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [revealReason, setRevealReason] = useState('');
+  const [revealing, setRevealing] = useState(false);
   const [rerunning, setRerunning] = useState<'standard' | 'deep' | null>(null);
   useCompare(); // re-render when the tray changes
   const inCompare = isInCompare(record.id);
   const meta = matchMeta(record.category);
   const name = candidateName(record);
+  const hidden = Boolean(record.blindHidden);
+
+  /** The one door out of blind mode: the server records who, whom and why. */
+  const reveal = async () => {
+    setRevealing(true);
+    try {
+      const res = await api.resumes.reveal(record.id, revealReason.trim() || 'بدون توضیح');
+      onChange(res.record);
+      setRevealOpen(false);
+      setRevealReason('');
+      toast('هویت آشکار شد و در فعالیت‌های تیم ثبت شد.', 'info');
+    } catch (e: any) {
+      toast(e?.message || 'آشکارسازی ممکن نشد.', 'error');
+    } finally {
+      setRevealing(false);
+    }
+  };
   const insufficient = meta.level === 'insufficient';
 
   useEffect(() => setTab('summary'), [record.id]);
@@ -490,6 +515,22 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
             </Chip>
           )}
         </div>
+        {hidden && (
+          <Callout
+            tone="info"
+            icon={EyeOff}
+            className="mt-4"
+            title="این کارجو بی‌نام نمایش داده می‌شود"
+            action={
+              <Button size="sm" variant="secondary" icon={Eye} onClick={() => setRevealOpen(true)}>
+                آشکارسازی هویت
+              </Button>
+            }
+          >
+            «غربالگری بی‌طرف» روشن است: نام، ایمیل، تلفن و فایل پنهان شده‌اند و تا آشکارسازی، پیام و مصاحبه و پیشنهاد برای این کارجو
+            بسته است. امتیاز و شاهدها کامل دیده می‌شوند.
+          </Callout>
+        )}
         {record.novelty === 'duplicate' && record.duplicateOf && (
           <Callout
             tone="warning"
@@ -541,10 +582,24 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
           </div>
         )}
         <div className="flex items-center gap-2 mt-4">
-          <Button size="sm" icon={CalendarClock} onClick={() => setInterviewOpen(true)} className="flex-1">
+          <Button
+            size="sm"
+            icon={CalendarClock}
+            onClick={() => setInterviewOpen(true)}
+            className="flex-1"
+            disabled={hidden}
+            title={hidden ? 'برای دعوت، اول هویت را آشکار کنید.' : undefined}
+          >
             تعیین جلسهٔ مصاحبه
           </Button>
-          <Button variant="secondary" size="sm" icon={MessageSquareText} onClick={() => setMessageOpen(true)}>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={MessageSquareText}
+            onClick={() => setMessageOpen(true)}
+            disabled={hidden}
+            title={hidden ? 'برای نوشتن پیام، اول هویت را آشکار کنید.' : undefined}
+          >
             پیام
           </Button>
         </div>
@@ -574,11 +629,11 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
             align="end"
             width={232}
             items={[
-              { label: 'ارسال پیام', icon: MessageSquareText, onClick: () => setMessageOpen(true) },
+              { label: 'ارسال پیام', icon: MessageSquareText, onClick: () => setMessageOpen(true), disabled: hidden, hint: hidden ? 'اول آشکارسازی' : undefined },
               record.inBank
                 ? { label: 'خروج از بانک استعداد', icon: ArchiveX, onClick: () => void removeTalent() }
                 : { label: 'افزودن به بانک استعداد', icon: Archive, onClick: () => setTalentOpen(true) },
-              { label: 'دانلود فایل اصلی', icon: Download, onClick: () => void download(), disabled: !record.filePath },
+              { label: 'دانلود فایل اصلی', icon: Download, onClick: () => void download(), disabled: hidden || !record.filePath, hint: hidden ? 'بی‌نام' : undefined },
               'divider',
               { label: 'تحلیل دوباره', icon: RefreshCw, onClick: () => void rerun('standard'), disabled: rerunning !== null },
               { label: 'بازبینی دقیق', icon: ScanSearch, onClick: () => void rerun('deep'), hint: 'کندتر', disabled: rerunning !== null },
@@ -812,19 +867,19 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
               <ContactRow icon={Mail} value={record.contact?.email} href={record.contact?.email ? `mailto:${record.contact.email}` : undefined} />
               <div className="mt-3">
                 <div className="flex flex-wrap items-center gap-2">
-                  <Button size="sm" variant="secondary" icon={MessageSquareText} onClick={() => setMessageOpen(true)}>
+                  <Button size="sm" variant="secondary" icon={MessageSquareText} onClick={() => setMessageOpen(true)} disabled={hidden}>
                     {record.messageStatus === 'sent' ? 'پیام دیگر' : 'نوشتن پیام'}
                   </Button>
-                  <Button size="sm" variant="ghost" icon={Smartphone} onClick={() => setSmsOpen(true)} disabled={!record.contact?.phone}>
+                  <Button size="sm" variant="ghost" icon={Smartphone} onClick={() => setSmsOpen(true)} disabled={hidden || !record.contact?.phone}>
                     ارسال پیامک
                   </Button>
-                  <Button size="sm" variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)}>
+                  <Button size="sm" variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)} disabled={hidden}>
                     انتخاب زمان مصاحبه
                   </Button>
-                  <Button size="sm" variant="ghost" icon={FileSignature} onClick={() => setOfferOpen(true)}>
+                  <Button size="sm" variant="ghost" icon={FileSignature} onClick={() => setOfferOpen(true)} disabled={hidden}>
                     پیشنهاد شغلی
                   </Button>
-                  <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)}>
+                  <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)} disabled={hidden}>
                     نظرسنجی تجربه
                   </Button>
                 </div>
@@ -967,6 +1022,33 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
         description="رکورد، فایل رزومه، یادداشت‌ها، مصاحبه‌ها، پیشنهاد، پیام‌ها و کارت‌های ارزیابی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ پیش از ادامه خروجی بگیرید."
         confirmLabel="پاک‌سازی کامل"
       />
+      <Modal
+        open={revealOpen}
+        onClose={() => setRevealOpen(false)}
+        icon={<Eye className="w-5 h-5 text-brand-strong" />}
+        title="آشکارسازی هویت کارجو"
+        description="از این لحظه نام، راه تماس و فایل این کارجو دیده می‌شود. این کار با نام شما در فعالیت‌های تیم ثبت می‌شود."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRevealOpen(false)}>
+              انصراف
+            </Button>
+            <Button icon={Eye} onClick={reveal} loading={revealing}>
+              آشکار کن
+            </Button>
+          </>
+        }
+      >
+        <TextInput
+          label="دلیل آشکارسازی"
+          optional
+          placeholder="مثلاً: برای هماهنگی مصاحبهٔ نهایی"
+          value={revealReason}
+          onChange={(e) => setRevealReason(e.target.value)}
+          maxLength={200}
+          hint="یک جمله کافی است؛ همین در تاریخچه می‌ماند."
+        />
+      </Modal>
       <ConfirmDialog
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}

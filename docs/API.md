@@ -118,6 +118,11 @@ curl -H "Authorization: Bearer hvd_sk_…" https://hovida.example.ir/api/v1/jobs
 | `sort` | `match` \| `newest` \| `oldest` \| `experience` \| `name` \| `decided` |
 | `page`, `pageSize` | صفحه‌بندی (پیش‌فرض ۲۵، حداکثر ۱۰۰) |
 
+> **اگر فضای کاری «غربالگری بی‌طرف» را روشن کرده باشد**، همان مسیرها نسخهٔ بی‌نام را
+> برمی‌گردانند: `name` برابر «کارجوی ۲۴۸۱» و `contact` تهی است. کلید API همان چیزی را
+> می‌بیند که مرورگر می‌بیند — پنهان‌سازی در لایهٔ داده است، نه در رابط کاربری.
+> جزئیات: [`BLIND-SCREENING.md`](BLIND-SCREENING.md).
+
 ```json
 {
   "apiVersion": 1,

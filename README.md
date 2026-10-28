@@ -86,6 +86,7 @@ NODE_ENV=production npm start
 - **API و وب‌هوک** (کلید API، شش مسیر `/api/v1`، وب‌هوک امضاشده با HMAC و نمونهٔ بررسی امضا) → [`docs/API.md`](docs/API.md).
 - **نگه‌داری داده و حذف دادهٔ شخصی (DSAR)** (سیاست روزشمار، ناشناس‌سازی، خروجی و پاک‌سازی) → [`docs/DATA-RETENTION.md`](docs/DATA-RETENTION.md).
 - **ورود دومرحله‌ای** (QR برنامهٔ احراز هویت، کدهای بازیابی، بازنشانی توسط مدیر) → [`docs/TWO-FACTOR.md`](docs/TWO-FACTOR.md).
+- **غربالگری بی‌طرف** (پنهان‌سازی هویت سمت سرور، بستن تماس تا آشکارسازی، ثبت آشکارسازی) → [`docs/BLIND-SCREENING.md`](docs/BLIND-SCREENING.md).
 - **تجربهٔ کارجو (نظرسنجی و NPS)** (لینک عمومی، فرم دو دقیقه‌ای، محاسبهٔ NPS و گزارش) → [`docs/EXPERIENCE-SURVEY.md`](docs/EXPERIENCE-SURVEY.md).
 
 مقادیر ورودی در پنل با AES-256-GCM رمزنگاری می‌شوند، دوباره به مرورگر برنمی‌گردند و تنها بخش کوتاهی از آن‌ها نمایش داده

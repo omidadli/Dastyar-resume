@@ -3,6 +3,7 @@ import {
   Braces,
   Building2,
   Copy,
+  EyeOff,
   Cpu,
   KeyRound,
   LayoutGrid,
@@ -21,7 +22,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { Button, ButtonLink, Callout, Card, CardHeader, Chip, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
+import { Button, ButtonLink, Callout, Card, CardHeader, Chip, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Switch, Tabs, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
 import { copyText } from '../lib/clipboard';
 import { useAuth, useCan } from '../lib/auth';
@@ -670,6 +671,77 @@ function AccountTab() {
 }
 
 /**
+ * «غربالگری بی‌طرف» — the workspace switch for blind screening.
+ *
+ * It is deliberately blunt about what it does: the server removes the identity
+ * from every screening view, and the only way back is a reveal that is written
+ * to the history with the name of whoever pressed it. Off by default: a small
+ * team that knows its candidates does not need it, and it should never surprise
+ * anyone mid-hiring.
+ */
+function BlindCard() {
+  const { org, setOrg } = useAuth();
+  const canEdit = useCan('admin');
+  const [busy, setBusy] = useState(false);
+  // Read it fresh: another admin may have flipped it since this tab signed in.
+  const state = useAsync(() => api.org.get(), []);
+  const current = state.data?.org ?? org;
+  if (!current) return null;
+  const on = Boolean(current.blindScreening);
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      const { org: updated } = await api.org.update({ blindScreening: next });
+      setOrg(updated);
+      state.reload();
+      toast(next ? 'غربالگری بی‌طرف روشن شد؛ نام و راه تماس کارجوها پنهان می‌شود.' : 'غربالگری بی‌طرف خاموش شد؛ هویت‌ها دوباره دیده می‌شوند.', next ? 'success' : 'info');
+      emitChange('activity');
+    } catch (e: any) {
+      toast(e?.message || 'تغییر ممکن نشد.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="mt-5 max-w-[640px]">
+      <CardHeader
+        icon={EyeOff}
+        title="غربالگری بی‌طرف"
+        subtitle="در نمای غربالگری، نام، ایمیل، تلفن و فایل کارجو پنهان می‌شود تا تصمیم بر پایهٔ کار و شاهدها گرفته شود."
+        action={on ? <Chip tone="brand">روشن</Chip> : <Chip tone="neutral">خاموش</Chip>}
+      />
+      <div className="flex flex-col gap-4">
+        <Switch
+          checked={on}
+          disabled={!canEdit || busy}
+          onChange={(v) => void toggle(v)}
+          label={on ? 'پنهان‌سازی فعال است' : 'پنهان‌سازی خاموش است'}
+          description={
+            on
+              ? 'کارجوها با «کارجوی ۲۴۸۱» و مانند آن شناخته می‌شوند؛ امتیاز، معیارها و شاهدها کامل دیده می‌شوند.'
+              : 'همه‌چیز مثل قبل است. با روشن‌کردنش، فیلترها، تختهٔ جذب و پنل کارجو، بی‌نام می‌شوند.'
+          }
+        />
+        {on && (
+          <Callout tone="info" title="چطور هویت را ببینیم؟">
+            در پنل هر کارجو دکمهٔ «آشکارسازی هویت» هست: با یک دلیل کوتاه، نام و راه تماس برمی‌گردد و همان لحظه در
+            «فعالیت‌های تیم» با نام شما ثبت می‌شود. تا وقتی آشکار نکنید، ارسال ایمیل، پیامک، دعوت مصاحبه، پیشنهاد و
+            نظرسنجی برای آن کارجو بسته است — روی سرور، نه فقط در ظاهر صفحه.
+          </Callout>
+        )}
+        {!canEdit && <p className="text-[12px] text-ink-4">فقط مدیر یا مالک فضای کاری می‌تواند این تنظیم را تغییر دهد.</p>}
+        <p className="text-[12px] text-ink-3 leading-relaxed">
+          معیارها و امتیازها از رزومه می‌آیند و بی‌نام نمی‌شوند؛ آنچه پنهان می‌شود هویت است. اگر معیار شما «دانشگاه» یا
+          «نام شرکت قبلی» باشد، همان هم پنهان نمی‌شود — این ابزار برای کم‌کردن سوگیری هویتی است، نه ادعای بی‌طرفی کامل.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+/**
  * «ورود دومرحله‌ای» — a volunteer setting for every member, shown honestly:
  * the secret is displayed once, the recovery codes only once, and turning it off
  * needs the password plus a live code. The demo workspace cannot enable it.
@@ -1149,6 +1221,7 @@ export default function Settings({ tab }: { tab: string }) {
       {current === 'org' && (
         <>
           <OrgTab />
+          <BlindCard />
           <RetentionCard />
         </>
       )}

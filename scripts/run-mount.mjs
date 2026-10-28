@@ -167,6 +167,37 @@ assert(await waitFor(() => text().includes('آستانهٔ دعوت'), 12000), '
 assert(text().includes('ارسال خودکار نامهٔ نتیجه'), 'the automatic-send rule is exposed with its warning');
 assert(text().includes('متغیرهای متن'), 'the template variables are documented on the page');
 
+// 11b. «غربالگری بی‌طرف» — the switch, the masked table, the reveal.
+const setBlind = (on) =>
+  nodeFetch(SERVER + '/api/org', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Hovida-Session': demo.token },
+    body: JSON.stringify({ blindScreening: on }),
+  }).then((r) => r.json());
+
+const firstName = list.items[0].candidateName;
+await setBlind(true);
+navigate('/app/settings/org');
+assert(await waitFor(() => text().includes('غربالگری بی‌طرف'), 12000), 'the workspace settings offer blind screening');
+assert(await waitFor(() => text().includes('پنهان‌سازی فعال است'), 8000), 'the card shows it as on');
+assert(text().includes('آشکارسازی هویت'), 'the card explains how the identity comes back');
+
+navigate(`/app/jobs/${hr.id}`);
+assert(await waitFor(() => text().includes('کارجوی'), 15000), 'the screening table labels candidates blind');
+assert(Boolean(firstName) && !text().includes(firstName), 'the real name is not on the page', String(firstName));
+
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('این کارجو بی‌نام نمایش داده می‌شود'), 15000), 'the panel says why it is anonymous');
+assert(clickByText('آشکارسازی هویت'), 'the reveal action is offered');
+assert(await waitFor(() => text().includes('دلیل آشکارسازی'), 12000), 'the reveal asks for a reason');
+assert(clickByText('آشکار کن'), 'the reveal can be confirmed');
+assert(await waitFor(() => text().includes('هویت آشکار شد'), 15000), 'the reveal reports itself');
+assert(await waitFor(() => !text().includes('این کارجو بی‌نام نمایش داده می‌شود'), 12000), 'the banner goes away after the reveal');
+
+await setBlind(false);
+navigate(`/app/jobs/${hr.id}`);
+assert(await waitFor(() => text().includes(firstName || 'کارجوی'), 15000), 'switching it off brings the names back');
+
 // 12. «تجربهٔ کارجو» — the public survey page a candidate opens from the e-mail.
 // Created through the API so the page is exercised exactly as a candidate sees it.
 const surveyRes = await nodeFetch(SERVER + '/api/surveys', {

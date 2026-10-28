@@ -696,6 +696,7 @@ function normalizeOrg(o: OrgRecord): OrgRecord {
     suspendedReason: o.suspendedReason ?? null,
     careerSlug: (o.careerSlug || `org-${o.id.slice(-6)}`).toLowerCase(),
     careerAbout: o.careerAbout ?? '',
+    blindScreening: Boolean(o.blindScreening),
   };
 }
 
@@ -871,6 +872,9 @@ export function createOrg(input: { name: string; isDemo?: boolean; demoExpiresAt
     demoExpiresAt: input.demoExpiresAt ?? null,
     careerSlug: `org-${Math.random().toString(36).slice(2, 8)}`,
     careerAbout: '',
+    // «غربالگری بی‌طرف» is opt-in: a small team that knows its candidates does
+    // not need it, and it must never surprise anyone mid-hiring.
+    blindScreening: false,
     createdAtISO: new Date().toISOString(),
   };
   orgs.set(org.id, org);
@@ -926,7 +930,7 @@ function claimLegacyDataOnStartup() {
 
 export function updateOrg(
   id: string,
-  patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout'>>
+  patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'blindScreening'>>
 ): OrgRecord | null {
   const org = orgs.get(id);
   if (!org) return null;
@@ -935,6 +939,7 @@ export function updateOrg(
   if (Array.isArray(patch.departments)) org.departments = patch.departments;
   if (typeof patch.careerSlug === 'string') org.careerSlug = patch.careerSlug;
   if (typeof patch.careerAbout === 'string') org.careerAbout = patch.careerAbout.slice(0, 1200);
+  if (typeof patch.blindScreening === 'boolean') org.blindScreening = patch.blindScreening;
   scheduleSave();
   return org;
 }

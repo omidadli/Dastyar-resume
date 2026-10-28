@@ -10,6 +10,7 @@
 import express from 'express';
 import * as db from '../db';
 import { ctxOf } from '../auth';
+import { blockedByBlind } from '../blind';
 import { h, int, str } from './util';
 import { SurveyError, createInvite, markOpened, publicView, report, sendInvite, submitAnswer } from '../surveys';
 import { formatJalaliDate } from '../../src/utils/jalali';
@@ -111,6 +112,7 @@ export function surveyRoutes() {
     '/surveys',
     h(async (req, res) => {
       const { org, user } = ctxOf(req);
+      if (blockedByBlind(org, res)) return;
       try {
         const row = createInvite(org.id, user, {
           resumeId: req.body?.resumeId,

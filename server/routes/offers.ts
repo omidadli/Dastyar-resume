@@ -15,6 +15,7 @@ import crypto from 'crypto';
 import express from 'express';
 import * as db from '../db';
 import { ctxOf } from '../auth';
+import { blockedByBlind } from '../blind';
 import { h, str } from './util';
 import { isEmailConfigured, sendMail, friendlySmtpError } from '../mailer';
 import { formatJalaliDate, toPersianDigits } from '../../src/utils/jalali';
@@ -251,6 +252,7 @@ export function offerRoutes() {
       const { org, user } = ctxOf(req);
       const rec = db.getResume(org.id, str(req.body?.resumeId, 80));
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByBlind(org, res)) return;
       const job = db.getJob(org.id, rec.jobId);
       if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
       if (db.openOfferFor(org.id, rec.id)) {

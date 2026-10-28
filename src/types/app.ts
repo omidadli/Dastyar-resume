@@ -26,6 +26,11 @@ export interface OrgPublic {
    */
   careerSlug: string;
   careerAbout: string;
+  /**
+   * «غربالگری بی‌طرف»: while on, screening views are redacted on the server and
+   * contacting a candidate waits for an explicit, logged reveal.
+   */
+  blindScreening?: boolean;
   createdAtISO: string;
   /** Suspended by a platform admin — members cannot sign in. */
   suspended?: boolean;
@@ -97,6 +102,7 @@ export type ActivityType =
   | 'member.added'
   | 'member.removed'
   | 'member.updated'
+  | 'candidate.revealed'
   | 'job.created'
   | 'job.status'
   | 'job.deleted'

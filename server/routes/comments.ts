@@ -8,6 +8,7 @@
 import express from 'express';
 import * as db from '../db';
 import { ctxOf } from '../auth';
+import { blindOn, knownNames, maskText } from '../blind';
 import { h, str } from './util';
 import { formatJalaliDate } from '../../src/utils/jalali';
 import { tehranJalaliOf } from '../tehran-time';
@@ -35,7 +36,9 @@ export function commentRoutes() {
       const rec = db.getResume(org.id, req.params.id);
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
       const items = db.listComments(org.id, rec.id).map(db.withoutOrg);
-      res.json({ items, members: db.listMembers(org.id).map((m) => ({ id: m.id, name: m.name })) });
+      // A teammate may have written the name into a note; blind mode covers that too.
+      const maskedItems = blindOn(org) ? items.map((c) => ({ ...c, body: maskText(c.body, knownNames([rec])) })) : items;
+      res.json({ items: maskedItems, members: db.listMembers(org.id).map((m) => ({ id: m.id, name: m.name })) });
     })
   );
 

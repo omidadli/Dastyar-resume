@@ -16,6 +16,7 @@ import express from 'express';
 import * as db from '../db';
 import { apiOf, requireApiKey } from '../api-keys';
 import { h, int, oneOf, str } from './util';
+import { blindLabel, blindOn } from '../blind';
 import { appVersion } from '../version';
 import type { DecisionStatus, MatchFilter, NoveltyFilter } from '../../src/types/screening';
 
@@ -117,14 +118,15 @@ export function apiV1Routes(): express.Router {
         items: page.items.map((c) => ({
           id: c.id,
           jobId: c.jobId,
-          name: c.candidateName || c.fileName,
+          // An API key sees what the browser sees: no identity in blind mode.
+          name: blindOn(org) ? blindLabel(c.id) : c.candidateName || c.fileName,
           roleTitle: c.roleTitle || c.departmentName,
           score: c.score,
           category: c.category,
           decision: c.decisionStatus,
           stageId: c.stageId,
           source: c.source,
-          contact: c.contact || null,
+          contact: blindOn(org) ? null : c.contact || null,
           createdAtISO: c.createdAtISO,
           decidedAtISO: c.decidedAtISO,
         })),
@@ -143,7 +145,11 @@ export function apiV1Routes(): express.Router {
       const rec = db.getResume(org.id, str(req.params.id, 80));
       if (!rec) return send(res, { error: 'کاندیدا پیدا نشد.', code: 'CANDIDATE_NOT_FOUND' }, 404);
       const job = db.getJob(org.id, rec.jobId);
-      send(res, { candidate: db.toListItem(rec), job: job ? { id: job.id, roleTitle: job.roleTitle, status: job.status } : null });
+      const item = db.toListItem(rec);
+      send(res, {
+        candidate: blindOn(org) ? { ...item, candidateName: blindLabel(rec.id), fileName: '', contact: null, filePath: null } : item,
+        job: job ? { id: job.id, roleTitle: job.roleTitle, status: job.status } : null,
+      });
     })
   );
 

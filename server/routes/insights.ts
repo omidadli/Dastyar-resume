@@ -3,12 +3,21 @@ import * as db from '../db';
 import { ctxOf } from '../auth';
 import type { ReportRange } from '../../src/types/app';
 import { int, oneOf, str } from './util';
+import { blindOn, knownNames, maskActivity, maskText, redactList } from '../blind';
 
 export function insightRoutes(): express.Router {
   const r = express.Router();
 
   r.get('/dashboard', (req, res) => {
-    res.json(db.dashboard(ctxOf(req).org.id));
+    const { org } = ctxOf(req);
+    const data = db.dashboard(org.id);
+    if (!blindOn(org)) return res.json(data);
+    // Blind mode covers the dashboard too: the «منتظر تصمیم» queue and the feed.
+    res.json({
+      ...data,
+      pending: redactList(data.pending),
+      activity: maskActivity(data.activity, knownNames(db.listOrgResumes(org.id))),
+    });
   });
 
   r.get('/reports', (req, res) => {
@@ -17,13 +26,23 @@ export function insightRoutes(): express.Router {
   });
 
   r.get('/search', (req, res) => {
-    res.json(db.search(ctxOf(req).org.id, str(req.query.q, 100)));
+    const { org } = ctxOf(req);
+    const q = str(req.query.q, 100);
+    const found = db.search(org.id, q);
+    if (!blindOn(org)) return res.json(found);
+    // Searching by a name in blind mode would confirm a guess: the person is
+    // not searchable by identity, only by role, skill or score.
+    res.json({ jobs: found.jobs, candidates: found.candidates.map((c) => ({ ...c, name: maskText(c.name, [c.name]) })) });
   });
 
   r.get('/activity', (req, res) => {
     const { org, user } = ctxOf(req);
     const limit = Math.min(100, Math.max(1, int(req.query.limit, 30)));
-    res.json({ items: db.listActivity(org.id, limit), unread: db.unreadCount(user) });
+    const items = db.listActivity(org.id, limit);
+    res.json({
+      items: blindOn(org) ? maskActivity(items, knownNames(db.listOrgResumes(org.id))) : items,
+      unread: db.unreadCount(user),
+    });
   });
 
   r.post('/activity/seen', (req, res) => {
@@ -41,8 +60,7 @@ export function insightRoutes(): express.Router {
   r.get('/talent/list', (req, res) => {
     const { org } = ctxOf(req);
     const q = req.query;
-    res.json(
-      db.queryTalent(org.id, {
+    const page = db.queryTalent(org.id, {
         departmentId: str(q.departmentId, 80) || undefined,
         q: str(q.q, 120) || undefined,
         tags: str(q.tags, 600) ? str(q.tags, 600).split(',').map((t) => t.trim()).filter(Boolean) : undefined,
@@ -51,8 +69,8 @@ export function insightRoutes(): express.Router {
         sort: oneOf(q.sort, ['newest', 'score', 'experience'] as const, 'newest'),
         page: q.page ? int(q.page, 1) : 1,
         pageSize: q.pageSize ? int(q.pageSize, 12) : 12,
-      })
-    );
+    });
+    res.json(blindOn(org) ? { ...page, items: redactList(page.items) } : page);
   });
 
   return r;

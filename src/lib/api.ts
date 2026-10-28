@@ -293,7 +293,7 @@ export const api = {
   },
   org: {
     get: () => get<{ org: OrgPublic; members: TeamMember[] }>('/api/org'),
-    update: (b: { name?: string; messageSignature?: string }) => patch<{ org: OrgPublic }>('/api/org', b),
+    update: (b: { name?: string; messageSignature?: string; blindScreening?: boolean }) => patch<{ org: OrgPublic }>('/api/org', b),
     setDepartments: (departments: Array<Partial<Department> & { name: string; hint: string }>) =>
       put<{ org: OrgPublic }>('/api/org/departments', { departments }),
     addMember: (b: { name: string; email: string; title: string; role: Role; password: string }) =>
@@ -434,6 +434,11 @@ export const api = {
     addTalent: (id: string, b: { departmentId: string; note: string; tags: string[] }) =>
       post<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`, b),
     removeTalent: (id: string) => del<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`),
+    /**
+     * «آشکارسازی هویت» — the single door out of blind mode. The server writes
+     * who revealed whom, and why, to the workspace history before answering.
+     */
+    reveal: (id: string, reason: string) => post<{ record: ResumeRecord }>(`/api/resumes/${id}/reveal`, { reason }),
     /** DSAR: everything we hold about one candidate, as one JSON document. */
     exportData: (id: string) => get<CandidateDataExport>(`/api/resumes/${id}/export`),
     /** DSAR: irreversible erasure of every row and the stored file. */

@@ -24,10 +24,22 @@ export function orgRoutes(): express.Router {
     const { org } = ctxOf(req);
     const name = str(req.body?.name, 80);
     if (req.body?.name !== undefined && name.length < 2) return res.status(400).json({ error: 'نام سازمان خیلی کوتاه است.' });
+    const blind = typeof req.body?.blindScreening === 'boolean' ? req.body.blindScreening : undefined;
+    // Read it before updateOrg mutates the very same record.
+    const was = Boolean(org.blindScreening);
     const updated = db.updateOrg(org.id, {
       ...(name ? { name } : {}),
       ...(typeof req.body?.messageSignature === 'string' ? { messageSignature: str(req.body.messageSignature, 400) } : {}),
+      ...(blind === undefined ? {} : { blindScreening: blind }),
     });
+    if (blind !== undefined && blind !== was) {
+      db.logActivity(
+        org.id,
+        actorOf(req),
+        'settings.changed',
+        blind ? '«غربالگری بی‌طرف» را روشن کرد؛ نام، تماس و فایل کارجو تا آشکارسازی پنهان می‌ماند' : '«غربالگری بی‌طرف» را خاموش کرد'
+      );
+    }
     res.json({ org: updated });
   });
 

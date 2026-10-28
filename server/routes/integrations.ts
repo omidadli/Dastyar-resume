@@ -12,6 +12,7 @@
 import express from 'express';
 import * as db from '../db';
 import { actorOf, ctxOf, requireRole } from '../auth';
+import { blindOn, blockedByBlind, knownNames, maskText } from '../blind';
 import { h, str } from './util';
 import { evaluateResume } from '../ai/screening';
 import { EmailNotConfiguredError, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings, sendMail, verifyEmail } from '../mailer';
@@ -254,6 +255,8 @@ export function integrationRoutes(): express.Router {
     '/integrations/sms/send',
     h(async (req, res) => {
       const { org, user } = ctxOf(req);
+      // A text to a hidden candidate is still contact: wait for the reveal.
+      if (str(req.body?.resumeId, 80) && blockedByBlind(org, res)) return;
       const settings = db.getOrgSecrets(org.id).sms;
       if (!settings || !isSmsConfigured(db.getOrgSecrets(org.id))) {
         return res.status(409).json({
@@ -445,6 +448,8 @@ export function integrationRoutes(): express.Router {
       const resumeId = str(req.body?.resumeId, 80) || null;
       const rec = resumeId ? db.getResume(org.id, resumeId) : null;
       if (resumeId && !rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      // Blind mode: writing to a person is a reveal, and it must be explicit.
+      if (rec && blockedByBlind(org, res)) return;
       const subject = str(req.body?.subject, 200);
       const body = typeof req.body?.body === 'string' ? req.body.body.slice(0, 20_000) : '';
       if (!subject.trim() || !body.trim()) return res.status(400).json({ error: 'موضوع و متن ایمیل الزامی است.' });
@@ -535,7 +540,10 @@ export function integrationRoutes(): express.Router {
     const { org } = ctxOf(req);
     const jobId = str(req.query.jobId, 80) || undefined;
     const resumeId = str(req.query.resumeId, 80) || undefined;
-    res.json({ items: db.listInterviews(org.id, { jobId, resumeId }).map(publicInterview) });
+    const items = db.listInterviews(org.id, { jobId, resumeId }).map(publicInterview);
+    if (!blindOn(org)) return res.json({ items });
+    const names = knownNames(db.listOrgResumes(org.id));
+    res.json({ items: items.map((i) => ({ ...i, candidateName: maskText(i.candidateName, names) })) });
   });
 
   /**
@@ -567,6 +575,7 @@ export function integrationRoutes(): express.Router {
     '/interviews',
     h(async (req, res) => {
       const { org, user } = ctxOf(req);
+      if (blockedByBlind(org, res)) return;
       // The booking itself lives in server/interviews.ts so an approved
       // automation proposal books exactly the same interview.
       try {

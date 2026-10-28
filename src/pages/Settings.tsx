@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Braces,
   Building2,
   Copy,
   Cpu,
@@ -30,8 +31,9 @@ import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { Department, Role, TeamMember } from '../types/app';
 import { IntegrationsTab } from './settings/IntegrationsTab';
+import { DeveloperTab } from './settings/DeveloperTab';
 
-type SettingsTab = 'org' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'account';
+type SettingsTab = 'org' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'developer' | 'account';
 const ROLE_LABEL: Record<Role, string> = { owner: 'مالک', admin: 'مدیر', member: 'عضو' };
 
 function ReadOnlyNote() {
@@ -639,6 +641,7 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   messages: 'پیام‌ها',
   ai: 'هوش مصنوعی',
   integrations: 'اتصال‌ها',
+  developer: 'توسعه‌دهندگان',
   account: 'حساب کاربری',
 };
 
@@ -652,7 +655,7 @@ export default function Settings({ tab }: { tab: string }) {
   }, [tab, known]);
   return (
     <div>
-      <PageHeader title="تنظیمات" subtitle="سازمان، دپارتمان‌ها، تیم، پیام‌ها، هوش مصنوعی و اتصال‌ها" />
+      <PageHeader title="تنظیمات" subtitle="سازمان، دپارتمان‌ها، تیم، پیام‌ها، هوش مصنوعی، اتصال‌ها و API" />
       <Tabs<SettingsTab>
         className="mb-5"
         value={current}
@@ -664,6 +667,7 @@ export default function Settings({ tab }: { tab: string }) {
           { id: 'messages', label: TAB_LABELS.messages, icon: MessageSquareText },
           { id: 'ai', label: TAB_LABELS.ai, icon: Sparkles },
           { id: 'integrations', label: TAB_LABELS.integrations, icon: PlugZap },
+          { id: 'developer', label: TAB_LABELS.developer, icon: Braces },
           { id: 'account', label: TAB_LABELS.account, icon: UserRound },
         ]}
       />
@@ -673,6 +677,7 @@ export default function Settings({ tab }: { tab: string }) {
       {current === 'messages' && <MessagesTab />}
       {current === 'ai' && <AiTab />}
       {current === 'integrations' && <IntegrationsTab />}
+      {current === 'developer' && <DeveloperTab />}
       {current === 'account' && <AccountTab />}
     </div>
   );

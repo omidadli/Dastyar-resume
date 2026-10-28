@@ -23,7 +23,10 @@ import { careerPublicRoutes, careerRoutes } from './server/routes/careers';
 import { offerPublicRoutes, offerRoutes } from './server/routes/offers';
 import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/scheduling';
 import { commentRoutes } from './server/routes/comments';
+import { developerRoutes } from './server/routes/developer';
+import { apiV1Routes } from './server/routes/api-v1';
 import { forwardActivity } from './server/chat-webhook';
+import { deliverActivity } from './server/webhooks';
 import { backupPublicRoutes } from './server/routes/backup';
 import { remindersEnabled, runRemindersQuietly } from './server/reminders';
 
@@ -84,14 +87,19 @@ async function startServer() {
   });
   app.use('/api/auth', authRoutes());
   app.use('/api', fileRoutes()); // HMAC-signed, no bearer token needed
-  // Every activity line can become a Slack/Teams message, when the workspace asked.
-  db.setActivityHook(forwardActivity);
+  // Every activity line can become a Slack/Teams message or a signed webhook,
+  // when the workspace asked for it. Both are fire-and-forget.
+  db.setActivityHook((item) => {
+    forwardActivity(item);
+    deliverActivity(item);
+  });
 
   app.use('/api', backupPublicRoutes()); // signed backup download + restore progress
   app.use('/api', integrationPublicRoutes()); // Google Calendar OAuth callback
   app.use('/api', careerPublicRoutes()); // public career portal (no session)
   app.use('/api', offerPublicRoutes()); // public offer page + the candidate's signature
   app.use('/api', schedulingPublicRoutes()); // public «choose an interview time» page
+  app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
 
   // ---------------- Authenticated API ----------------
   app.use('/api', requireAuth);
@@ -107,6 +115,7 @@ async function startServer() {
   app.use('/api', offerRoutes());
   app.use('/api', schedulingRoutes());
   app.use('/api', commentRoutes());
+  app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------

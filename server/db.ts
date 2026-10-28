@@ -57,6 +57,7 @@ import type { AutomationProposal, AutomationSettings } from '../src/types/automa
 import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
 import type { CandidateComment } from '../src/types/pipeline';
+import type { ApiKeyPublic, ApiScope, WebhookDeliveryPublic, WebhookEndpointPublic } from '../src/types/developer';
 import type { ResumeSourceKind } from '../src/types/app';
 import type { InterviewFeedback, PipelineBoard, PipelineStage } from '../src/types/pipeline';
 import { DEFAULT_STAGES } from '../src/types/pipeline';
@@ -139,6 +140,12 @@ export interface StoreSnapshot {
   schedulingLinks?: SchedulingLinkRow[];
   /** Team comments (@mentions) written on a candidate. */
   comments?: CommentRow[];
+  /** API keys — only a SHA-256 hash of the key is ever stored. */
+  apiKeys?: ApiKeyRow[];
+  /** Outbound webhook endpoints (URL and signing secret, both encrypted). */
+  webhooks?: WebhookEndpointRow[];
+  /** The last few hundred delivery attempts, for the settings page. */
+  webhookDeliveries?: WebhookDeliveryRow[];
 }
 
 /** Encrypted connection material for one workspace. */
@@ -232,6 +239,18 @@ export type OfferRow = JobOffer & {
   updatedAtISO: string;
 };
 export type SmsLogRow = SentSms & { orgId: string };
+
+/**
+ * A REST API key. `hash` is SHA-256 of the whole token; the plain key exists
+ * once, in the response to the request that created it.
+ */
+export type ApiKeyRow = ApiKeyPublic & { orgId: string; hash: string; createdById: string | null };
+/**
+ * An outbound webhook. The URL often contains its own secret (Slack-style), so
+ * it is encrypted and the browser only ever sees host + masked path.
+ */
+export type WebhookEndpointRow = WebhookEndpointPublic & { orgId: string; urlEnc: string; secretEnc: string };
+export type WebhookDeliveryRow = WebhookDeliveryPublic & { orgId: string };
 export type InterviewRecordRow = InterviewRecord & { orgId: string };
 export type SentEmailRow = SentEmail & { orgId: string };
 
@@ -246,6 +265,9 @@ const offers = new Map<string, OfferRow>();
 const schedulingLinks = new Map<string, SchedulingLinkRow>();
 const comments = new Map<string, CommentRow>();
 const smsLog = new Map<string, SmsLogRow>();
+const apiKeys = new Map<string, ApiKeyRow>();
+const webhooks = new Map<string, WebhookEndpointRow>();
+const webhookDeliveries = new Map<string, WebhookDeliveryRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -291,6 +313,9 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.schedulingLinks?.forEach((x) => schedulingLinks.set(x.id, x));
   snap.comments?.forEach((x) => comments.set(x.id, x));
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
+  snap.apiKeys?.forEach((x) => apiKeys.set(x.id, x));
+  snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
+  snap.webhookDeliveries?.forEach((x) => webhookDeliveries.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -319,6 +344,9 @@ function clearMemory() {
   schedulingLinks.clear();
   comments.clear();
   smsLog.clear();
+  apiKeys.clear();
+  webhooks.clear();
+  webhookDeliveries.clear();
   activity = [];
   platformBlob = null;
   auditLog = [];
@@ -435,6 +463,9 @@ function snapshot(): StoreSnapshot {
     schedulingLinks: Array.from(schedulingLinks.values()),
     comments: Array.from(comments.values()),
     smsLog: Array.from(smsLog.values()),
+    apiKeys: Array.from(apiKeys.values()),
+    webhooks: Array.from(webhooks.values()),
+    webhookDeliveries: Array.from(webhookDeliveries.values()),
   };
 }
 
@@ -891,6 +922,9 @@ export function deleteOrg(id: string) {
   for (const [k, v] of schedulingLinks) if (v.orgId === id) schedulingLinks.delete(k);
   for (const [k, v] of comments) if (v.orgId === id) comments.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
+  for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
+  for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
+  for (const [k, v] of webhookDeliveries) if (v.orgId === id) webhookDeliveries.delete(k);
   orgSecrets.delete(id);
   orgs.delete(id);
   deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`);
@@ -1846,6 +1880,81 @@ export function deleteComment(orgId: string, id: string): boolean {
   return true;
 }
 
+// --------------------------------------------------------------- api keys --
+
+export function listApiKeys(orgId: string): ApiKeyRow[] {
+  return Array.from(apiKeys.values())
+    .filter((k) => k.orgId === orgId)
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+/** Looked up by id embedded in the token, before the hash has been checked. */
+export function getApiKey(id: string): ApiKeyRow | null {
+  return apiKeys.get(id) || null;
+}
+
+export function saveApiKey(row: ApiKeyRow): ApiKeyRow {
+  apiKeys.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+/** Counts a call. Debounced by the caller so a busy integration is one write a minute. */
+export function touchApiKey(id: string, atISO = new Date().toISOString()): void {
+  const row = apiKeys.get(id);
+  if (!row) return;
+  row.calls += 1;
+  row.lastUsedAtISO = atISO;
+  row.lastUsedAtJalali = formatJalaliDate(tehranJalaliOf(new Date(atISO)), true);
+  scheduleSave();
+}
+
+// --------------------------------------------------------------- webhooks --
+
+export function listWebhookEndpoints(orgId: string): WebhookEndpointRow[] {
+  return Array.from(webhooks.values())
+    .filter((w) => w.orgId === orgId)
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getWebhookEndpoint(orgId: string, id: string): WebhookEndpointRow | null {
+  const w = webhooks.get(id);
+  return w && w.orgId === orgId ? w : null;
+}
+
+export function saveWebhookEndpoint(row: WebhookEndpointRow): WebhookEndpointRow {
+  webhooks.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deleteWebhookEndpoint(orgId: string, id: string): boolean {
+  if (!getWebhookEndpoint(orgId, id)) return false;
+  webhooks.delete(id);
+  for (const [k, v] of webhookDeliveries) if (v.endpointId === id) webhookDeliveries.delete(k);
+  scheduleSave();
+  return true;
+}
+
+export function listWebhookDeliveries(orgId: string, limit = 30): WebhookDeliveryRow[] {
+  return Array.from(webhookDeliveries.values())
+    .filter((d) => d.orgId === orgId)
+    .sort((a, b) => b.atISO.localeCompare(a.atISO))
+    .slice(0, Math.min(200, Math.max(1, limit)));
+}
+
+/** The newest 300 attempts per workspace are kept; older ones are dropped. */
+export function saveWebhookDelivery(row: WebhookDeliveryRow): WebhookDeliveryRow {
+  webhookDeliveries.set(row.id, row);
+  const mine = Array.from(webhookDeliveries.values()).filter((d) => d.orgId === row.orgId);
+  if (mine.length > 300) {
+    const drop = new Set(mine.sort((a, b) => a.atISO.localeCompare(b.atISO)).slice(0, mine.length - 300).map((d) => d.id));
+    for (const id of drop) webhookDeliveries.delete(id);
+  }
+  scheduleSave();
+  return row;
+}
+
 // ------------------------------------------------------------- scheduling --
 
 export function listSchedulingLinks(orgId: string, filter: { jobId?: string; resumeId?: string } = {}): SchedulingLinkRow[] {
@@ -2665,6 +2774,15 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       ? raw.interviewFeedback.filter((f: any) => f && isStr(f.id) && isStr(f.orgId) && isStr(f.resumeId))
       : [],
     smsLog: Array.isArray(raw.smsLog) ? raw.smsLog.filter((x: any) => x && isStr(x.id) && isStr(x.orgId)) : [],
+    apiKeys: Array.isArray(raw.apiKeys)
+      ? raw.apiKeys.filter((k: any) => k && isStr(k.id) && isStr(k.orgId) && isStr(k.hash) && isStr(k.prefix))
+      : [],
+    webhooks: Array.isArray(raw.webhooks)
+      ? raw.webhooks.filter((w: any) => w && isStr(w.id) && isStr(w.orgId) && isStr(w.urlEnc) && isStr(w.secretEnc))
+      : [],
+    webhookDeliveries: Array.isArray(raw.webhookDeliveries)
+      ? raw.webhookDeliveries.filter((d: any) => d && isStr(d.id) && isStr(d.orgId) && isStr(d.event))
+      : [],
     aiStats: undefined,
   };
 }

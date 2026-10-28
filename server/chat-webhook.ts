@@ -61,7 +61,7 @@ const HOSTS: Record<ChatProvider, RegExp> = {
   generic: /^$/,
 };
 
-function allowedByEnv(url: string): boolean {
+export function allowedByEnv(url: string): boolean {
   const list = (process.env.WEBHOOK_ALLOW_HOSTS || '')
     .split(',')
     .map((h) => h.trim().toLowerCase())

@@ -42,6 +42,7 @@ import type {
   AutomationRunResult,
   AutomationSettings,
 } from '../types/automation';
+import type { ApiKeyPublic, CreatedApiKey, DeveloperOverview, WebhookDeliveryPublic, WebhookEndpointPublic, WebhookTestResult } from '../types/developer';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -517,6 +518,30 @@ export const api = {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),
     list: (p: { departmentId?: string; q?: string; tags?: string[]; minScore?: number; minYears?: number; sort?: string; page?: number }) =>
       get<PagedResult<ResumeListItem>>(`/api/talent/list${qs({ ...p, tags: p.tags?.length ? p.tags.join(',') : undefined })}`),
+  },
+  developer: {
+    overview: () => get<DeveloperOverview>('/api/developer/overview'),
+    createKey: (b: { name: string; scopes: string[] }) => post<CreatedApiKey>('/api/developer/keys', b),
+    revokeKey: (id: string) => del<{ keys: ApiKeyPublic[] }>(`/api/developer/keys/${encodeURIComponent(id)}`),
+    addWebhook: (b: { name: string; url: string; events: string[] }) =>
+      post<{ endpoint: WebhookEndpointPublic; test: WebhookTestResult; webhooks: WebhookEndpointPublic[] }>(
+        '/api/developer/webhooks',
+        b,
+        { timeoutMs: 45_000 }
+      ),
+    updateWebhook: (id: string, b: { name?: string; url?: string; events?: string[]; active?: boolean }) =>
+      patch<{ endpoint: WebhookEndpointPublic; webhooks: WebhookEndpointPublic[] }>(
+        `/api/developer/webhooks/${encodeURIComponent(id)}`,
+        b
+      ),
+    removeWebhook: (id: string) => del<{ webhooks: WebhookEndpointPublic[] }>(`/api/developer/webhooks/${encodeURIComponent(id)}`),
+    testWebhook: (id: string) =>
+      post<{ test: WebhookTestResult; endpoint: WebhookEndpointPublic | null; deliveries: WebhookDeliveryPublic[] }>(
+        `/api/developer/webhooks/${encodeURIComponent(id)}/test`,
+        {},
+        { timeoutMs: 45_000 }
+      ),
+    deliveries: (limit = 50) => get<{ deliveries: WebhookDeliveryPublic[] }>(`/api/developer/deliveries?limit=${limit}`),
   },
   insights: {
     dashboard: () => get<DashboardData>('/api/dashboard'),

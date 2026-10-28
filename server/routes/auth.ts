@@ -16,6 +16,17 @@ import { aiStatus } from '../ai/provider';
 import { demoAllowed, demoTtlMs, isEnvAdmin, isPlatformAdmin, publicConfig, systemSettings } from '../platform';
 import { createDemoWorkspace } from '../demo-seed';
 import { h, str } from './util';
+import {
+  TwoFactorError,
+  beginEnrollment,
+  challengeUser,
+  confirmEnrollment,
+  disable,
+  regenerateRecovery,
+  startChallenge,
+  statusOf,
+  verifySecondStep,
+} from '../twofactor';
 
 // Only FAILED logins count: an office behind one NAT address must be able to
 // sign in all day. Per address+account, per address, and per account across
@@ -28,6 +39,9 @@ const demoByIp = new RateLimiter(15, 60 * 60_000);
 // Wrong «current password» on PATCH /me — a stolen session must not be able
 // to guess the real password at full speed.
 const passwordCheckFailByUser = new RateLimiter(10, 15 * 60_000);
+// Guessing a 6-digit code: 10 wrong answers per account per 15 minutes leaves
+// room for a person who mistyped twice and is useless for a script (one in 10^6).
+const secondFactorFailByUser = new RateLimiter(10, 15 * 60_000);
 
 function tooMany(res: express.Response, retryAfterSec: number) {
   res.setHeader('Retry-After', String(retryAfterSec));
@@ -99,6 +113,15 @@ export function authRoutes(): express.Router {
       loginFailByAccount.reset(email);
       const blocked = accessBlock(user, org);
       if (blocked) return res.status(blocked.status).json({ error: blocked.error, code: blocked.code });
+      // «ورود دومرحله‌ای»: the password was right, but no session exists yet.
+      const twoFactor = db.getTwoFactor(user.id);
+      if (twoFactor?.enabledAtISO) {
+        return res.json({
+          twoFactorRequired: true as const,
+          challenge: startChallenge(user.id),
+          hint: 'کد ۶ رقمی برنامهٔ احراز هویت را وارد کنید (یا یکی از کدهای بازیابی).',
+        });
+      }
       db.updateUser(user.id, { lastLoginISO: new Date().toISOString() });
       res.json({ token: issueSession(user.id), user: { ...db.publicUser(user), platformAdmin: isPlatformAdmin(user) }, org });
     })
@@ -136,6 +159,133 @@ export function authRoutes(): express.Router {
       support: support ? { adminName: support.adminName, expiresAt: support.expiresAt } : null,
     });
   });
+
+  /**
+   * The second step of a login. One request, one single-use challenge: the code
+   * is checked against the account that started the challenge, never a body id.
+   */
+  r.post(
+    '/2fa',
+    h(async (req, res) => {
+      const challenge = str(req.body?.challenge, 200);
+      if (!challenge) return res.status(400).json({ error: 'درخواست ورود نامعتبر است.', code: 'CHALLENGE_REQUIRED' });
+      // The service owns the challenge map; this only resolves who it belongs to.
+      let user: db.UserRecord;
+      try {
+        user = challengeUser(challenge);
+      } catch (err) {
+        if (!(err instanceof TwoFactorError)) throw err;
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
+      const budget = secondFactorFailByUser.check(user.id);
+      if (!budget.ok) return tooMany(res, budget.retryAfterSec);
+      try {
+        verifySecondStep(user, { challenge, code: req.body?.code, recoveryCode: req.body?.recoveryCode });
+      } catch (err) {
+        if (!(err instanceof TwoFactorError)) throw err;
+        if (err.code !== 'CHALLENGE_EXPIRED' && err.code !== 'TOO_MANY_TRIES') secondFactorFailByUser.hit(user.id);
+        return res.status(err.status).json({ error: err.message, code: err.code });
+      }
+      secondFactorFailByUser.reset(user.id);
+      const org = db.getOrg(user.orgId);
+      if (!org) return res.status(401).json({ error: 'فضای کاری این حساب پیدا نشد.' });
+      const blocked = accessBlock(user, org);
+      if (blocked) return res.status(blocked.status).json({ error: blocked.error, code: blocked.code });
+      db.updateUser(user.id, { lastLoginISO: new Date().toISOString() });
+      db.logActivity(org.id, { id: user.id, name: user.name }, 'settings.changed', 'با ورود دومرحله‌ای وارد حساب خود شد');
+      res.json({ token: issueSession(user.id), user: { ...db.publicUser(user), platformAdmin: isPlatformAdmin(user) }, org });
+    })
+  );
+
+  // ------------------------------------------------- ورود دومرحله‌ای (TOTP) --
+
+  r.get('/2fa', requireAuth, (req, res) => {
+    const { user } = ctxOf(req);
+    res.json(statusOf(user.id));
+  });
+
+  r.post(
+    '/2fa/setup',
+    requireAuth,
+    h(async (req, res) => {
+      const { user, org } = ctxOf(req);
+      // A shared demo workspace has a published password: a second factor there
+      // would lock the next visitor out, so it is offered on real accounts only.
+      if (org.isDemo) return res.status(400).json({ error: 'در نسخه نمایشی ورود دومرحله‌ای فعال نمی‌شود؛ روی حساب واقعی سازمان خودتان روشنش کنید.', code: 'DEMO_WORKSPACE' });
+      const budget = passwordCheckFailByUser.check(user.id);
+      if (!budget.ok) return tooMany(res, budget.retryAfterSec);
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
+      if (!(await verifyPassword(password, user.passwordHash))) {
+        passwordCheckFailByUser.hit(user.id);
+        return res.status(400).json({ error: 'برای راه‌اندازی، رمز عبور فعلی را وارد کنید.', field: 'password' });
+      }
+      passwordCheckFailByUser.reset(user.id);
+      try {
+        const enrollment = await beginEnrollment(user.id, user.email, org.name || 'HOVIDA');
+        res.status(201).json(enrollment);
+      } catch (err) {
+        if (!(err instanceof TwoFactorError)) throw err;
+        res.status(err.status).json({ error: err.message, code: err.code });
+      }
+    })
+  );
+
+  r.post(
+    '/2fa/enable',
+    requireAuth,
+    h(async (req, res) => {
+      const { user, org, tokenHash } = ctxOf(req);
+      try {
+        const result = confirmEnrollment(user.id, str(req.body?.code, 10));
+        db.logActivity(org.id, { id: user.id, name: user.name }, 'settings.changed', 'ورود دومرحله‌ای را روشن کرد');
+        // Other devices must sign in again, now with a code.
+        db.deleteSessionsOfUser(user.id, tokenHash);
+        res.json({ ...statusOf(user.id), ...result });
+      } catch (err) {
+        if (!(err instanceof TwoFactorError)) throw err;
+        res.status(err.status).json({ error: err.message, code: err.code });
+      }
+    })
+  );
+
+  r.post(
+    '/2fa/disable',
+    requireAuth,
+    h(async (req, res) => {
+      const { user, org } = ctxOf(req);
+      const budget = passwordCheckFailByUser.check(user.id);
+      if (!budget.ok) return tooMany(res, budget.retryAfterSec);
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
+      if (!(await verifyPassword(password, user.passwordHash))) {
+        passwordCheckFailByUser.hit(user.id);
+        return res.status(400).json({ error: 'رمز عبور درست نیست.', field: 'password' });
+      }
+      try {
+        disable(user.id, str(req.body?.code, 10));
+        passwordCheckFailByUser.reset(user.id);
+        db.logActivity(org.id, { id: user.id, name: user.name }, 'settings.changed', 'ورود دومرحله‌ای را خاموش کرد');
+        res.json(statusOf(user.id));
+      } catch (err) {
+        if (!(err instanceof TwoFactorError)) throw err;
+        res.status(err.status).json({ error: err.message, code: err.code });
+      }
+    })
+  );
+
+  r.post(
+    '/2fa/recovery',
+    requireAuth,
+    h(async (req, res) => {
+      const { user } = ctxOf(req);
+      try {
+        const codes = regenerateRecovery(user.id, str(req.body?.code, 10));
+        res.json({ recoveryCodes: codes, ...statusOf(user.id) });
+      } catch (err) {
+        if (!(err instanceof TwoFactorError)) throw err;
+        res.status(err.status).json({ error: err.message, code: err.code });
+      }
+    })
+  );
 
   r.patch(
     '/me',

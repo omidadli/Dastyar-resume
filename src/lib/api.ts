@@ -24,6 +24,8 @@ import type {
   MeResponse,
   OrgPublic,
   ReportRange,
+  TwoFactorChallenge,
+  TwoFactorStatus,
   ReportsData,
   Role,
   SearchResults,
@@ -270,7 +272,19 @@ export const api = {
     config: () => get<PublicConfig>('/api/auth/config', { timeoutMs: 10_000, anonymous: true }),
     signup: (b: { orgName: string; name: string; email: string; password: string }) =>
       post<AuthPayload>('/api/auth/signup', b, { anonymous: true }),
-    login: (b: { email: string; password: string }) => post<AuthPayload>('/api/auth/login', b, { anonymous: true }),
+    login: (b: { email: string; password: string }) =>
+      post<AuthPayload | TwoFactorChallenge>('/api/auth/login', b, { anonymous: true }),
+    /** Step two: a challenge plus a code (or a recovery code) becomes a session. */
+    twoFactor: (b: { challenge: string; code?: string; recoveryCode?: string }) =>
+      post<AuthPayload>('/api/auth/2fa', b, { anonymous: true }),
+    twoFactorStatus: () => get<TwoFactorStatus>('/api/auth/2fa'),
+    twoFactorSetup: (b: { password: string }) =>
+      post<{ secret: string; otpauth: string; qr: string; recoveryCodes: string[] }>('/api/auth/2fa/setup', b),
+    twoFactorEnable: (b: { code: string }) =>
+      post<TwoFactorStatus & { recoveryLeft: number }>('/api/auth/2fa/enable', b),
+    twoFactorDisable: (b: { password: string; code: string }) => post<TwoFactorStatus>('/api/auth/2fa/disable', b),
+    twoFactorRecovery: (b: { code: string }) =>
+      post<{ recoveryCodes: string[] } & TwoFactorStatus>('/api/auth/2fa/recovery', b),
     demo: () => post<AuthPayload>('/api/auth/demo', {}, { timeoutMs: 45_000, anonymous: true }),
     logout: () => post<{ ok: boolean }>('/api/auth/logout'),
     me: () => get<MeResponse>('/api/auth/me', { timeoutMs: 15_000 }),
@@ -286,6 +300,8 @@ export const api = {
       post<{ member: TeamMember; members: TeamMember[] }>('/api/org/members', b),
     updateMember: (id: string, role: Role) => patch<{ members: TeamMember[] }>(`/api/org/members/${id}`, { role }),
     removeMember: (id: string) => del<{ members: TeamMember[] }>(`/api/org/members/${id}`),
+    /** «قفل‌شده‌ام»: an admin clears a member's second factor after a lost phone. */
+    resetMemberTwoFactor: (id: string) => post<{ members: TeamMember[] }>(`/api/org/members/${id}/2fa-reset`, {}),
     retention: () =>
       get<{ policy: RetentionPolicy; preview: { days: number; action: RetentionPolicy['action']; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } }>(
         '/api/org/retention'
@@ -608,6 +624,8 @@ export const adminApi = {
   updateUser: (id: string, b: { name?: string; role?: Role; disabled?: boolean; platformAdmin?: boolean }) => patch<{ user: AdminUserRow }>(`/api/admin/users/${id}`, b),
   resetPassword: (id: string) => post<{ tempPassword: string }>(`/api/admin/users/${id}/reset-password`),
   revokeSessions: (id: string) => post<{ user: AdminUserRow }>(`/api/admin/users/${id}/revoke-sessions`),
+  /** The operator's last-resort unlock for a locked-out workspace owner. */
+  resetTwoFactor: (id: string) => post<{ user: AdminUserRow }>(`/api/admin/users/${id}/reset-2fa`),
   deleteUser: (id: string) => del<{ ok: boolean }>(`/api/admin/users/${id}`),
   ai: () => get<AiSettingsPublic>('/api/admin/ai'),
   updateAi: (b: Partial<{ enabled: boolean; strategy: KeyStrategy; useEnvKeys: boolean; temperature: number; fastTimeoutSec: number; deepTimeoutSec: number }>) =>

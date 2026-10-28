@@ -89,9 +89,24 @@ export const ASSISTED_MINUTES_PER_RESUME = 1.5;
 
 export type OrgRecord = OrgPublic;
 
+/**
+ * «ورود دومرحله‌ای» material. The secret is encrypted with the deployment key,
+ * exactly like an SMTP password, and the recovery codes are only hashes.
+ */
+export interface TwoFactorRecord {
+  /** Set during enrolment; `enabledAtISO` is null until the first valid code. */
+  secretEnc: string;
+  enabledAtISO: string | null;
+  /** SHA-256 of each unused recovery code, with the moment it was spent. */
+  recovery: { hash: string; usedAtISO: string | null }[];
+  /** The last TOTP step accepted, so a code cannot be replayed. */
+  lastStep: number | null;
+}
+
 export interface UserRecord extends UserPublic {
   passwordHash: string;
   lastSeenActivityISO: string | null;
+  twoFactor?: TwoFactorRecord | null;
 }
 
 export interface SessionRecord {
@@ -950,8 +965,9 @@ export function deleteOrg(id: string) {
 }
 
 export function publicUser(u: UserRecord): UserPublic {
-  const { passwordHash: _p, lastSeenActivityISO: _l, ...rest } = u;
-  return rest;
+  const { passwordHash: _p, lastSeenActivityISO: _l, twoFactor, ...rest } = u;
+  // The browser learns only that 2FA is on — never the secret or the codes.
+  return { ...rest, twoFactorEnabled: Boolean(twoFactor?.enabledAtISO) };
 }
 
 export function findUserByEmail(email: string): UserRecord | null {
@@ -984,7 +1000,12 @@ export function createUser(input: { orgId: string; name: string; email: string; 
 
 export function updateUser(
   id: string,
-  patch: Partial<Pick<UserRecord, 'name' | 'title' | 'role' | 'passwordHash' | 'lastLoginISO' | 'lastSeenActivityISO' | 'platformAdmin' | 'disabled' | 'email'>>
+  patch: Partial<
+    Pick<
+      UserRecord,
+      'name' | 'title' | 'role' | 'passwordHash' | 'lastLoginISO' | 'lastSeenActivityISO' | 'platformAdmin' | 'disabled' | 'email' | 'twoFactor'
+    >
+  >
 ) {
   const u = users.get(id);
   if (!u) return null;
@@ -1577,6 +1598,22 @@ export function deleteResume(rec: ResumeRecord) {
   // The original may itself have been a duplicate, so the whole scope is rebuilt.
   refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
+}
+
+/**
+ * Direct access to the 2FA material — kept separate from `updateUser` so no
+ * generic profile edit can ever overwrite it by accident.
+ */
+export function getTwoFactor(userId: string): TwoFactorRecord | null {
+  return users.get(userId)?.twoFactor || null;
+}
+
+export function setTwoFactor(userId: string, value: TwoFactorRecord | null): void {
+  const u = users.get(userId);
+  if (!u) return;
+  if (value) u.twoFactor = value;
+  else delete u.twoFactor;
+  scheduleSave();
 }
 
 export function setDecision(

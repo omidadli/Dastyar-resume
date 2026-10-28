@@ -365,6 +365,8 @@ export interface AdminUserRow {
   createdAtISO: string;
   lastLoginISO: string | null;
   sessions: number;
+  /** «ورود دومرحله‌ای» is on for this account. */
+  twoFactorEnabled: boolean;
 }
 
 export interface AdminMe {

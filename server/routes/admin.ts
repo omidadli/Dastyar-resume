@@ -147,6 +147,7 @@ function userRow(u: db.UserRecord): AdminUserRow {
     createdAtISO: u.createdAtISO,
     lastLoginISO: u.lastLoginISO,
     sessions: db.sessionsOfUser(u.id).length,
+    twoFactorEnabled: Boolean(db.getTwoFactor(u.id)?.enabledAtISO),
   };
 }
 
@@ -415,6 +416,26 @@ export function adminRoutes(): express.Router {
       db.deleteSessionsOfUser(target.id, keep);
       log(req, 'user.reset_password', target.email, keep ? 'رمز موقت ساخته شد و نشست‌های دیگر بسته شد' : 'رمز موقت ساخته شد و همه نشست‌ها بسته شد');
       res.json({ tempPassword: password });
+    })
+  );
+
+  /**
+   * Last resort when a workspace owner has lost both phone and recovery codes:
+   * only the platform admin can take the second factor off, and every action is
+   * logged with the operator's own address.
+   */
+  r.post(
+    '/users/:id/reset-2fa',
+    h(async (req, res) => {
+      const target = db.getUser(req.params.id);
+      if (!target) return res.status(404).json({ error: 'کاربر یافت نشد.' });
+      const record = db.getTwoFactor(target.id);
+      if (!record) return res.status(409).json({ error: 'ورود دومرحله‌ای این کاربر روشن نیست.', code: 'NOT_ENABLED' });
+      db.setTwoFactor(target.id, null);
+      const keep = target.id === ctxOf(req).user.id ? ctxOf(req).tokenHash : undefined;
+      db.deleteSessionsOfUser(target.id, keep);
+      log(req, 'user.reset_2fa', target.email, keep ? 'ورود دومرحله‌ای برداشته شد (نشست فعلی ماند)' : 'ورود دومرحله‌ای برداشته شد و همه نشست‌ها بسته شد');
+      return res.json({ user: userRow(db.getUser(target.id)!) });
     })
   );
 

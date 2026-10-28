@@ -43,6 +43,8 @@ export interface UserPublic {
   lastLoginISO: string | null;
   /** Operator of the whole deployment (/admin). */
   platformAdmin?: boolean;
+  /** «ورود دومرحله‌ای» is active for this account (the secret itself never leaves the server). */
+  twoFactorEnabled?: boolean;
   disabled?: boolean;
 }
 
@@ -67,6 +69,20 @@ export interface AuthPayload {
   org: OrgPublic;
 }
 
+/** `POST /api/auth/login` for an account with «ورود دومرحله‌ای» on. */
+export interface TwoFactorChallenge {
+  twoFactorRequired: true;
+  challenge: string;
+  hint: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  enabledAtISO: string | null;
+  recoveryLeft: number;
+  pending: boolean;
+}
+
 export interface MeResponse {
   user: UserPublic;
   org: OrgPublic;
@@ -80,6 +96,7 @@ export type ActivityType =
   | 'org.created'
   | 'member.added'
   | 'member.removed'
+  | 'member.updated'
   | 'job.created'
   | 'job.status'
   | 'job.deleted'

@@ -33,7 +33,8 @@
     "test:collab": "npm run build && tsx scripts/collab-api.test.ts",
     "test:developer": "npm run build && tsx scripts/developer-api.test.ts",
     "test:retention": "npm run build && tsx scripts/retention-api.test.ts",
-    "test:survey": "npm run build && tsx scripts/survey-api.test.ts"
+    "test:survey": "npm run build && tsx scripts/survey-api.test.ts",
+    "test:2fa": "npm run build && tsx scripts/twofactor-api.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -51,6 +52,7 @@
     "nodemailer": "^7.0.13",
     "omggif": "^1.0.10",
     "pdfjs-dist": "^6.3.289",
+    "qrcode": "^1.5.4",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "recharts": "^3.10.1",
@@ -67,6 +69,7 @@
     "@types/jszip": "^3.4.1",
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^8.0.2",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-legacy": "^6.1.1",

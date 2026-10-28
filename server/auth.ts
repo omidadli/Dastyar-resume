@@ -13,6 +13,7 @@ import type { Role } from '../src/types/app';
 import * as db from './db';
 import { appSecret } from './secret';
 import { demoTtlMs, isPlatformAdmin, sessionTtlMs, systemSettings } from './platform';
+import { purgeChallenges } from './twofactor';
 
 export const SESSION_TTL_MS = 30 * 24 * 3600_000;
 export const DEMO_TTL_MS = 24 * 3600_000;
@@ -154,6 +155,7 @@ export function requireAuth(req: express.Request, res: express.Response, next: e
     return res.status(401).json({ error: blocked.error, code: blocked.code });
   }
   db.touchSession(session, org.isDemo ? demoTtlMs() : sessionTtlMs());
+  purgeChallenges();
   req.ctx = {
     user,
     org,

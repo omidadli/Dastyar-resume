@@ -105,7 +105,14 @@ function AdminLogin() {
     clearNotice();
     setLoading(true);
     try {
-      signIn(await api.auth.login({ email: em, password: pw }));
+      const payload = await api.auth.login({ email: em, password: pw });
+      if ('twoFactorRequired' in payload) {
+        // The operator account is protected too: finish on the main login page,
+        // which owns the code step, and come back here afterwards.
+        navigate(`/login?next=${encodeURIComponent('/admin')}`);
+        return;
+      }
+      signIn(payload);
     } catch (err: any) {
       setError(err?.message || 'ورود ممکن نشد.');
     } finally {

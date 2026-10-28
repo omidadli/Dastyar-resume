@@ -118,6 +118,12 @@ assert(text().includes('اتصال‌ها'), 'the connections tab is reachable f
 assert(text().includes('پیامک سازمان'), 'the connections tab offers the workspace SMS line');
 assert(text().includes('پورتال شغلی'), 'the connections tab offers the public career portal');
 
+// 8b. Settings › account: the 2FA card is there, and the demo is honest about it.
+navigate('/app/settings/account');
+assert(await waitFor(() => text().includes('ورود دومرحله‌ای')), 'the account tab offers two-factor login');
+assert(await waitFor(() => text().includes('در نسخهٔ نمایشی')), 'the demo workspace says 2FA belongs on a real account');
+assert(text().includes('تغییر رمز عبور'), 'the password card is still beside it');
+
 // 9. Interview modal opens from the candidate panel
 const clickByText = (needle) => {
   const el = Array.from(window.document.querySelectorAll('button, a')).find((b) => (b.textContent || '').includes(needle));

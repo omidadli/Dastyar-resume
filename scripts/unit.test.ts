@@ -8,6 +8,7 @@ import { safeExt } from '../server/db';
 import { matchesSearch, normalizeForSearch, normalizePersianText } from '../src/lib/normalizeFa';
 import { faRelative } from '../src/lib/format';
 import { assemblePageText, restoreZwnj, type PdfTextItem } from '../src/lib/pdfLayout';
+import { base32Decode, base32Encode, generateRecoveryCodes, generateSecret, hashRecoveryCode, hotp, otpauthUrl, secondsLeft, stepAt, verifyTotp } from '../server/totp';
 import fs from 'fs';
 import path from 'path';
 import type { JobUnderstanding } from '../src/types/screening';
@@ -161,6 +162,43 @@ const u: JobUnderstanding = {
   } finally {
     Date.now = realNow;
   }
+}
+
+// ---- ورود دومرحله‌ای: TOTP matches the RFC and the apps in people's pockets ----
+{
+  // RFC 6238, appendix B: the ASCII secret "12345678901234567890" at T=59 is 94287082.
+  const rfcSecret = base32Encode(Buffer.from('12345678901234567890', 'ascii'));
+  assert(hotp(rfcSecret, Math.floor(59 / 30), 8) === '94287082', 'TOTP follows the RFC 6238 vector (T=59)', hotp(rfcSecret, 1, 8));
+  assert(hotp(rfcSecret, Math.floor(1111111109 / 30), 8) === '07081804', 'TOTP follows the RFC 6238 vector (T=1111111109)');
+  // Base32 is what the app reads off the screen: it must survive the round trip.
+  const raw = Buffer.from([0, 1, 2, 250, 251, 252, 253]);
+  assert(base32Decode(base32Encode(raw)).equals(raw), 'base32 round-trips arbitrary bytes');
+  assert(!/[^A-Z2-7]/.test(generateSecret()), 'a generated secret is clean base32');
+  assert(base32Decode(generateSecret()).length === 20, 'a secret carries 160 bits');
+
+  // One step of drift is tolerated, two are not: a phone a minute behind works.
+  const secret = generateSecret();
+  const now = 1_700_000_000_000;
+  const step = stepAt(now);
+  const at = (s: number) => hotp(secret, s);
+  assert(verifyTotp(secret, at(step), { at: now }) === step, 'the current code is accepted');
+  assert(verifyTotp(secret, at(step - 1), { at: now }) === step - 1, 'one step in the past is accepted');
+  assert(verifyTotp(secret, at(step + 2), { at: now }) === null, 'two steps ahead is refused');
+  assert(verifyTotp(secret, '12345', { at: now }) === null, 'five digits is not a code');
+  assert(verifyTotp(secret, 'abcdef', { at: now }) === null, 'letters are not a code');
+  assert(verifyTotp(secret, ` ${at(step).slice(0, 3)} ${at(step).slice(3)} `, { at: now }) === step, 'a spaced code still works');
+
+  const url = new URL(otpauthUrl({ secret, account: 'hr@company.ir', issuer: 'شرکت نمونه' }));
+  assert(url.protocol === 'otpauth:' && url.host === 'totp', 'the setup link is an otpauth://totp address');
+  assert(url.searchParams.get('secret') === secret && url.searchParams.get('digits') === '6' && url.searchParams.get('period') === '30', 'it names the secret, six digits and thirty seconds');
+
+  // Recovery codes: unambiguous alphabet, single-use hashes, no clear text.
+  const codes = generateRecoveryCodes();
+  assert(codes.length === 8 && new Set(codes).size === 8, 'eight distinct recovery codes');
+  assert(codes.every((c) => /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/.test(c)), 'no I, O, 0 or 1 to misread on paper', codes[0]);
+  assert(hashRecoveryCode(codes[0]) === hashRecoveryCode(codes[0].toLowerCase().replace('-', '')), 'a typed code normalizes before hashing');
+  assert(hashRecoveryCode(codes[0]) !== hashRecoveryCode(codes[1]), 'different codes hash differently');
+  assert(secondsLeft(now) > 0 && secondsLeft(now) <= 30, 'the window countdown is within one step');
 }
 
 // ---- file extensions are preserved (bug #4) ----

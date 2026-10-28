@@ -151,6 +151,33 @@ export function orgRoutes(): express.Router {
     res.json({ members: members(org.id, user.id) });
   });
 
+  /**
+   * «قفل‌شده‌ام»: a member who lost both phone and recovery codes asks an admin.
+   * The second factor is removed (not the password), their other sessions end,
+   * and the whole organization sees who did it and when — in the activity log.
+   */
+  r.post(
+    '/org/members/:id/2fa-reset',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const target = db.getUser(req.params.id);
+      if (!target || target.orgId !== org.id) return res.status(404).json({ error: 'عضو یافت نشد.' });
+      // An admin cannot strip a second factor from someone more privileged than
+      // themselves: only the owner may reset another admin, and never the owner.
+      if (target.role === 'owner') return res.status(403).json({ error: 'ورود دومرحله‌ای مالک فضای کاری را فقط مدیر سامانه می‌تواند بازنشانی کند.' });
+      if (target.role === 'admin' && user.role !== 'owner') {
+        return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند ورود دومرحله‌ای یک مدیر را بازنشانی کند.' });
+      }
+      const record = db.getTwoFactor(target.id);
+      if (!record) return res.status(409).json({ error: 'ورود دومرحله‌ای این عضو روشن نیست.', code: 'NOT_ENABLED' });
+      db.setTwoFactor(target.id, null);
+      db.deleteSessionsOfUser(target.id);
+      db.logActivity(org.id, actorOf(req), 'member.updated', `ورود دومرحله‌ای «${target.name}» را بازنشانی کرد`);
+      res.json({ members: members(org.id, user.id) });
+    })
+  );
+
   r.get('/ai/status', (_req, res) => res.json(aiStatus()));
 
   r.post(

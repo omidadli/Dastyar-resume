@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Building2, CheckCircle2, Mail, Sparkles, UserRound } from 'lucide-react';
+import { ArrowLeft, Building2, CheckCircle2, KeyRound, Mail, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
 import { HovidaLogo, HovidaMark } from '../components/brand/Logo';
 import { Button, Callout, TextInput } from '../components/ui';
 import { api, ApiError } from '../lib/api';
+import type { AuthPayload } from '../types/app';
 import { useAuth } from '../lib/auth';
 import { usePublicConfig } from '../lib/config';
 import { Link, navigate, useLocation } from '../lib/router';
@@ -26,7 +27,7 @@ function AuthLayout({ children, title, subtitle }: { children: React.ReactNode; 
           </div>
         </main>
         <footer>
-          <p className="text-[12px] text-ink-4 text-center">هویدا • تحلیل دقیق‌تر، تصمیم بهتر</p>
+          <p className="text-[12px] text-ink-4 text-center">هویدا، تحلیل دقیق‌تر، تصمیم بهتر</p>
         </footer>
       </div>
       <aside aria-label="درباره هویدا" className="hidden lg:flex relative overflow-hidden bg-brand-soft items-center justify-center p-12">
@@ -83,6 +84,38 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Set once the password is right and the account has «ورود دومرحله‌ای» on. */
+  const [challenge, setChallenge] = useState<{ token: string; hint: string; email: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [useRecovery, setUseRecovery] = useState(false);
+
+  const finish = (payload: AuthPayload) => {
+    clearNotice();
+    signIn(payload);
+    const next = query.get('next');
+    navigate(next && next.startsWith('/app') ? next : '/app', { replace: true });
+  };
+
+  const verify = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!challenge) return;
+    const value = code.trim();
+    if (!value) {
+      setError(useRecovery ? 'یکی از کدهای بازیابی را وارد کنید.' : 'کد ۶ رقمی را وارد کنید.');
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      finish(await api.auth.twoFactor({ challenge: challenge.token, [useRecovery ? 'recoveryCode' : 'code']: value }));
+    } catch (err: any) {
+      setError(err instanceof ApiError ? err.message : 'تأیید کد ممکن نشد.');
+      // An expired challenge cannot be retried: send the person back to the password.
+      if (err instanceof ApiError && /منقضی/.test(err.message)) setChallenge(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -103,16 +136,77 @@ export function LoginPage() {
     setLoading(true);
     try {
       const payload = await api.auth.login({ email: em, password: pw });
-      clearNotice();
-      signIn(payload);
-      const next = query.get('next');
-      navigate(next && next.startsWith('/app') ? next : '/app', { replace: true });
+      if ('twoFactorRequired' in payload) {
+        setChallenge({ token: payload.challenge, hint: payload.hint, email: em });
+        setCode('');
+        setUseRecovery(false);
+        return;
+      }
+      finish(payload);
     } catch (err: any) {
       setError(err instanceof ApiError ? err.message : 'ورود ممکن نشد.');
     } finally {
       setLoading(false);
     }
   };
+
+  if (challenge) {
+    return (
+      <AuthLayout
+        title="تأیید دومرحله‌ای"
+        subtitle={
+          <>
+            رمز <span className="hv-latin font-semibold">{challenge.email}</span> درست بود. برای کامل‌شدن ورود،{' '}
+            {useRecovery ? 'یکی از کدهای بازیابی' : 'کد ۶ رقمی برنامهٔ احراز هویت'} را وارد کنید.
+          </>
+        }
+      >
+        <form onSubmit={verify} className="flex flex-col gap-4" noValidate>
+          <TextInput
+            label={useRecovery ? 'کد بازیابی' : 'کد تأیید'}
+            name={useRecovery ? 'recoveryCode' : 'code'}
+            icon={useRecovery ? KeyRound : ShieldCheck}
+            latin
+            inputMode={useRecovery ? 'text' : 'numeric'}
+            autoComplete="one-time-code"
+            autoFocus
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder={useRecovery ? 'ABCD-EFGH' : '۱۲۳۴۵۶'}
+            hint={useRecovery ? 'هر کد بازیابی فقط یک‌بار کار می‌کند.' : challenge.hint}
+          />
+          {error && <Callout tone="danger">{error}</Callout>}
+          <Button type="submit" size="lg" block loading={loading} iconEnd={ArrowLeft}>
+            تأیید و ورود
+          </Button>
+          <div className="flex items-center justify-between text-[13px]">
+            <button
+              type="button"
+              className="font-bold text-brand-ink hover:underline"
+              onClick={() => {
+                setUseRecovery((v) => !v);
+                setCode('');
+                setError(null);
+              }}
+            >
+              {useRecovery ? 'کد برنامهٔ احراز هویت را دارم' : 'به گوشی‌ام دسترسی ندارم'}
+            </button>
+            <button
+              type="button"
+              className="text-ink-3 hover:underline"
+              onClick={() => {
+                setChallenge(null);
+                setCode('');
+                setError(null);
+              }}
+            >
+              بازگشت
+            </button>
+          </div>
+        </form>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout

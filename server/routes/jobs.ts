@@ -10,6 +10,7 @@ import type { CandidateEvaluation, EmploymentType, EvaluationMeta, JobStatus, Re
 import type { Department } from '../../src/types/app';
 import { matchesSearch } from '../../src/lib/normalizeFa';
 import { h, oneOf, str } from './util';
+import { bankSummary, buildInterviewKit } from '../interview-kit';
 
 const EMPLOYMENT: EmploymentType[] = ['full-time', 'part-time', 'contract', 'remote', 'hybrid', 'internship'];
 const STATUS_LABEL: Record<JobStatus, string> = { open: 'باز', paused: 'متوقف', closed: 'بسته‌شده' };
@@ -118,6 +119,26 @@ export function jobRoutes(): express.Router {
     const job = db.getJob(org.id, req.params.id);
     if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
     res.json({ job });
+  });
+
+  /**
+   * «کیت مصاحبه» — composed on every request from the job's own criteria (and
+   * the chosen candidate's résumé), so it is never stale.
+   */
+  r.get('/jobs/:id/interview-kit', (req, res) => {
+    const { org } = ctxOf(req);
+    const job = db.getJob(org.id, req.params.id);
+    if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    const resumeId = str(req.query.resumeId, 80);
+    const rec = resumeId ? db.getResume(org.id, resumeId) : null;
+    if (resumeId && !rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    if (rec && rec.jobId !== job.id) return res.status(400).json({ error: 'این کارجو به این فرصت شغلی مربوط نیست.' });
+    res.json({ kit: buildInterviewKit({ org, job, candidate: rec }) });
+  });
+
+  /** What the bank covers — the settings/docs page reads this instead of a static list. */
+  r.get('/interview-kit/bank', (_req, res) => {
+    res.json(bankSummary());
   });
 
   r.patch('/jobs/:id', (req, res) => {

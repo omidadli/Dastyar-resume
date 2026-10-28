@@ -9,6 +9,7 @@ import { matchesSearch, normalizeForSearch, normalizePersianText } from '../src/
 import { faRelative } from '../src/lib/format';
 import { assemblePageText, restoreZwnj, type PdfTextItem } from '../src/lib/pdfLayout';
 import { blindLabel, maskText, redactRecord } from '../server/blind';
+import { bankSummary, matchPacksByCriteria, matchRole } from '../server/interview-kit';
 import { base32Decode, base32Encode, generateRecoveryCodes, generateSecret, hashRecoveryCode, hotp, otpauthUrl, secondsLeft, stepAt, verifyTotp } from '../server/totp';
 import fs from 'fs';
 import path from 'path';
@@ -255,6 +256,40 @@ const u: JobUnderstanding = {
   const json = JSON.stringify(red);
   assert(!json.includes('مینا') && !json.includes('mina@example.ir'), 'nothing identifying survives the redaction');
   assert(red.strengths[0].point === 'مسیریابی' && red.criterionScores[0].score === 80, 'the evidence and the scores stay');
+}
+
+// ---- کیت مصاحبه: the bank matches work, not words ----
+{
+  const bank = bankSummary();
+  assert(bank.packCount === 30 && bank.roleCount === 30, 'thirty packs and thirty roles', `${bank.packCount}/${bank.roleCount}`);
+  assert(bank.questionCount >= 70, 'the bank holds at least seventy questions', String(bank.questionCount));
+  assert(bank.packs.every((p) => p.questions >= 2), 'no pack is a single question');
+
+  // Role matching prefers the longest alias, so «فرانت‌اند» does not become «بک‌اند».
+  assert(matchRole('کارشناس ارشد شبکه و زیرساخت')?.title === 'کارشناس شبکه', 'a senior network title maps to the network role');
+  assert(matchRole('برنامه‌نویس فرانت‌اند')?.title === 'برنامه‌نویس فرانت‌اند', 'frontend stays frontend');
+  assert(matchRole('برنامه‌نویس بک‌اند')?.title === 'برنامه‌نویس بک‌اند', 'backend stays backend');
+  assert(matchRole('کارشناس فروش تلفنی')?.title === 'کارشناس فروش تلفنی', 'phone sales is its own role, not generic sales');
+  assert(matchRole('هماهنگ‌کنندهٔ رویداد') === null, 'an unknown role is honestly unmatched');
+
+  // Criteria pull packs by the job's own words, and only on word boundaries.
+  const ids = (criteria: Array<{ id: string; title: string; weight: number }>) => matchPacksByCriteria(criteria).map((m) => m.pack.id);
+  assert(ids([{ id: 'c1', title: 'تولید محتوا برای شبکه‌های اجتماعی', weight: 50 }]).includes('content'), '«تولید محتوا» pulls the content pack');
+  assert(!ids([{ id: 'c1', title: 'تولید محتوا برای شبکه‌های اجتماعی', weight: 50 }]).includes('production'), 'and not the factory pack');
+  assert(!ids([{ id: 'c1', title: 'نگهداری مشتریان کلیدی', weight: 50 }]).includes('maintenance'), '«نگهداری مشتری» is not machine maintenance');
+  assert(ids([{ id: 'c1', title: 'مذاکره و بستن قرارداد فروش', weight: 50 }]).includes('negotiation'), 'negotiation is recognised');
+  assert(ids([{ id: 'c1', title: 'برقراری ارتباط مؤثر با همکاران', weight: 50 }]).length === 0, '«برقراری» does not match «برق»');
+  const many = matchPacksByCriteria([
+    { id: 'a', title: 'فروش و مذاکره', weight: 30 },
+    { id: 'b', title: 'تارگت و پورسانت', weight: 80 },
+    { id: 'c', title: 'مدیریت مشتری در CRM', weight: 50 },
+    { id: 'd', title: 'کشف نیاز مشتری', weight: 60 },
+    { id: 'e', title: 'گزارش فروش', weight: 10 },
+  ]);
+  assert(many.length <= 4, 'criteria never pull more than four packs', String(many.length));
+  const top = many.slice(0, 2).map((m) => m.pack.id).sort();
+  assert(top.join(',') === 'negotiation,targets', 'the packs pulled by the heaviest criterion come first', top.join(','));
+  assert(many.every((m) => Boolean(m.criterionId)), 'each matched pack records which criterion pulled it');
 }
 
 // ---- file extensions are preserved (bug #4) ----

@@ -35,7 +35,8 @@
     "test:retention": "npm run build && tsx scripts/retention-api.test.ts",
     "test:survey": "npm run build && tsx scripts/survey-api.test.ts",
     "test:2fa": "npm run build && tsx scripts/twofactor-api.test.ts",
-    "test:blind": "npm run build && tsx scripts/blind-api.test.ts"
+    "test:blind": "npm run build && tsx scripts/blind-api.test.ts",
+    "test:kit": "npm run build && tsx scripts/interview-kit-api.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

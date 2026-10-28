@@ -6,6 +6,7 @@ import {
   Columns3,
   CopyCheck,
   Download,
+  NotebookText,
   ExternalLink,
   FileStack,
   Globe,
@@ -507,6 +508,9 @@ export default function JobDetail({ id }: { id: string }) {
         subtitle={subtitle}
         actions={
           <>
+            <ButtonLink to={`/app/jobs/${job.id}/kit`} variant="secondary" icon={NotebookText} className="max-sm:hidden">
+              کیت مصاحبه
+            </ButtonLink>
             <Button icon={UploadCloud} onClick={() => setUploadOpen(true)} disabled={closed || running} title={closed ? 'فرصت بسته است' : undefined}>
               افزودن رزومه
             </Button>

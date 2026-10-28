@@ -12,6 +12,7 @@ import {
   Copy,
   Download,
   Eye,
+  NotebookText,
   EyeOff,
   ExternalLink,
   FileSignature,
@@ -43,6 +44,7 @@ import {
 import type { Criterion, DecisionStatus, EvidencePoint, ResumeListItem } from '../../types/screening';
 import { api, openResumeFile } from '../../lib/api';
 import { useCan } from '../../lib/auth';
+import { navigate } from '../../lib/router';
 import { emitChange } from '../../lib/events';
 import { copyText } from '../../lib/clipboard';
 import { isInCompare, removeFromCompare, toggleCompare, useCompare } from '../../lib/compare';
@@ -630,6 +632,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
             width={232}
             items={[
               { label: 'ارسال پیام', icon: MessageSquareText, onClick: () => setMessageOpen(true), disabled: hidden, hint: hidden ? 'اول آشکارسازی' : undefined },
+              { label: 'کیت مصاحبه', icon: NotebookText, onClick: () => navigate(`/app/jobs/${record.jobId}/kit?c=${record.id}`), hint: 'سؤال‌های همین رزومه' },
               record.inBank
                 ? { label: 'خروج از بانک استعداد', icon: ArchiveX, onClick: () => void removeTalent() }
                 : { label: 'افزودن به بانک استعداد', icon: Archive, onClick: () => setTalentOpen(true) },
@@ -881,6 +884,14 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   </Button>
                   <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)} disabled={hidden}>
                     نظرسنجی تجربه
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={NotebookText}
+                    onClick={() => navigate(`/app/jobs/${record.jobId}/kit?c=${record.id}`)}
+                  >
+                    کیت مصاحبه
                   </Button>
                 </div>
                 {record.messageStatus === 'sent' && (

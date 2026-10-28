@@ -51,6 +51,7 @@ const Dashboard = lazyPage(() => import('./pages/Dashboard'));
 const Jobs = lazyPage(() => import('./pages/Jobs'));
 const JobNew = lazyPage(() => import('./pages/JobNew'));
 const JobDetail = lazyPage(() => import('./pages/JobDetail'));
+const InterviewKit = lazyPage(() => import('./pages/InterviewKit'));
 const Candidates = lazyPage(() => import('./pages/Candidates'));
 const CandidatePage = lazyPage(() => import('./pages/CandidatePage'));
 const Compare = lazyPage(() => import('./pages/Compare'));
@@ -110,6 +111,9 @@ function appPage(pathname: string): React.ReactNode {
   if (pathname === '/app' || pathname === '/app/') return <Dashboard />;
   if (pathname === '/app/jobs') return <Jobs />;
   if (pathname === '/app/jobs/new') return <JobNew />;
+  // The kit is a printable page of its own, before the generic job match.
+  let km = matchPath('/app/jobs/:id/kit', pathname);
+  if (km) return RECORD_ID.test(km.id) ? <InterviewKit key={km.id} id={km.id} /> : <NotFound inApp />;
   let m = matchPath('/app/jobs/:id', pathname);
   // Keyed: moving between two openings (notification, search) starts with fresh filters and panels.
   if (m) return RECORD_ID.test(m.id) ? <JobDetail key={m.id} id={m.id} /> : <NotFound inApp />;

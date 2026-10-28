@@ -15,6 +15,7 @@ import type {
   ResumeRecord,
   ScreeningAnswers,
 } from '../types/screening';
+import type { InterviewKit } from '../types/interview-kit';
 import type {
   ActivityFeed,
   AiStatus,
@@ -329,6 +330,9 @@ export const api = {
     create: (b: JobInput & { understanding: JobUnderstanding; answers: ScreeningAnswers; criteriaSource: CriteriaSource }) =>
       post<{ job: Job }>('/api/jobs', b),
     get: (id: string, opts?: RequestOptions) => get<{ job: Job }>(`/api/jobs/${id}`, opts),
+    /** «کیت مصاحبه» — composed from the job's criteria, plus this candidate's résumé. */
+    interviewKit: (id: string, resumeId?: string) =>
+      get<{ kit: InterviewKit }>(`/api/jobs/${id}/interview-kit${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
     update: (id: string, b: Partial<JobInput> & { status?: Job['status'] }) => patch<{ job: Job }>(`/api/jobs/${id}`, b),
     remove: (id: string) => del<{ ok: boolean }>(`/api/jobs/${id}`),
     analysis: (id: string, state: 'start' | 'cancel', opts?: RequestOptions) =>

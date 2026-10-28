@@ -167,6 +167,17 @@ assert(await waitFor(() => text().includes('آستانهٔ دعوت'), 12000), '
 assert(text().includes('ارسال خودکار نامهٔ نتیجه'), 'the automatic-send rule is exposed with its warning');
 assert(text().includes('متغیرهای متن'), 'the template variables are documented on the page');
 
+// 11a. «کیت مصاحبه» — the questions this job needs, and this candidate's own.
+navigate(`/app/jobs/${hr.id}/kit`);
+assert(await waitFor(() => text().includes('کیت مصاحبه'), 15000), 'the interview kit opens from the job');
+assert(await waitFor(() => text().includes('بشنوید') && text().includes('علامت هشدار'), 15000), 'each question says what to listen for and what to worry about');
+assert(text().includes('پایان جلسه'), 'the kit closes the session with a next step');
+assert(text().includes('چطور از این کیت استفاده کنیم'), 'the sidebar explains how to run it');
+assert(text().includes('معیارهای این فرصت'), 'the job criteria are repeated beside the questions');
+navigate(`/app/jobs/${hr.id}/kit?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('پرسش از خود این رزومه'), 15000), 'with a candidate, the kit asks about that résumé');
+assert(text().includes('این کیت برای'), 'and says whose kit it is');
+
 // 11b. «غربالگری بی‌طرف» — the switch, the masked table, the reveal.
 const setBlind = (on) =>
   nodeFetch(SERVER + '/api/org', {

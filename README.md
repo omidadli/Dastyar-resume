@@ -81,6 +81,8 @@ NODE_ENV=production npm start
 - **دسترسی LinkedIn را چطور بخرم و چه چیزی واقعاً قابل خرید است؟** [`docs/LINKEDIN-ACCESS-OPTIONS.md`](docs/LINKEDIN-ACCESS-OPTIONS.md).
 - **بدون هیچ API: وارد کردن فهرست پروفایل از فایل CSV** (خروجی Recruiter یا هر جدول) → [`docs/IMPORT-CSV.md`](docs/IMPORT-CSV.md).
 - **اتوماسیون جذب** (پیشنهاد دعوت/نامهٔ نتیجه/جلسه، با تأیید منابع انسانی) → [`docs/AUTOMATION.md`](docs/AUTOMATION.md).
+- **مقایسه با رقبا و فهرست امکانات** (ایران و جهان، با منبع و جای خالی‌ها) → [`docs/COMPETITORS.md`](docs/COMPETITORS.md).
+- **اسکریپت ارائهٔ فروش، پاسخ اعتراض‌ها، چک‌لیست دمو** → [`docs/SALES.md`](docs/SALES.md).
 
 مقادیر ورودی در پنل با AES-256-GCM رمزنگاری می‌شوند، دوباره به مرورگر برنمی‌گردند و تنها بخش کوتاهی از آن‌ها نمایش داده
 می‌شود. سرویس جست‌وجو پیش از ذخیره و کلید گوگل هنگام ذخیره آزمایش می‌شوند.
@@ -198,6 +200,8 @@ wrangler.jsonc, Dockerfile پیکربندی Cloudflare و ایمیج سرور
 docs/DEPLOY-CLOUDFLARE.md راهنمای استقرار روی Cloudflare
 docs/DESIGN-SYSTEM.md     مستند سیستم طراحی
 docs/AUTOMATION.md        اتوماسیون جذب: قواعد، متن‌ها، تأیید و تاریخچه
+docs/COMPETITORS.md       رقبا، ماتریس امکانات، جای خالی‌های باقی‌مانده
+docs/SALES.md             اسکریپت ارائهٔ فروش و پاسخ اعتراض‌ها
 ```
 
 سیستم طراحی (رنگ‌ها، تایپوگرافی، اجزا و قواعد دسترس‌پذیری) در [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) مستند شده است.

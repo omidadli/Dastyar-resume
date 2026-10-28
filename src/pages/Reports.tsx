@@ -35,6 +35,15 @@ function ChartTooltip({ active, payload, label }: any) {
   );
 }
 
+function MiniStat({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-[10px] bg-canvas border border-line-2 px-2 py-2">
+      <p className="text-[11px] text-ink-4">{label}</p>
+      <p className="text-[15px] font-bold text-ink hv-num mt-0.5">{typeof value === 'number' ? toPersianDigits(value) : value}</p>
+    </div>
+  );
+}
+
 function HBar({ label, value, max, sub, color = 'bg-brand' }: { label: React.ReactNode; value: number; max: number; sub?: React.ReactNode; color?: string }) {
   const pct = max ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
@@ -285,6 +294,80 @@ export default function Reports() {
               ) : (
                 <p className="text-[13px] text-ink-3">هنوز داده کافی نیست.</p>
               )}
+            </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <Card>
+              <CardHeader title="منبع استخدام" subtitle="کاندیداها از کجا آمده‌اند — و چند نفر استخدام شدند" />
+              {data.hiring.bySource.length ? (
+                <div className="flex flex-col gap-3.5">
+                  {data.hiring.bySource.map((s) => (
+                    <HBar
+                      key={s.kind}
+                      label={s.label}
+                      value={s.count}
+                      max={Math.max(...data.hiring.bySource.map((x) => x.count), 1)}
+                      sub={s.hired ? `${toPersianDigits(s.hired)} استخدام` : undefined}
+                      color={s.kind === 'referral' ? 'bg-[#7FCB93]' : s.kind === 'careers' ? 'bg-brand' : 'bg-[#CFE5D5]'}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[13px] text-ink-3">هنوز رزومه‌ای در این بازه ثبت نشده است.</p>
+              )}
+              <p className="text-[11.5px] text-ink-4 mt-3 leading-relaxed">منبع از خودِ درخواست خوانده می‌شود؛ بارگذاری دستی تیم به‌عنوان «بارگذاری دستی» شمرده می‌شود.</p>
+            </Card>
+
+            <Card>
+              <CardHeader title="زمان استخدام" subtitle="از ثبت درخواست تا پذیرش پیشنهاد" />
+              <div className="flex items-end gap-4">
+                <div>
+                  <p className="text-[12.5px] text-ink-3">میانه</p>
+                  <p className="text-[26px] font-extrabold text-ink hv-num leading-none mt-1">
+                    {data.hiring.timeToHire.medianDays === null ? '—' : toPersianDigits(data.hiring.timeToHire.medianDays)}
+                    <span className="text-[13px] font-bold text-ink-3 mr-1">روز</span>
+                  </p>
+                </div>
+                <div className="pb-1">
+                  <p className="text-[12.5px] text-ink-3">میانگین</p>
+                  <p className="text-[17px] font-bold text-ink-2 hv-num">
+                    {data.hiring.timeToHire.averageDays === null ? '—' : toPersianDigits(data.hiring.timeToHire.averageDays)} روز
+                  </p>
+                </div>
+              </div>
+              <p className="text-[11.5px] text-ink-4 mt-2">
+                {data.hiring.timeToHire.sample
+                  ? `بر پایهٔ ${toPersianDigits(data.hiring.timeToHire.sample)} استخدام ثبت‌شده.`
+                  : 'وقتی ستون «استخدام‌شده» پر شود، این عدد محاسبه می‌شود.'}
+              </p>
+              <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+                <MiniStat label="پیشنهاد پذیرفته" value={data.hiring.offers.accepted} />
+                <MiniStat label="پیشنهاد رد‌شده" value={data.hiring.offers.declined} />
+                <MiniStat label="نرخ پذیرش" value={data.hiring.offers.acceptRate === null ? '—' : `${toPersianDigits(data.hiring.offers.acceptRate)}٪`} />
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="بار مراحل جذب" subtitle="کاندیداهای فعال هر ستون در فرصت‌های باز" />
+              {data.hiring.byStage.length ? (
+                <div className="flex flex-col gap-3">
+                  {data.hiring.byStage.slice(0, 6).map((st) => (
+                    <HBar
+                      key={st.id}
+                      label={st.name}
+                      value={st.count}
+                      max={Math.max(...data.hiring.byStage.map((x) => x.count), 1)}
+                      color={st.kind === 'hired' ? 'bg-brand-stronger' : st.kind === 'rejected' ? 'bg-[#E5E7EB]' : 'bg-brand'}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-[13px] text-ink-3">هنوز کاندیدای فعالی در فرصت‌های باز نیست.</p>
+              )}
+              <p className="text-[12px] text-ink-3 mt-3">
+                {toPersianDigits(data.hiring.interviews.scheduled)} مصاحبه ثبت‌شده، {toPersianDigits(data.hiring.interviews.upcoming)} پیشِ‌رو
+              </p>
             </Card>
           </div>
 

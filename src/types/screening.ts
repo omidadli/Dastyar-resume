@@ -238,8 +238,12 @@ export interface AnalysisHistoryEntry {
 
 /** Where a candidate came from — set for sourced profiles, null for uploads. */
 export interface ResumeSource {
-  /** `careers` = applied through the public career portal; `linkedin` also covers CSV imports. */
-  kind: 'linkedin' | 'careers';
+  /**
+   * Where the candidate came from: `careers` = the public career portal,
+   * `referral` = a colleague's referral link, `linkedin` = a sourced profile or
+   * a CSV export.
+   */
+  kind: 'linkedin' | 'careers' | 'referral';
   profileUrl: string;
   headline: string;
   company: string | null;
@@ -247,6 +251,10 @@ export interface ResumeSource {
   openToWork: boolean;
   /** The sourcing search that found this profile. */
   searchId: string | null;
+  /** For `referral`: the colleague the candidate names (free text, never resolved). */
+  referrer?: string | null;
+  /** «چطور با ما آشنا شدید؟» — kept as answered, for the source-of-hire report. */
+  heardFrom?: string | null;
 }
 
 export interface ResumeRecord {

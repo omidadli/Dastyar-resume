@@ -181,6 +181,8 @@ export function careerPublicRoutes() {
       const fileBase64 = typeof req.body?.fileBase64 === 'string' && req.body.fileBase64.length > 50 ? (req.body.fileBase64 as string) : undefined;
       const text = typeof req.body?.text === 'string' ? req.body.text.slice(0, 40000) : '';
       const consent = req.body?.consent === true;
+      const ref = str(req.body?.ref ?? req.query.ref, 80);
+      const heardFrom = str(req.body?.heardFrom, 60);
 
       if (name.length < 3) return res.status(400).json({ error: 'نام و نام خانوادگی را کامل بنویسید.' });
       if (!EMAIL_RE.test(email) && !/^0?9\d{9}$/.test(phone.replace(/[^\d]/g, ''))) {
@@ -217,7 +219,17 @@ export function careerPublicRoutes() {
           extractedText: text,
           unjudgeableReason: null,
           fileBase64,
-          source: { kind: 'careers', profileUrl: '', headline: message || 'درخواست از پورتال شغلی', company: null, location: city, openToWork: true, searchId: null },
+          source: {
+            kind: ref ? 'referral' : 'careers',
+            profileUrl: '',
+            headline: message || 'درخواست از پورتال شغلی',
+            company: null,
+            location: city,
+            openToWork: true,
+            searchId: null,
+            referrer: ref || null,
+            heardFrom: heardFrom || null,
+          },
           errorMessage: 'رزومه دریافت شد؛ بررسی خودکار در حال انجام است.',
         });
       } catch {

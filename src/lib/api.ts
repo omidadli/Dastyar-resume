@@ -33,6 +33,8 @@ import type {
 } from '../types/app';
 import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PublicCareersPage, PublicJobDetail } from '../types/careers';
 import type { InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
+import type { JobOffer, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
+import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
   AutomationOverview,
   AutomationPreviewItem,
@@ -321,6 +323,42 @@ export const api = {
     saveSettings: (b: { slug: string; about: string }) => put<{ careers: CareerSettings }>('/api/careers/settings', b),
     publish: (jobId: string, isPublic: boolean) =>
       post<{ job: JobSummary }>(`/api/jobs/${encodeURIComponent(jobId)}/publish`, { isPublic }),
+  },
+  scheduling: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: SchedulingLink[] }>(`/api/scheduling${qs(p)}`),
+    get: (id: string) => get<{ link: SchedulingLink }>(`/api/scheduling/${encodeURIComponent(id)}`),
+    create: (b: {
+      resumeId: string;
+      slots: { date: string; time: string }[];
+      title?: string;
+      durationMin?: number;
+      notes?: string;
+      interviewerIds?: string[];
+      expiresInDays?: number;
+    }) => post<{ link: SchedulingLink }>('/api/scheduling', b),
+    send: (id: string) => post<{ link: SchedulingLink }>(`/api/scheduling/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ link: SchedulingLink }>(`/api/scheduling/${encodeURIComponent(id)}/cancel`, {}),
+    public: {
+      get: (token: string) => get<{ link: PublicSchedulingLink }>(`/api/scheduling/public/${encodeURIComponent(token)}`),
+      book: (token: string, startsAtISO: string) =>
+        post<{ link: PublicSchedulingLink; interviewId: string }>(`/api/scheduling/public/${encodeURIComponent(token)}/book`, { startsAtISO }, { timeoutMs: 90_000 }),
+    },
+  },
+  offers: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: JobOffer[]; counts: Record<OfferStatus, number> }>(`/api/offers${qs(p)}`),
+    get: (id: string) => get<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}`),
+    create: (b: { resumeId: string; terms: Partial<OfferTerms>; message?: string }) => post<{ offer: JobOffer }>('/api/offers', b),
+    update: (id: string, b: { terms?: Partial<OfferTerms>; message?: string }) => patch<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}`, b),
+    send: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/cancel`, {}),
+    /** Public page — the candidate's side, no session. */
+    public: {
+      get: (token: string) => get<{ offer: PublicOffer }>(`/api/offers/public/${encodeURIComponent(token)}`),
+      accept: (token: string, b: OfferDecisionInput) =>
+        post<{ offer: PublicOffer; already?: boolean }>(`/api/offers/public/${encodeURIComponent(token)}/accept`, b),
+      decline: (token: string, b: OfferDecisionInput) =>
+        post<{ offer: PublicOffer; already?: boolean }>(`/api/offers/public/${encodeURIComponent(token)}/decline`, b),
+    },
   },
   resumes: {
     list: (q: ResumeQuery, opts?: RequestOptions) =>

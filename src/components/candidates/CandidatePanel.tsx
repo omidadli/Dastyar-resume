@@ -12,6 +12,7 @@ import {
   Copy,
   Download,
   ExternalLink,
+  FileSignature,
   FileText,
   GraduationCap,
   History,
@@ -64,6 +65,8 @@ import {
 import { MessageModal, RejectModal, TalentModal } from './CandidateModals';
 import { ScorecardSection } from './Scorecard';
 import { SmsModal } from './SmsModal';
+import { OfferModal } from './OfferModal';
+import { SchedulingModal } from './SchedulingModal';
 import { InterviewModal } from './InterviewModal';
 import type { PipelineStage } from '../../types/pipeline';
 
@@ -280,6 +283,8 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [stageBusy, setStageBusy] = useState(false);
   const [smsOpen, setSmsOpen] = useState(false);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [rerunning, setRerunning] = useState<'standard' | 'deep' | null>(null);
   useCompare(); // re-render when the tray changes
   const inCompare = isInCompare(record.id);
@@ -761,6 +766,12 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   <Button size="sm" variant="ghost" icon={Smartphone} onClick={() => setSmsOpen(true)} disabled={!record.contact?.phone}>
                     ارسال پیامک
                   </Button>
+                  <Button size="sm" variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)}>
+                    انتخاب زمان مصاحبه
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={FileSignature} onClick={() => setOfferOpen(true)}>
+                    پیشنهاد شغلی
+                  </Button>
                 </div>
                 {record.messageStatus === 'sent' && (
                   <span className="text-[12px] text-ink-3 mr-3">آخرین پیام: {record.lastMessagedAtJalali}</span>
@@ -860,6 +871,8 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
 
       {messageOpen && <MessageModal record={record} onClose={() => setMessageOpen(false)} onSent={onChange} />}
       {smsOpen && <SmsModal record={record} onClose={() => setSmsOpen(false)} />}
+      {offerOpen && <OfferModal record={record} jobTitle={jobTitle} onClose={() => setOfferOpen(false)} />}
+      {scheduleOpen && <SchedulingModal record={record} jobTitle={jobTitle} onClose={() => setScheduleOpen(false)} />}
       {interviewOpen && (
         <InterviewModal
           record={record}

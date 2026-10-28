@@ -99,6 +99,10 @@ export type ActivityType =
   | 'automation.approved'
   | 'stage.moved'
   | 'scorecard.added'
+  | 'offer.sent'
+  | 'offer.accepted'
+  | 'offer.declined'
+  | 'offer.cancelled'
   | 'settings.changed';
 
 export interface ActivityItem {
@@ -160,7 +164,21 @@ export interface ReportsData {
   engines: { ai: number; local: number };
   jobs: { id: string; roleTitle: string; departmentName: string; status: JobStatus; total: number; high: number; approved: number; avgScore: number }[];
   timeSaved: { hours: number; resumes: number; minutesManual: number; minutesWithHovida: number };
+  /**
+   * The hiring questions a manager actually asks: where do good people come
+   * from, how long does it take, and is a stage becoming a bottleneck.
+   */
+  hiring: {
+    bySource: { kind: ResumeSourceKind; label: string; count: number; hired: number }[];
+    /** Current pipeline position across every open opening. */
+    byStage: { id: string; name: string; kind: string; count: number }[];
+    timeToHire: { medianDays: number | null; averageDays: number | null; sample: number };
+    offers: { draft: number; sent: number; accepted: number; declined: number; cancelled: number; acceptRate: number | null };
+    interviews: { scheduled: number; upcoming: number; cancelled: number };
+  };
 }
+
+export type ResumeSourceKind = 'careers' | 'referral' | 'linkedin' | 'direct';
 
 export interface SearchResults {
   jobs: { id: string; roleTitle: string; departmentName: string; status: JobStatus; total: number }[];

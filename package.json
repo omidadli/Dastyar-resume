@@ -27,7 +27,9 @@
     "mock:smtp": "node scripts/mock-smtp.mjs --port 2525",
     "test:apify": "npm run build && tsx scripts/apify-guard.test.ts",
     "test:automation": "npm run build && tsx scripts/automation-api.test.ts",
-    "test:automation:unit": "tsx scripts/automation.test.ts"
+    "test:automation:unit": "tsx scripts/automation.test.ts",
+    "test:offers": "npm run build && tsx scripts/offers-api.test.ts",
+    "test:scheduling": "npm run build && tsx scripts/scheduling-api.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

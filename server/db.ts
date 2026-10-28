@@ -54,6 +54,9 @@ import { cloneDefaultDepartments } from '../src/shared/departments';
 import { tehranJalaliOf, tehranNow, tehranWallDate } from './tehran-time';
 import type { InterviewRecord, SentEmail, SentSms, SourcingSearch } from '../src/types/integrations';
 import type { AutomationProposal, AutomationSettings } from '../src/types/automation';
+import type { JobOffer, OfferStatus } from '../src/types/offers';
+import type { SchedulingLink } from '../src/types/scheduling';
+import type { ResumeSourceKind } from '../src/types/app';
 import type { InterviewFeedback, PipelineBoard, PipelineStage } from '../src/types/pipeline';
 import { DEFAULT_STAGES } from '../src/types/pipeline';
 import { normalizeAutomationSettings } from './automation-settings';
@@ -129,6 +132,10 @@ export interface StoreSnapshot {
   interviewFeedback?: InterviewFeedbackRow[];
   /** Messages sent through the workspace's own SMS gateway. */
   smsLog?: SmsLogRow[];
+  /** «پیشنهاد شغلی» — including the signature the candidate typed. */
+  offers?: OfferRow[];
+  /** «لینک زمان‌بندی» links and the slots the candidate may choose from. */
+  schedulingLinks?: SchedulingLinkRow[];
 }
 
 /** Encrypted connection material for one workspace. */
@@ -190,6 +197,22 @@ export type SourcingSearchRecord = SourcingSearch & { orgId: string; providerJob
 /** A proposal as stored: it belongs to exactly one workspace. */
 export type AutomationActionRow = AutomationProposal & { orgId: string };
 export type InterviewFeedbackRow = InterviewFeedback & { orgId: string };
+
+/**
+ * An offer as stored: the workspace-facing record plus the secret that opens the
+ * public page. The token never leaves the server except inside the link the
+ * workspace deliberately sends.
+ */
+/** A scheduling link plus the secret that opens its public page. */
+export type SchedulingLinkRow = SchedulingLink & { orgId: string; token: string };
+
+export type OfferRow = JobOffer & {
+  orgId: string;
+  /** Random, unguessable; the public link is /offer/<token>. */
+  token: string;
+  /** Internal: who last edited it. */
+  updatedAtISO: string;
+};
 export type SmsLogRow = SentSms & { orgId: string };
 export type InterviewRecordRow = InterviewRecord & { orgId: string };
 export type SentEmailRow = SentEmail & { orgId: string };
@@ -201,6 +224,8 @@ const orgSecrets = new Map<string, OrgSecrets>();
 const automationSettings = new Map<string, AutomationSettings>();
 const automationActions = new Map<string, AutomationActionRow>();
 const interviewFeedback = new Map<string, InterviewFeedbackRow>();
+const offers = new Map<string, OfferRow>();
+const schedulingLinks = new Map<string, SchedulingLinkRow>();
 const smsLog = new Map<string, SmsLogRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
@@ -243,6 +268,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   for (const [k, v] of Object.entries(snap.automation || {})) automationSettings.set(k, normalizeAutomationSettings(v));
   snap.automationActions?.forEach((x) => automationActions.set(x.id, x));
   snap.interviewFeedback?.forEach((x) => interviewFeedback.set(x.id, x));
+  snap.offers?.forEach((x) => offers.set(x.id, x));
+  snap.schedulingLinks?.forEach((x) => schedulingLinks.set(x.id, x));
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
@@ -268,6 +295,8 @@ function clearMemory() {
   automationSettings.clear();
   automationActions.clear();
   interviewFeedback.clear();
+  offers.clear();
+  schedulingLinks.clear();
   smsLog.clear();
   activity = [];
   platformBlob = null;
@@ -381,6 +410,8 @@ function snapshot(): StoreSnapshot {
     automation: Object.fromEntries(automationSettings),
     automationActions: Array.from(automationActions.values()),
     interviewFeedback: Array.from(interviewFeedback.values()),
+    offers: Array.from(offers.values()),
+    schedulingLinks: Array.from(schedulingLinks.values()),
     smsLog: Array.from(smsLog.values()),
   };
 }
@@ -834,6 +865,8 @@ export function deleteOrg(id: string) {
   for (const [k, v] of interviews) if (v.orgId === id) interviews.delete(k);
   for (const [k, v] of sentEmails) if (v.orgId === id) sentEmails.delete(k);
   for (const [k, v] of interviewFeedback) if (v.orgId === id) interviewFeedback.delete(k);
+  for (const [k, v] of offers) if (v.orgId === id) offers.delete(k);
+  for (const [k, v] of schedulingLinks) if (v.orgId === id) schedulingLinks.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   orgSecrets.delete(id);
   orgs.delete(id);
@@ -1446,6 +1479,8 @@ export function deleteResume(rec: ResumeRecord) {
   deleteFileQuietly(rec.filePath);
   resumes.delete(rec.id);
   for (const [k, v] of interviewFeedback) if (v.resumeId === rec.id) interviewFeedback.delete(k);
+  for (const [k, v] of offers) if (v.resumeId === rec.id) offers.delete(k);
+  for (const [k, v] of schedulingLinks) if (v.resumeId === rec.id) schedulingLinks.delete(k);
   // The original may itself have been a duplicate, so the whole scope is rebuilt.
   refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
@@ -1744,6 +1779,76 @@ export function saveFeedback(row: InterviewFeedbackRow): InterviewFeedbackRow {
   return row;
 }
 
+// ------------------------------------------------------------- scheduling --
+
+export function listSchedulingLinks(orgId: string, filter: { jobId?: string; resumeId?: string } = {}): SchedulingLinkRow[] {
+  return Array.from(schedulingLinks.values())
+    .filter((l) => l.orgId === orgId)
+    .filter((l) => (filter.jobId ? l.jobId === filter.jobId : true))
+    .filter((l) => (filter.resumeId ? l.resumeId === filter.resumeId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getSchedulingLink(orgId: string, id: string): SchedulingLinkRow | null {
+  const l = schedulingLinks.get(id);
+  return l && l.orgId === orgId ? l : null;
+}
+
+export function findSchedulingLinkByToken(token: string): SchedulingLinkRow | null {
+  for (const l of schedulingLinks.values()) if (l.token === token) return l;
+  return null;
+}
+
+export function saveSchedulingLink(row: SchedulingLinkRow): SchedulingLinkRow {
+  schedulingLinks.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+/** An open link for the same candidate and opening — the one to resend. */
+export function openSchedulingLinkFor(orgId: string, resumeId: string): SchedulingLinkRow | null {
+  return listSchedulingLinks(orgId, { resumeId }).find((l) => l.status === 'open') || null;
+}
+
+// ------------------------------------------------------------------ offers --
+
+export function listOffers(orgId: string, filter: { jobId?: string; resumeId?: string } = {}): OfferRow[] {
+  return Array.from(offers.values())
+    .filter((o) => o.orgId === orgId)
+    .filter((o) => (filter.jobId ? o.jobId === filter.jobId : true))
+    .filter((o) => (filter.resumeId ? o.resumeId === filter.resumeId : true))
+    // The newest offer for a candidate is the one that matters.
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getOffer(orgId: string, id: string): OfferRow | null {
+  const o = offers.get(id);
+  return o && o.orgId === orgId ? o : null;
+}
+
+/** The public page does not know the workspace id; it looks the offer up by token. */
+export function findOfferByToken(token: string): OfferRow | null {
+  for (const o of offers.values()) if (o.token === token) return o;
+  return null;
+}
+
+export function saveOffer(row: OfferRow): OfferRow {
+  offers.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+/** The newest offer still open for a candidate (draft or sent). */
+export function openOfferFor(orgId: string, resumeId: string): OfferRow | null {
+  return listOffers(orgId, { resumeId }).find((o) => o.status === 'draft' || o.status === 'sent') || null;
+}
+
+export function offerCounts(orgId: string): Record<OfferStatus, number> {
+  const counts: Record<OfferStatus, number> = { draft: 0, sent: 0, accepted: 0, declined: 0, cancelled: 0 };
+  for (const o of offers.values()) if (o.orgId === orgId) counts[o.status]++;
+  return counts;
+}
+
 /** Deleting a workspace takes its automation history with it. */
 export function dropAutomationOf(orgId: string) {
   automationSettings.delete(orgId);
@@ -1765,6 +1870,8 @@ export function patchOrgSecrets(orgId: string, patch: Partial<OrgSecrets>): OrgS
 function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   if (!job.orgId) return;
   for (const [k, v] of interviews) if (v.orgId === job.orgId && v.jobId === job.id) interviews.delete(k);
+  for (const [k, v] of offers) if (v.orgId === job.orgId && v.jobId === job.id) offers.delete(k);
+  for (const [k, v] of schedulingLinks) if (v.orgId === job.orgId && v.jobId === job.id) schedulingLinks.delete(k);
   for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
 }
 
@@ -2077,6 +2184,58 @@ export function reports(orgId: string, range: ReportRange): ReportsData {
   const skillMap = new Map<string, number>();
   for (const r of analyzed.filter(isHigh)) for (const s of r.facts?.skills || []) skillMap.set(s, (skillMap.get(s) || 0) + 1);
 
+  // ----- hiring questions: source of hire, time to hire, stage load, offers ---
+  const sourceLabel: Record<ResumeSourceKind, string> = {
+    careers: 'پورتال شغلی',
+    referral: 'معرفی همکار',
+    linkedin: 'جست‌وجوی استعداد',
+    direct: 'بارگذاری دستی',
+  };
+  const isHired = (r: ResumeRecord) => {
+    if (r.decisionStatus === 'approved' && r.stageId) {
+      const job = jobs.get(r.jobId);
+      const stage = (job?.stages || DEFAULT_STAGES).find((st) => st.id === r.stageId);
+      if (stage) return stage.kind === 'hired';
+    }
+    return false;
+  };
+  const sourceMap = new Map<ResumeSourceKind, { count: number; hired: number }>();
+  for (const r of inRange) {
+    const kind: ResumeSourceKind = (r.source?.kind as ResumeSourceKind) || 'direct';
+    const row = sourceMap.get(kind) || { count: 0, hired: 0 };
+    row.count++;
+    if (isHired(r)) row.hired++;
+    sourceMap.set(kind, row);
+  }
+  const stageMap = new Map<string, { name: string; kind: string; count: number }>();
+  const hiredList = all.filter(isHired);
+  for (const r of all) {
+    const job = jobs.get(r.jobId);
+    if (!job || job.status === 'closed') continue;
+    const stages = job.stages?.length ? job.stages : DEFAULT_STAGES;
+    const stage = stages.find((st) => st.id === r.stageId) || stages[0];
+    if (!stage) continue;
+    const row = stageMap.get(stage.id) || { name: stage.name, kind: stage.kind, count: 0 };
+    row.count++;
+    stageMap.set(stage.id, row);
+  }
+  const durations = hiredList
+    .map((r) => {
+      const from = new Date(r.createdAtISO).getTime();
+      const to = new Date(r.decidedAtISO || r.updatedAtISO).getTime();
+      return Number.isFinite(from) && Number.isFinite(to) && to >= from ? (to - from) / 86_400_000 : null;
+    })
+    .filter((d): d is number => d !== null && d >= 0)
+    .sort((a, b) => a - b);
+  const median = durations.length
+    ? Math.round(durations.length % 2 ? durations[(durations.length - 1) / 2] : (durations[durations.length / 2 - 1] + durations[durations.length / 2]) / 2)
+    : null;
+  const nowISO = new Date().toISOString();
+  const orgOffers = Array.from(offers.values()).filter((o) => o.orgId === orgId);
+  const offerCount = (st: string) => orgOffers.filter((o) => o.status === st).length;
+  const decidedOffers = offerCount('accepted') + offerCount('declined');
+  const orgInterviews = Array.from(interviews.values()).filter((i) => i.orgId === orgId);
+
   const scored = analyzed.filter((r) => !isInsufficient(r));
   const orgJobs = listJobs(orgId).filter((j) => !days || new Date(j.updatedAtISO).getTime() >= cutoff || j.status === 'open');
   return {
@@ -2120,6 +2279,32 @@ export function reports(orgId: string, range: ReportRange): ReportsData {
       avgScore: j.stats.avgScore,
     })),
     timeSaved: timeSavedFor(analyzed.length),
+    hiring: {
+      bySource: (Object.keys(sourceLabel) as ResumeSourceKind[])
+        .map((kind) => ({ kind, label: sourceLabel[kind], count: sourceMap.get(kind)?.count || 0, hired: sourceMap.get(kind)?.hired || 0 }))
+        .filter((x) => x.count > 0),
+      byStage: Array.from(stageMap.entries())
+        .map(([id, v]) => ({ id, name: v.name, kind: v.kind, count: v.count }))
+        .sort((a, b) => b.count - a.count),
+      timeToHire: {
+        medianDays: median,
+        averageDays: durations.length ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length) : null,
+        sample: durations.length,
+      },
+      offers: {
+        draft: offerCount('draft'),
+        sent: offerCount('sent'),
+        accepted: offerCount('accepted'),
+        declined: offerCount('declined'),
+        cancelled: offerCount('cancelled'),
+        acceptRate: decidedOffers ? Math.round((offerCount('accepted') / decidedOffers) * 100) : null,
+      },
+      interviews: {
+        scheduled: orgInterviews.length,
+        upcoming: orgInterviews.filter((i) => i.status !== 'cancelled' && i.startsAtISO > nowISO).length,
+        cancelled: orgInterviews.filter((i) => i.status === 'cancelled').length,
+      },
+    },
   };
 }
 
@@ -2401,6 +2586,10 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     automationActions: Array.isArray(raw.automationActions)
       ? raw.automationActions.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.resumeId))
       : [],
+    schedulingLinks: Array.isArray(raw.schedulingLinks)
+      ? raw.schedulingLinks.filter((l: any) => l && isStr(l.id) && isStr(l.orgId) && isStr(l.token) && Array.isArray(l.slots))
+      : [],
+    offers: Array.isArray(raw.offers) ? raw.offers.filter((o: any) => o && isStr(o.id) && isStr(o.orgId) && isStr(o.token)) : [],
     interviewFeedback: Array.isArray(raw.interviewFeedback)
       ? raw.interviewFeedback.filter((f: any) => f && isStr(f.id) && isStr(f.orgId) && isStr(f.resumeId))
       : [],

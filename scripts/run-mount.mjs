@@ -135,6 +135,14 @@ assert(text().includes('تاریخ (شمسی)') && text().includes('ساعت (ت
 navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
 assert(await waitFor(() => text().includes('تصمیم شما'), 10000), 'candidate panel is back for the message step');
 assert(clickByText('پیام'), 'the message action exists in the candidate panel');
+// The two newer candidate actions live in the «اطلاعات بیشتر» tab: a scheduling
+// link the candidate uses to pick a time, and an offer letter they sign.
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('اطلاعات بیشتر'), 10000), 'the candidate panel is open');
+assert(clickByText('اطلاعات بیشتر'), 'the «more» tab is reachable');
+const hasAction = (needle) => Array.from(window.document.querySelectorAll('button')).some((b) => (b.textContent || '').includes(needle));
+assert(await waitFor(() => hasAction('انتخاب زمان مصاحبه'), 8000), 'the candidate panel offers the self-scheduling link');
+assert(hasAction('پیشنهاد شغلی'), 'the candidate panel offers the offer letter');
 assert(
   await waitFor(() => text().includes('ارسال با ایمیل سازمان') || text().includes('ایمیل سازمان را در «تنظیمات'), 12000),
   'the message modal offers organizational e-mail or explains how to connect it'

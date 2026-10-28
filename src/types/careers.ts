@@ -46,6 +46,10 @@ export interface CareerApplicationInput {
   answers?: Record<string, string | string[] | boolean>;
   /** Explicit agreement to the workspace keeping the résumé for this opening. */
   consent: boolean;
+  /** The colleague (or channel) that pointed the candidate here, if any. */
+  ref?: string;
+  /** «چطور با ما آشنا شدید؟» — the candidate's own answer. */
+  heardFrom?: string;
 }
 
 export interface CareerApplicationResult {

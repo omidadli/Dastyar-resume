@@ -59,6 +59,8 @@ const Reports = lazyPage(() => import('./pages/Reports'));
 const Sourcing = lazyPage(() => import('./pages/Sourcing'));
 const Automation = lazyPage(() => import('./pages/Automation'));
 const Careers = lazyPage(() => import('./pages/Careers'));
+const Offer = lazyPage(() => import('./pages/Offer'));
+const Schedule = lazyPage(() => import('./pages/Schedule'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
@@ -137,6 +139,23 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <Careers slug={m.slug} jobId={m.jobId} />
+      </Suspense>
+    );
+  }
+  // The candidate's offer page, reached from the e-mail: the token is the key.
+  m = matchPath('/offer/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Offer token={m.token} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/schedule/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Schedule token={m.token} />
       </Suspense>
     );
   }

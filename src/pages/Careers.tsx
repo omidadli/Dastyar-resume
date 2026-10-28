@@ -221,6 +221,9 @@ function ApplyForm({ slug, job, onSent }: { slug: string; job: PublicJobDetail; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [heardFrom, setHeardFrom] = useState('');
+  // A colleague's referral link lands here as ?ref=… — recorded on the application.
+  const ref = new URLSearchParams(window.location.search).get('ref') || '';
 
   async function pickFile(f: File | null) {
     setError(null);
@@ -256,6 +259,8 @@ function ApplyForm({ slug, job, onSent }: { slug: string; job: PublicJobDetail; 
         text: fileBase64 ? undefined : pasted,
         consent: true,
         answers,
+        heardFrom: heardFrom || undefined,
+        ref: ref || undefined,
       };
       const res = await api.careers.apply(slug, job.id, body);
       onSent(res.message);
@@ -320,6 +325,22 @@ function ApplyForm({ slug, job, onSent }: { slug: string; job: PublicJobDetail; 
         value={message}
         onChange={(e) => setMessage(e.target.value)}
         hint="مثلاً چرا این نقش برای شما جذاب است یا بازهٔ زمانی شروع همکاری."
+      />
+
+      <Select
+        label="چطور با ما آشنا شدید؟"
+        value={heardFrom}
+        onChange={(e) => setHeardFrom(e.target.value)}
+        placeholder="انتخاب کنید (اختیاری)"
+        options={[
+          { value: 'پورتال شغلی', label: 'پورتال شغلی' },
+          { value: 'معرفی همکار', label: 'معرفی یکی از همکاران' },
+          { value: 'شبکه‌های اجتماعی', label: 'شبکه‌های اجتماعی' },
+          { value: 'سایت سازمان', label: 'سایت سازمان' },
+          { value: 'سایر', label: 'سایر' },
+        ]}
+        optional
+        hint={ref ? `شما از طرف «${ref}» به این صفحه آمده‌اید.` : undefined}
       />
 
       {job.questions.slice(0, 4).map((q) =>

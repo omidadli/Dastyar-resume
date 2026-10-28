@@ -67,6 +67,7 @@ import { ScorecardSection } from './Scorecard';
 import { SmsModal } from './SmsModal';
 import { OfferModal } from './OfferModal';
 import { SchedulingModal } from './SchedulingModal';
+import { CommentsSection } from './Comments';
 import { InterviewModal } from './InterviewModal';
 import type { PipelineStage } from '../../types/pipeline';
 
@@ -779,6 +780,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
               </div>
             </section>
             <ScorecardSection resumeId={record.id} criteria={criteria || []} compact />
+            <CommentsSection resumeId={record.id} />
             <section>
               <SectionTitle icon={FileText}>فایل رزومه</SectionTitle>
               <div className="flex items-center gap-3 rounded-[12px] border border-line p-3">

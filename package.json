@@ -29,7 +29,8 @@
     "test:automation": "npm run build && tsx scripts/automation-api.test.ts",
     "test:automation:unit": "tsx scripts/automation.test.ts",
     "test:offers": "npm run build && tsx scripts/offers-api.test.ts",
-    "test:scheduling": "npm run build && tsx scripts/scheduling-api.test.ts"
+    "test:scheduling": "npm run build && tsx scripts/scheduling-api.test.ts",
+    "test:collab": "npm run build && tsx scripts/collab-api.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

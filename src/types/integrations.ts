@@ -212,6 +212,7 @@ export interface IntegrationsStatus {
   email: EmailSettingsPublic;
   calendar: CalendarStatusPublic;
   sms: SmsSettingsPublic;
+  chat: ChatStatusPublic;
 }
 
 // ------------------------------------------------------------------- SMS ----
@@ -255,4 +256,40 @@ export interface SentSms {
   sentAtISO: string;
   sentAtJalali: string;
   sentByName: string | null;
+}
+
+// ------------------------------------------------------ Slack / Teams -------
+
+export type ChatProvider = 'slack' | 'teams' | 'generic';
+
+export const CHAT_PROVIDER_LABEL: Record<ChatProvider, string> = {
+  slack: 'اسلک (Slack)',
+  teams: 'مایکروسافت تیمز',
+  generic: 'وبهوک دلخواه (Mattermost / Rocket.Chat)',
+};
+
+/** Persian labels for the events a workspace can forward to its channel. */
+export const CHAT_EVENT_LABEL: Record<string, string> = {
+  'application.received': 'درخواست تازه از پورتال شغلی',
+  decision: 'تصمیم روی کارجو (تأیید/رد)',
+  'message.sent': 'پیام فرستاده‌شده به کارجو',
+  'interview.scheduled': 'مصاحبهٔ ثبت‌شده',
+  'stage.moved': 'جابه‌جایی کارجو در ستون‌ها',
+  'scorecard.added': 'کارت ارزیابی تازه',
+  'offer.sent': 'پیشنهاد شغلی فرستاده‌شده',
+  'offer.accepted': 'پذیرش پیشنهاد شغلی',
+  'offer.declined': 'رد پیشنهاد شغلی',
+  'automation.run': 'اجرای اتوماسیون جذب',
+  'automation.approved': 'تأیید پیشنهاد اتوماسیون',
+  'comment.added': 'یادداشت تیمی روی کارجو',
+};
+
+export interface ChatStatusPublic {
+  configured: boolean;
+  provider: ChatProvider | null;
+  host: string | null;
+  events: string[];
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
 }

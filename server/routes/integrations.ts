@@ -27,6 +27,7 @@ import {
 } from '../linkedin';
 import { EMAIL_HOURLY_LIMIT, noteEmailSend, withinEmailLimit } from '../email-rate';
 import { friendlySmsError, isSmsConfigured, normalizeIranMobile, prepareSmsSettings, sendSms, smsStatus, verifySms } from '../sms';
+import { CHAT_EVENTS, ChatError, chatStatus, prepareChatWebhook, testChat } from '../chat-webhook';
 import { buildSearchBrief } from '../sourcing';
 import { bookInterview, InterviewInputError } from '../interviews';
 import { reminderHours, remindersEnabled, sendInterviewReminders } from '../reminders';
@@ -179,9 +180,10 @@ export function integrationRoutes(): express.Router {
     res.json({
       sourcing: { ...sourcingStatus(), usage: sourcingUsage() },
       email: emailStatus(secrets),
+      sms: smsStatus(secrets),
+      chat: chatStatus(secrets),
       calendar: {
         ...calendarStatus(secrets, redirectUriFor(originOf(req))),
-        sms: smsStatus(secrets),
         configured: Boolean(googleClient()),
         ownerEmail: org.name,
       },
@@ -309,6 +311,63 @@ export function integrationRoutes(): express.Router {
       res.json({ items: db.listSms(org.id, resumeId).map(db.withoutOrg) });
     })
   );
+
+  // ------------------------------------------------------- chat webhook ----
+  /** «اطلاع‌رسانی در اسلک/تیمز» — one line in the team's own channel. */
+  r.put(
+    '/integrations/chat',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const previous = db.getOrgSecrets(org.id).chat;
+      let prepared;
+      try {
+        prepared = prepareChatWebhook(
+          {
+            provider: str(req.body?.provider, 20) || 'slack',
+            url: typeof req.body?.url === 'string' ? req.body.url : '',
+            events: req.body?.events,
+          },
+          previous
+        );
+      } catch (err: any) {
+        return res.status(err?.status || 400).json({ error: err?.message || 'نشانی وبهوک معتبر نیست.', code: err?.code });
+      }
+      const check = await (async () => {
+        db.patchOrgSecrets(org.id, { chat: { ...prepared, lastTestAtISO: new Date().toISOString(), lastTestOk: null, lastError: null } });
+        return testChat(org.id);
+      })();
+      if (!check.ok) {
+        return res.status(400).json({ error: `وبهوک تأیید نشد: ${check.error}` });
+      }
+      db.logActivity(org.id, { id: user.id, name: user.name }, 'settings.changed', 'اطلاع‌رسانی اسلک/تیمز را وصل کرد');
+      res.json({ chat: chatStatus(db.getOrgSecrets(org.id)) });
+    })
+  );
+
+  r.post(
+    '/integrations/chat/test',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      try {
+        res.json(await testChat(org.id));
+      } catch (err: any) {
+        if (err instanceof ChatError) return res.status(err.status).json({ error: err.message, code: err.code });
+        res.status(502).json({ error: 'ارسال آزمایشی ممکن نشد.', code: 'CHAT_FAILED' });
+      }
+    })
+  );
+
+  r.delete('/integrations/chat', requireRole('admin'), (req, res) => {
+    const { org } = ctxOf(req);
+    db.patchOrgSecrets(org.id, { chat: undefined });
+    db.logActivity(org.id, actorOf(req), 'settings.changed', 'اطلاع‌رسانی اسلک/تیمز را قطع کرد');
+    res.json({ chat: chatStatus(db.getOrgSecrets(org.id)) });
+  });
+
+  /** The events a workspace can forward, so the panel never guesses. */
+  r.get('/integrations/chat/events', (req, res) => res.json({ events: CHAT_EVENTS }));
 
   r.put(
     '/integrations/email',

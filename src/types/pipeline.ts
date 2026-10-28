@@ -107,3 +107,23 @@ export interface ScorecardSummary {
   byRecommendation: Record<FeedbackRecommendation, number>;
   feedback: InterviewFeedback[];
 }
+
+// --------------------------------------------------------------- comments ---
+
+/**
+ * «یادداشت تیمی» — a comment on a candidate, with @mentions. Hiring decisions
+ * that happen in a chat app leave no record; this keeps the conversation on the
+ * candidate's own timeline.
+ */
+export interface CandidateComment {
+  id: string;
+  resumeId: string;
+  jobId: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  /** Team members mentioned with «@نام» — they get a notification line. */
+  mentions: { id: string; name: string }[];
+  atISO: string;
+  atJalali: string;
+}

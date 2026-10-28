@@ -56,6 +56,7 @@ import type { InterviewRecord, SentEmail, SentSms, SourcingSearch } from '../src
 import type { AutomationProposal, AutomationSettings } from '../src/types/automation';
 import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
+import type { CandidateComment } from '../src/types/pipeline';
 import type { ResumeSourceKind } from '../src/types/app';
 import type { InterviewFeedback, PipelineBoard, PipelineStage } from '../src/types/pipeline';
 import { DEFAULT_STAGES } from '../src/types/pipeline';
@@ -136,6 +137,8 @@ export interface StoreSnapshot {
   offers?: OfferRow[];
   /** «لینک زمان‌بندی» links and the slots the candidate may choose from. */
   schedulingLinks?: SchedulingLinkRow[];
+  /** Team comments (@mentions) written on a candidate. */
+  comments?: CommentRow[];
 }
 
 /** Encrypted connection material for one workspace. */
@@ -158,6 +161,19 @@ export interface OrgSecrets {
     provider: 'kavenegar' | 'smsir';
     apiKeyEnc: string;
     sender: string;
+    lastTestAtISO: string | null;
+    lastTestOk: boolean | null;
+    lastError: string | null;
+  };
+  /**
+   * Slack / Microsoft Teams incoming webhook — where the workspace's own chat
+   * channel gets a line when something happens. The URL is a secret (anyone with
+   * it can post), so it is stored encrypted like the SMTP password.
+   */
+  chat?: {
+    urlEnc: string;
+    provider: 'slack' | 'teams' | 'generic';
+    events: string[];
     lastTestAtISO: string | null;
     lastTestOk: boolean | null;
     lastError: string | null;
@@ -206,6 +222,8 @@ export type InterviewFeedbackRow = InterviewFeedback & { orgId: string };
 /** A scheduling link plus the secret that opens its public page. */
 export type SchedulingLinkRow = SchedulingLink & { orgId: string; token: string };
 
+export type CommentRow = CandidateComment & { orgId: string };
+
 export type OfferRow = JobOffer & {
   orgId: string;
   /** Random, unguessable; the public link is /offer/<token>. */
@@ -226,6 +244,7 @@ const automationActions = new Map<string, AutomationActionRow>();
 const interviewFeedback = new Map<string, InterviewFeedbackRow>();
 const offers = new Map<string, OfferRow>();
 const schedulingLinks = new Map<string, SchedulingLinkRow>();
+const comments = new Map<string, CommentRow>();
 const smsLog = new Map<string, SmsLogRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
@@ -270,6 +289,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.interviewFeedback?.forEach((x) => interviewFeedback.set(x.id, x));
   snap.offers?.forEach((x) => offers.set(x.id, x));
   snap.schedulingLinks?.forEach((x) => schedulingLinks.set(x.id, x));
+  snap.comments?.forEach((x) => comments.set(x.id, x));
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
@@ -297,6 +317,7 @@ function clearMemory() {
   interviewFeedback.clear();
   offers.clear();
   schedulingLinks.clear();
+  comments.clear();
   smsLog.clear();
   activity = [];
   platformBlob = null;
@@ -412,6 +433,7 @@ function snapshot(): StoreSnapshot {
     interviewFeedback: Array.from(interviewFeedback.values()),
     offers: Array.from(offers.values()),
     schedulingLinks: Array.from(schedulingLinks.values()),
+    comments: Array.from(comments.values()),
     smsLog: Array.from(smsLog.values()),
   };
 }
@@ -867,6 +889,7 @@ export function deleteOrg(id: string) {
   for (const [k, v] of interviewFeedback) if (v.orgId === id) interviewFeedback.delete(k);
   for (const [k, v] of offers) if (v.orgId === id) offers.delete(k);
   for (const [k, v] of schedulingLinks) if (v.orgId === id) schedulingLinks.delete(k);
+  for (const [k, v] of comments) if (v.orgId === id) comments.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   orgSecrets.delete(id);
   orgs.delete(id);
@@ -1001,6 +1024,17 @@ export function purgeExpired() {
 
 // --------------------------------------------------------------- activity ----
 
+/**
+ * A single, optional listener for the activity feed — the Slack/Teams bridge
+ * registers one at boot. It is a callback rather than a direct call so the store
+ * keeps knowing nothing about HTTP.
+ */
+let activityHook: ((item: ActivityItem) => void) | null = null;
+
+export function setActivityHook(fn: ((item: ActivityItem) => void) | null) {
+  activityHook = fn;
+}
+
 export function logActivity(
   orgId: string | null,
   actor: { id: string; name: string } | null,
@@ -1035,6 +1069,11 @@ export function logActivity(
     activity = activity.filter((a) => !drop.has(a.id));
   }
   scheduleSave();
+  try {
+    activityHook?.(item);
+  } catch {
+    // A failing webhook must never break the action that produced the activity.
+  }
   return item;
 }
 
@@ -1481,6 +1520,7 @@ export function deleteResume(rec: ResumeRecord) {
   for (const [k, v] of interviewFeedback) if (v.resumeId === rec.id) interviewFeedback.delete(k);
   for (const [k, v] of offers) if (v.resumeId === rec.id) offers.delete(k);
   for (const [k, v] of schedulingLinks) if (v.resumeId === rec.id) schedulingLinks.delete(k);
+  for (const [k, v] of comments) if (v.resumeId === rec.id) comments.delete(k);
   // The original may itself have been a duplicate, so the whole scope is rebuilt.
   refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
@@ -1779,6 +1819,33 @@ export function saveFeedback(row: InterviewFeedbackRow): InterviewFeedbackRow {
   return row;
 }
 
+// ---------------------------------------------------------------- comments --
+
+export function listComments(orgId: string, resumeId: string): CommentRow[] {
+  return Array.from(comments.values())
+    .filter((c) => c.orgId === orgId && c.resumeId === resumeId)
+    .sort((a, b) => a.atISO.localeCompare(b.atISO));
+}
+
+export function saveComment(row: CommentRow): CommentRow {
+  comments.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function getComment(orgId: string, id: string): CommentRow | null {
+  const c = comments.get(id);
+  return c && c.orgId === orgId ? c : null;
+}
+
+export function deleteComment(orgId: string, id: string): boolean {
+  const c = getComment(orgId, id);
+  if (!c) return false;
+  comments.delete(id);
+  scheduleSave();
+  return true;
+}
+
 // ------------------------------------------------------------- scheduling --
 
 export function listSchedulingLinks(orgId: string, filter: { jobId?: string; resumeId?: string } = {}): SchedulingLinkRow[] {
@@ -1872,6 +1939,7 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of interviews) if (v.orgId === job.orgId && v.jobId === job.id) interviews.delete(k);
   for (const [k, v] of offers) if (v.orgId === job.orgId && v.jobId === job.id) offers.delete(k);
   for (const [k, v] of schedulingLinks) if (v.orgId === job.orgId && v.jobId === job.id) schedulingLinks.delete(k);
+  for (const [k, v] of comments) if (v.orgId === job.orgId && v.jobId === job.id) comments.delete(k);
   for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
 }
 
@@ -2585,6 +2653,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     automation: automationRules(raw.automation),
     automationActions: Array.isArray(raw.automationActions)
       ? raw.automationActions.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.resumeId))
+      : [],
+    comments: Array.isArray(raw.comments)
+      ? raw.comments.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && isStr(c.resumeId) && isStr(c.body))
       : [],
     schedulingLinks: Array.isArray(raw.schedulingLinks)
       ? raw.schedulingLinks.filter((l: any) => l && isStr(l.id) && isStr(l.orgId) && isStr(l.token) && Array.isArray(l.slots))

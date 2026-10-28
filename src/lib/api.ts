@@ -32,7 +32,7 @@ import type {
   UserPublic,
 } from '../types/app';
 import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PublicCareersPage, PublicJobDetail } from '../types/careers';
-import type { InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
+import type { CandidateComment, InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
 import type { JobOffer, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
@@ -47,6 +47,7 @@ import type {
   EmailSettingsPublic,
   SentSms,
   SmsSettingsPublic,
+  ChatStatusPublic,
   IntegrationsStatus,
   InterviewRecord,
   SentEmail,
@@ -324,6 +325,15 @@ export const api = {
     publish: (jobId: string, isPublic: boolean) =>
       post<{ job: JobSummary }>(`/api/jobs/${encodeURIComponent(jobId)}/publish`, { isPublic }),
   },
+  comments: {
+    list: (resumeId: string) => get<{ items: CandidateComment[]; members: { id: string; name: string }[] }>(`/api/resumes/${encodeURIComponent(resumeId)}/comments`),
+    add: (resumeId: string, body: string) =>
+      post<{ comment: CandidateComment; items: CandidateComment[]; members: { id: string; name: string }[] }>(
+        `/api/resumes/${encodeURIComponent(resumeId)}/comments`,
+        { body }
+      ),
+    remove: (id: string) => del<{ items: CandidateComment[] }>(`/api/comments/${encodeURIComponent(id)}`),
+  },
   scheduling: {
     list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: SchedulingLink[] }>(`/api/scheduling${qs(p)}`),
     get: (id: string) => get<{ link: SchedulingLink }>(`/api/scheduling/${encodeURIComponent(id)}`),
@@ -437,6 +447,11 @@ export const api = {
     testSms: () => post<{ ok: boolean; error: string | null }>('/api/integrations/sms/test', {}, { timeoutMs: 45_000 }),
     sendSms: (b: { resumeId?: string | null; to?: string; text: string }) =>
       post<{ sms: SentSms }>('/api/integrations/sms/send', b, { timeoutMs: 60_000 }),
+    chatEvents: () => get<{ events: string[] }>('/api/integrations/chat/events'),
+    saveChat: (b: { provider: 'slack' | 'teams' | 'generic'; url?: string; events?: string[] }) =>
+      put<{ chat: ChatStatusPublic }>('/api/integrations/chat', b, { timeoutMs: 45_000 }),
+    testChat: () => post<{ ok: boolean; error: string | null }>('/api/integrations/chat/test', {}, { timeoutMs: 45_000 }),
+    disconnectChat: () => del<{ chat: ChatStatusPublic }>('/api/integrations/chat'),
     smsLog: (resumeId?: string) => get<{ items: SentSms[] }>(`/api/integrations/sms${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
   },
   interviews: {

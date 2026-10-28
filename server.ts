@@ -22,6 +22,8 @@ import { automationRoutes } from './server/routes/automation';
 import { careerPublicRoutes, careerRoutes } from './server/routes/careers';
 import { offerPublicRoutes, offerRoutes } from './server/routes/offers';
 import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/scheduling';
+import { commentRoutes } from './server/routes/comments';
+import { forwardActivity } from './server/chat-webhook';
 import { backupPublicRoutes } from './server/routes/backup';
 import { remindersEnabled, runRemindersQuietly } from './server/reminders';
 
@@ -82,6 +84,9 @@ async function startServer() {
   });
   app.use('/api/auth', authRoutes());
   app.use('/api', fileRoutes()); // HMAC-signed, no bearer token needed
+  // Every activity line can become a Slack/Teams message, when the workspace asked.
+  db.setActivityHook(forwardActivity);
+
   app.use('/api', backupPublicRoutes()); // signed backup download + restore progress
   app.use('/api', integrationPublicRoutes()); // Google Calendar OAuth callback
   app.use('/api', careerPublicRoutes()); // public career portal (no session)
@@ -101,6 +106,7 @@ async function startServer() {
   app.use('/api', careerRoutes());
   app.use('/api', offerRoutes());
   app.use('/api', schedulingRoutes());
+  app.use('/api', commentRoutes());
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------

@@ -9,6 +9,7 @@ import {
   PlugZap,
   Save,
   Send,
+  MessagesSquare,
   CheckCircle2,
   ShieldCheck,
   Trash2,
@@ -20,7 +21,8 @@ import { useCan } from '../../lib/auth';
 import { faDate, faNumber } from '../../lib/format';
 import { copyText } from '../../lib/clipboard';
 import { useAsync } from '../../lib/useAsync';
-import type { EmailSettingsPublic, SmsProvider, SmsSettingsPublic } from '../../types/integrations';
+import type { ChatProvider, ChatStatusPublic, EmailSettingsPublic, SmsProvider, SmsSettingsPublic } from '../../types/integrations';
+import { CHAT_EVENT_LABEL } from '../../types/integrations';
 
 const HOST_PRESETS: { id: string; label: string; host: string; port: number; secure: boolean; hint: string }[] = [
   { id: 'gmail', label: 'Gmail / Google Workspace', host: 'smtp.gmail.com', port: 465, secure: true, hint: 'در حساب گوگل «App Password» بسازید (نیازمند تأیید دومرحله‌ای).' },
@@ -399,6 +401,153 @@ function CalendarCard({ redirectUri, connected, accountEmail, configured }: { re
  * «پورتال شغلی» — a public page on the workspace's own slug. Openings appear
  * there only when a job is explicitly published from its page.
  */
+/**
+ * «اطلاع‌رسانی در اسلک/تیمز» — the team watches its own channel, not a dashboard.
+ * The webhook URL is a secret: it is stored encrypted and never sent back.
+ */
+function ChatCard() {
+  const can = useCan('admin');
+  const status = useAsync(() => api.integrations.status(), []);
+  const [chat, setChat] = useState<ChatStatusPublic | undefined>(status.data?.chat);
+  const [provider, setProvider] = useState<ChatProvider>('slack');
+  const [url, setUrl] = useState('');
+  const [events, setEvents] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
+
+  useEffect(() => setChat(status.data?.chat), [status.data?.chat]);
+  useEffect(() => {
+    if (!chat) return;
+    if (chat.provider) setProvider(chat.provider);
+    if (chat.events.length) setEvents(chat.events);
+    else setEvents(Object.keys(CHAT_EVENT_LABEL));
+  }, [chat?.provider, chat?.events?.join(',')]);
+
+  const toggle = (key: string) => setEvents((prev) => (prev.includes(key) ? prev.filter((e) => e !== key) : [...prev, key]));
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.integrations.saveChat({ provider, url: url || undefined, events });
+      setChat(res.chat);
+      setUrl('');
+      toast('اطلاع‌رسانی وصل و با یک پیام آزمایشی تأیید شد.');
+    } catch (err: any) {
+      toast(err?.message || 'اتصال وبهوک ممکن نشد.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      const res = await api.integrations.testChat();
+      toast(res.ok ? 'پیام آزمایشی در کانال شما نشست.' : `وبهوک پاسخ نداد: ${res.error}`, res.ok ? 'success' : 'error');
+      status.reload();
+    } catch (err: any) {
+      toast(err?.message || 'آزمایش ممکن نشد.', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const disconnect = async () => {
+    try {
+      const res = await api.integrations.disconnectChat();
+      setChat(res.chat);
+      toast('اطلاع‌رسانی قطع شد.', 'info');
+    } catch (err: any) {
+      toast(err?.message || 'قطع اتصال ممکن نشد.', 'error');
+    } finally {
+      setConfirmOff(false);
+    }
+  };
+
+  const configured = Boolean(chat?.configured);
+  return (
+    <Card>
+      <CardHeader
+        icon={MessagesSquare}
+        title="اطلاع‌رسانی در اسلک / تیمز"
+        subtitle="خط اطلاع‌رسانی در کانال خود تیم"
+        action={configured ? <Chip tone="brand" icon={CheckCircle2}>متصل</Chip> : <Chip tone="neutral">وصل نشده</Chip>}
+      />
+      <div className="space-y-3">
+        <Select
+          label="سرویس"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value as ChatProvider)}
+          options={[
+            { value: 'slack', label: 'اسلک (Incoming Webhook)' },
+            { value: 'teams', label: 'مایکروسافت تیمز' },
+            { value: 'generic', label: 'وبهوک دلخواه (Mattermost / Rocket.Chat)' },
+          ]}
+          disabled={!can || saving}
+        />
+        <TextInput
+          label={configured ? 'نشانی وبهوک (برای تغییر وارد کنید)' : 'نشانی وبهوک'}
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          latin
+          placeholder={provider === 'slack' ? 'https://hooks.slack.com/services/…' : 'https://…webhook.office.com/…'}
+          hint="رمزنگاری‌شده ذخیره می‌شود و هرگز به مرورگر برنمی‌گردد."
+          disabled={!can || saving}
+        />
+        <div>
+          <p className="text-[12.5px] font-semibold text-ink-2 mb-1.5">چه خبرهایی برود؟</p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(CHAT_EVENT_LABEL).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggle(key)}
+                disabled={!can}
+                className={`text-[12px] rounded-full border px-2.5 py-1 transition ${
+                  events.includes(key) ? 'border-brand bg-brand-soft text-brand-ink font-semibold' : 'border-line text-ink-3'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        {chat?.lastError && <p className="text-[12px] text-low-ink leading-relaxed">{chat.lastError}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button icon={Save} onClick={() => void save()} loading={saving} disabled={!can || saving || (!url && !configured)}>
+            ذخیره و آزمایش
+          </Button>
+          {configured && (
+            <>
+              <Button variant="secondary" icon={Send} onClick={() => void test()} loading={testing} disabled={!can}>
+                آزمایش
+              </Button>
+              <Button variant="ghost" icon={Trash2} onClick={() => setConfirmOff(true)} disabled={!can}>
+                قطع اتصال
+              </Button>
+            </>
+          )}
+        </div>
+        {!can && <p className="text-[12px] text-ink-3">فقط مدیر فضای کاری می‌تواند وبهوک را تنظیم کند.</p>}
+        {chat?.lastTestAtISO && (
+          <p className="text-[11.5px] text-ink-4">
+            آخرین آزمایش: {faDate(chat.lastTestAtISO)} — {chat.lastTestOk ? 'موفق' : 'ناموفق'}
+          </p>
+        )}
+      </div>
+      <ConfirmDialog
+        open={confirmOff}
+        onClose={() => setConfirmOff(false)}
+        onConfirm={() => void disconnect()}
+        title="قطع اطلاع‌رسانی؟"
+        description="پس از قطع، هیچ پیامی به کانال شما نمی‌رود؛ تنظیمات دیگر فضای کاری دست نمی‌خورد."
+        confirmLabel="قطع اتصال"
+      />
+    </Card>
+  );
+}
+
 function CareersCard() {
   const can = useCan('admin');
   const settings = useAsync(() => api.careers.settings(), []);
@@ -668,6 +817,7 @@ export function IntegrationsTab() {
       <div className="flex flex-col gap-5">
         <EmailCard />
         <SmsCard />
+        <ChatCard />
         <CareersCard />
         <SourcingCard
           configured={data?.sourcing.configured ?? false}

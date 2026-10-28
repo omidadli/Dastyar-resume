@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Save,
+  ShieldCheck,
   Sparkles,
   Trash2,
   UserPlus,
@@ -20,7 +21,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { Button, ButtonLink, Callout, Card, CardHeader, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
+import { Button, ButtonLink, Callout, Card, CardHeader, Chip, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
 import { copyText } from '../lib/clipboard';
 import { useAuth, useCan } from '../lib/auth';
@@ -30,6 +31,7 @@ import { navigate, useLeaveGuard } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { Department, Role, TeamMember } from '../types/app';
+import type { RetentionAction } from '../types/retention';
 import { IntegrationsTab } from './settings/IntegrationsTab';
 import { DeveloperTab } from './settings/DeveloperTab';
 
@@ -634,6 +636,204 @@ function AccountTab() {
   );
 }
 
+/**
+ * «نگه‌داری داده»: after N days a candidate nobody hired either loses their name
+ * (anonymise) or the whole record (delete). Hired people and the talent pool are
+ * never touched. A dry run is always available, and it never pretends to have
+ * deleted anything.
+ */
+function RetentionCard() {
+  const canEdit = useCan('admin');
+  const state = useAsync(() => api.org.retention(), []);
+  const [days, setDays] = useState('');
+  const [action, setAction] = useState<RetentionAction>('anonymize');
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<null | 'dry' | 'run'>(null);
+  const [confirmRun, setConfirmRun] = useState(false);
+  const [preview, setPreview] = useState<{ days: number; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } | null>(null);
+
+  useEffect(() => {
+    if (!state.data) return;
+    setDays(String(state.data.policy.days));
+    setAction(state.data.policy.action);
+  }, [state.data?.policy.days, state.data?.policy.action]);
+
+  if (state.error) return <Callout tone="warning" className="mt-4 max-w-[640px]">{state.error}</Callout>;
+  if (!state.data) return null;
+  const policy = state.data.policy;
+  const due = state.data.preview.items.length;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.org.saveRetention({ days: Number(days) || 0, action });
+      state.reload();
+      setPreview(null);
+      toast(res.policy.days === 0 ? 'سیاست نگه‌داری خاموش شد.' : `سیاست روی ${toPersianDigits(res.policy.days)} روز ذخیره شد.`, 'success');
+    } catch (err: any) {
+      toast(err?.message || 'ذخیره ممکن نشد.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dry = async () => {
+    setBusy('dry');
+    try {
+      const res = await api.org.runRetention({ dryRun: true });
+      setPreview({ days: res.result.days, items: res.result.items });
+      toast(
+        res.result.items.length
+          ? `${toPersianDigits(res.result.items.length)} رکورد از این سیاست عبور می‌کند (هیچ‌چیز تغییر نکرد).`
+          : 'هیچ رکوردی از این سیاست عبور نمی‌کند.',
+        'info'
+      );
+    } catch (err: any) {
+      toast(err?.message || 'اجرای آزمایشی ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const run = async () => {
+    setBusy('run');
+    try {
+      const res = await api.org.runRetention({});
+      const total = res.result.deleted + res.result.anonymized;
+      toast(
+        total
+          ? `${toPersianDigits(total)} رکورد پردازش شد (${toPersianDigits(res.result.deleted)} حذف، ${toPersianDigits(res.result.anonymized)} ناشناس).`
+          : 'رکوردی برای پردازش نبود.',
+        'success'
+      );
+      setPreview(null);
+      state.reload();
+    } catch (err: any) {
+      toast(err?.message || 'اجرا ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+      setConfirmRun(false);
+    }
+  };
+
+  return (
+    <Card className="max-w-[640px] mt-5">
+      <CardHeader
+        icon={ShieldCheck}
+        title="نگه‌داری داده"
+        subtitle="چه مدت اطلاعات کارجویانی بماند که استخدام نشده‌اند"
+        action={policy.days > 0 ? <Chip tone="brand">روشن، {toPersianDigits(policy.days)} روز</Chip> : <Chip tone="neutral">خاموش</Chip>}
+      />
+      {!canEdit && <ReadOnlyNote />}
+      <div className="flex flex-col gap-4">
+        <TextInput
+          label="مدت نگه‌داری (روز)"
+          value={days}
+          onChange={(e) => setDays(e.target.value.replace(/[^0-9۰-۹]/g, ''))}
+          inputMode="numeric"
+          latin
+          hint="۰ = خاموش (هیچ‌چیز خودکار پاک نمی‌شود). حداکثر ۳۶۵۰ روز."
+          disabled={!canEdit || saving}
+        />
+        <div className="flex flex-wrap gap-1.5">
+          {[90, 180, 365, 730].map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setDays(String(n))}
+              disabled={!canEdit}
+              className={`text-[12px] rounded-full border px-2.5 py-1 transition ${
+                Number(days) === n ? 'border-brand bg-brand-soft text-brand-ink font-semibold' : 'border-line text-ink-3'
+              }`}
+            >
+              {toPersianDigits(n)} روز
+            </button>
+          ))}
+        </div>
+        <div>
+          <p className="text-[12.5px] font-semibold text-ink-2 mb-1.5">وقتی مدت تمام شد چه شود؟</p>
+          <div className="flex flex-col gap-2">
+            {(
+              [
+                { id: 'anonymize', title: 'ناشناس‌سازی (پیشنهاد ما)', hint: 'نام، ایمیل، تلفن، متن رزومه و فایل حذف می‌شود؛ امتیاز و آمار برای گزارش می‌ماند.' },
+                { id: 'delete', title: 'حذف کامل رکورد', hint: 'همهٔ داده‌ها و فایل پاک می‌شود؛ آمار گذشتهٔ آن کارجو در گزارش‌ها نمی‌ماند.' },
+              ] as Array<{ id: RetentionAction; title: string; hint: string }>
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setAction(opt.id)}
+                disabled={!canEdit}
+                className={`text-right rounded-[12px] border px-3 py-2 transition ${
+                  action === opt.id ? 'border-brand bg-brand-soft' : 'border-line-2'
+                }`}
+              >
+                <span className="block text-[13px] font-bold text-ink">{opt.title}</span>
+                <span className="block text-[11.5px] text-ink-3 mt-0.5 leading-relaxed">{opt.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <Callout tone="info">
+          کارجویانی که استخدام شده‌اند یا در «بانک استعداد» نگه داشته شده‌اید هرگز مشمول این سیاست نمی‌شوند؛ برای آن‌ها فقط از «پاک‌سازی کامل»
+          در پروندهٔ همان کارجو استفاده کنید.
+        </Callout>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button icon={Save} onClick={() => void save()} loading={saving} disabled={!canEdit || saving}>
+            ذخیرهٔ سیاست
+          </Button>
+          <Button variant="secondary" icon={RefreshCw} onClick={() => void dry()} loading={busy === 'dry'} disabled={busy !== null}>
+            اجرای آزمایشی
+          </Button>
+          {policy.days > 0 && (
+            <Button variant="ghost" icon={Trash2} onClick={() => setConfirmRun(true)} disabled={!canEdit || busy !== null}>
+              اجرای الآن
+            </Button>
+          )}
+        </div>
+        {due > 0 && (
+          <p className="text-[12px] text-ink-3">
+            در این لحظه {toPersianDigits(due)} رکورد از سیاست عبور می‌کند
+            {policy.days > 0 ? ' — اجرای روزانه خودکار انجام می‌شود.' : ' (برای اجرا، سیاست را روشن کنید).'}
+          </p>
+        )}
+        {preview && preview.items.length > 0 && (
+          <div className="rounded-[12px] border border-line-2 p-3">
+            <p className="text-[12px] font-semibold text-ink-2 mb-1.5">نتیجهٔ اجرای آزمایشی (هیچ‌چیز تغییر نکرد)</p>
+            <ul className="text-[12px] text-ink-2 space-y-1">
+              {preview.items.slice(0, 6).map((it) => (
+                <li key={it.id} className="flex flex-wrap justify-between gap-2">
+                  <span className="font-semibold">{it.name}</span>
+                  <span className="text-ink-4">{it.roleTitle}</span>
+                  <span className="text-ink-4">{faDate(it.updatedAtISO)}</span>
+                </li>
+              ))}
+            </ul>
+            {preview.items.length > 6 && <p className="text-[11.5px] text-ink-4 mt-1.5">و {toPersianDigits(preview.items.length - 6)} رکورد دیگر.</p>}
+          </div>
+        )}
+        {policy.lastRunAtISO && (
+          <p className="text-[11.5px] text-ink-4">
+            آخرین اجرا: {faDate(policy.lastRunAtISO)} — {toPersianDigits(policy.lastRunCount)} رکورد
+          </p>
+        )}
+      </div>
+      <ConfirmDialog
+        open={confirmRun}
+        onClose={() => setConfirmRun(false)}
+        onConfirm={() => void run()}
+        title={action === 'delete' ? 'رکوردهای قدیمی حذف شوند؟' : 'رکوردهای قدیمی ناشناس شوند؟'}
+        description={
+          action === 'delete'
+            ? 'همهٔ رکوردهای خارج از سیاست — با فایل، یادداشت، مصاحبه و پیام — برای همیشه حذف می‌شوند. پیش از اجرا، «اجرای آزمایشی» را ببینید.'
+            : 'نام، ایمیل، تلفن، متن رزومه و فایل این رکوردها حذف می‌شود؛ امتیاز و آمار می‌ماند. این کار برگشت‌پذیر نیست.'
+        }
+        confirmLabel="اجرا"
+      />
+    </Card>
+  );
+}
+
 const TAB_LABELS: Record<SettingsTab, string> = {
   org: 'سازمان',
   departments: 'دپارتمان‌ها',
@@ -671,7 +871,12 @@ export default function Settings({ tab }: { tab: string }) {
           { id: 'account', label: TAB_LABELS.account, icon: UserRound },
         ]}
       />
-      {current === 'org' && <OrgTab />}
+      {current === 'org' && (
+        <>
+          <OrgTab />
+          <RetentionCard />
+        </>
+      )}
       {current === 'departments' && <DepartmentsTab />}
       {current === 'team' && <TeamTab />}
       {current === 'messages' && <MessagesTab />}

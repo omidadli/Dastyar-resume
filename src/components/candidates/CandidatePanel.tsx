@@ -29,6 +29,7 @@ import {
   RefreshCw,
   ScanSearch,
   ShieldAlert,
+  ShieldCheck,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -38,6 +39,7 @@ import {
 } from 'lucide-react';
 import type { Criterion, DecisionStatus, EvidencePoint, ResumeListItem } from '../../types/screening';
 import { api, openResumeFile } from '../../lib/api';
+import { useCan } from '../../lib/auth';
 import { emitChange } from '../../lib/events';
 import { copyText } from '../../lib/clipboard';
 import { isInCompare, removeFromCompare, toggleCompare, useCompare } from '../../lib/compare';
@@ -282,6 +284,9 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
   const [interviews, setInterviews] = useState<Array<{ id: string; startsAtISO: string; status: string; meetLink: string | null }>>([]);
   const [talentOpen, setTalentOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
+  const canAdmin = useCan('admin');
   const [stageBusy, setStageBusy] = useState(false);
   const [smsOpen, setSmsOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
@@ -368,6 +373,49 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
       toast('از بانک استعداد خارج شد.');
     } catch (e: any) {
       toast(e?.message || 'انجام نشد.', 'error');
+    }
+  };
+
+  /**
+   * DSAR — «همهٔ داده‌های من» as one file, and the irreversible erasure.
+   * Both are admin-only; the server refuses anything without an explicit confirm.
+   */
+  const exportData = async () => {
+    setPrivacyBusy(true);
+    try {
+      const data = await api.resumes.exportData(record.id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `candidate-${record.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('پروندهٔ کامل داده‌های این کارجو دانلود شد.', 'success');
+    } catch (e: any) {
+      toast(e?.message || 'خروجی گرفتن ممکن نشد.', 'error');
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
+
+  const doErase = async () => {
+    setPrivacyBusy(true);
+    try {
+      const res = await api.resumes.erase(record.id);
+      const total = Object.values(res.erased).reduce((a, b) => a + b, 0);
+      removeFromCompare(record.id);
+      emitChange('resumes', record.jobId);
+      emitChange('activity');
+      toast(`${toPersianDigits(total)} رکورد و فایل این کارجو برای همیشه پاک شد.`, 'info');
+      setEraseOpen(false);
+      onDeleted?.(record.id);
+    } catch (e: any) {
+      toast(e?.message || 'پاک‌سازی ممکن نشد.', 'error');
+    } finally {
+      setPrivacyBusy(false);
     }
   };
 
@@ -782,6 +830,22 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
             <ScorecardSection resumeId={record.id} criteria={criteria || []} compact />
             <CommentsSection resumeId={record.id} />
             <section>
+              <SectionTitle icon={ShieldCheck}>دادهٔ شخصی کارجو</SectionTitle>
+              <p className="text-[12px] text-ink-3 leading-relaxed mb-2.5">
+                اگر کارجو خواسته بداند چه داده‌ای از او نگه می‌دارید، همهٔ آن را در یک فایل بگیرید. «پاک‌سازی کامل» رکورد، فایل، یادداشت‌ها،
+                مصاحبه‌ها، پیام‌ها و کارت‌های ارزیابی را حذف می‌کند و برگشت‌پذیر نیست.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" icon={Download} onClick={() => void exportData()} loading={privacyBusy} disabled={!canAdmin}>
+                  دریافت همهٔ داده‌ها
+                </Button>
+                <Button size="sm" variant="ghost" icon={Trash2} onClick={() => setEraseOpen(true)} disabled={!canAdmin || privacyBusy}>
+                  پاک‌سازی کامل داده
+                </Button>
+              </div>
+              {!canAdmin && <p className="text-[11.5px] text-ink-4 mt-1.5">فقط مدیر فضای کاری می‌تواند دادهٔ شخصی را صادر یا پاک کند.</p>}
+            </section>
+            <section>
               <SectionTitle icon={FileText}>فایل رزومه</SectionTitle>
               <div className="flex items-center gap-3 rounded-[12px] border border-line p-3">
                 <span className="w-10 h-10 rounded-[10px] bg-line-2 flex items-center justify-center shrink-0">
@@ -888,6 +952,14 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
         />
       )}
       {talentOpen && <TalentModal record={record} onClose={() => setTalentOpen(false)} onSaved={onChange} />}
+      <ConfirmDialog
+        open={eraseOpen}
+        onClose={() => setEraseOpen(false)}
+        onConfirm={() => void doErase()}
+        title="همهٔ داده‌های این کارجو پاک شود؟"
+        description="رکورد، فایل رزومه، یادداشت‌ها، مصاحبه‌ها، پیشنهاد، پیام‌ها و کارت‌های ارزیابی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ پیش از ادامه خروجی بگیرید."
+        confirmLabel="پاک‌سازی کامل"
+      />
       <ConfirmDialog
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}

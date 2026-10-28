@@ -24,9 +24,11 @@ import { offerPublicRoutes, offerRoutes } from './server/routes/offers';
 import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/scheduling';
 import { commentRoutes } from './server/routes/comments';
 import { developerRoutes } from './server/routes/developer';
+import { privacyRoutes } from './server/routes/privacy';
 import { apiV1Routes } from './server/routes/api-v1';
 import { forwardActivity } from './server/chat-webhook';
 import { deliverActivity } from './server/webhooks';
+import { runDuePolicies } from './server/retention';
 import { backupPublicRoutes } from './server/routes/backup';
 import { remindersEnabled, runRemindersQuietly } from './server/reminders';
 
@@ -115,6 +117,7 @@ async function startServer() {
   app.use('/api', offerRoutes());
   app.use('/api', schedulingRoutes());
   app.use('/api', commentRoutes());
+  app.use('/api', privacyRoutes()); // candidate data export + erasure (DSAR)
   app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
@@ -177,6 +180,9 @@ async function startServer() {
 
   // Housekeeping: expired sessions and demo workspaces.
   setInterval(() => db.purgeExpired(), 15 * 60_000).unref();
+  // «نگه‌داری داده»: a policy nobody clicked «اجرا» on still runs, once a day.
+  setInterval(() => runDuePolicies(), 60 * 60_000).unref();
+  if (process.env.RETENTION_SWEEP !== 'off') setTimeout(() => runDuePolicies(), 90_000).unref();
 
   // «یادآوری مصاحبه»: once an hour, one day before each interview, from the
   // workspace's own mailbox. Every interview is reminded at most once.

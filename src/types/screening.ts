@@ -332,6 +332,8 @@ export interface ResumeRecord {
   createdAtISO: string;
   createdAtJalali: string;
   updatedAtISO: string;
+  /** Set when the retention policy stripped the personal data but kept the numbers. */
+  anonymizedAtISO?: string | null;
 }
 
 /** Lightweight list shape: the extracted resume text stays on the server. */

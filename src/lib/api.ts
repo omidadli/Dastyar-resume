@@ -43,6 +43,7 @@ import type {
   AutomationSettings,
 } from '../types/automation';
 import type { ApiKeyPublic, CreatedApiKey, DeveloperOverview, WebhookDeliveryPublic, WebhookEndpointPublic, WebhookTestResult } from '../types/developer';
+import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '../types/retention';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -284,6 +285,17 @@ export const api = {
       post<{ member: TeamMember; members: TeamMember[] }>('/api/org/members', b),
     updateMember: (id: string, role: Role) => patch<{ members: TeamMember[] }>(`/api/org/members/${id}`, { role }),
     removeMember: (id: string) => del<{ members: TeamMember[] }>(`/api/org/members/${id}`),
+    retention: () =>
+      get<{ policy: RetentionPolicy; preview: { days: number; action: RetentionPolicy['action']; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } }>(
+        '/api/org/retention'
+      ),
+    saveRetention: (b: { days: number; action: RetentionPolicy['action'] }) =>
+      put<{ policy: RetentionPolicy; preview: { days: number; action: RetentionPolicy['action']; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } }>(
+        '/api/org/retention',
+        b
+      ),
+    runRetention: (b: { days?: number; dryRun?: boolean }) =>
+      post<{ result: RetentionRunResult; policy: RetentionPolicy }>('/api/org/retention/run', b, { timeoutMs: 120_000 }),
   },
   ai: {
     status: () => get<AiStatus>('/api/ai/status'),
@@ -405,6 +417,10 @@ export const api = {
     addTalent: (id: string, b: { departmentId: string; note: string; tags: string[] }) =>
       post<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`, b),
     removeTalent: (id: string) => del<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`),
+    /** DSAR: everything we hold about one candidate, as one JSON document. */
+    exportData: (id: string) => get<CandidateDataExport>(`/api/resumes/${id}/export`),
+    /** DSAR: irreversible erasure of every row and the stored file. */
+    erase: (id: string) => post<{ erased: Record<string, number> }>(`/api/resumes/${id}/erase`, { confirm: 'ERASE' }, { timeoutMs: 60_000 }),
     attachFile: (id: string, fileName: string, fileBase64: string) =>
       post<{ ok: boolean }>(`/api/resumes/${id}/file`, { fileName, fileBase64 }, { timeoutMs: 150_000 }),
     fileUrl: (id: string, inline: boolean) => get<FileUrlInfo>(`/api/resumes/${id}/file-url${inline ? '?inline=1' : ''}`),

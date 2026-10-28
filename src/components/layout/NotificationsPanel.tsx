@@ -17,6 +17,7 @@ import {
   Scale,
   Sparkles,
   Trash2,
+  ShieldCheck,
   UserPlus,
   UserMinus,
   X,
@@ -60,6 +61,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'settings.changed': SlidersHorizontal,
   'deep.review': FileSearch2,
   'resume.deleted': Trash2,
+  'retention.applied': ShieldCheck,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

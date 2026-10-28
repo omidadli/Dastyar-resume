@@ -104,6 +104,7 @@ export type ActivityType =
   | 'offer.declined'
   | 'offer.cancelled'
   | 'comment.added'
+  | 'retention.applied'
   | 'settings.changed';
 
 export interface ActivityItem {

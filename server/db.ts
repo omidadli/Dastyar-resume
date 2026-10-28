@@ -58,6 +58,7 @@ import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
 import type { CandidateComment } from '../src/types/pipeline';
 import type { ApiKeyPublic, ApiScope, WebhookDeliveryPublic, WebhookEndpointPublic } from '../src/types/developer';
+import type { RetentionPolicy } from '../src/types/retention';
 import type { ResumeSourceKind } from '../src/types/app';
 import type { InterviewFeedback, PipelineBoard, PipelineStage } from '../src/types/pipeline';
 import { DEFAULT_STAGES } from '../src/types/pipeline';
@@ -146,6 +147,8 @@ export interface StoreSnapshot {
   webhooks?: WebhookEndpointRow[];
   /** The last few hundred delivery attempts, for the settings page. */
   webhookDeliveries?: WebhookDeliveryRow[];
+  /** Per-workspace retention policy («نگه‌داری داده»). */
+  retention?: Record<string, RetentionPolicy>;
 }
 
 /** Encrypted connection material for one workspace. */
@@ -268,6 +271,7 @@ const smsLog = new Map<string, SmsLogRow>();
 const apiKeys = new Map<string, ApiKeyRow>();
 const webhooks = new Map<string, WebhookEndpointRow>();
 const webhookDeliveries = new Map<string, WebhookDeliveryRow>();
+const retentionPolicies = new Map<string, RetentionPolicy>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -316,6 +320,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.apiKeys?.forEach((x) => apiKeys.set(x.id, x));
   snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
   snap.webhookDeliveries?.forEach((x) => webhookDeliveries.set(x.id, x));
+  for (const [k, v] of Object.entries(snap.retention || {})) retentionPolicies.set(k, v);
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -347,6 +352,7 @@ function clearMemory() {
   apiKeys.clear();
   webhooks.clear();
   webhookDeliveries.clear();
+  retentionPolicies.clear();
   activity = [];
   platformBlob = null;
   auditLog = [];
@@ -466,6 +472,7 @@ function snapshot(): StoreSnapshot {
     apiKeys: Array.from(apiKeys.values()),
     webhooks: Array.from(webhooks.values()),
     webhookDeliveries: Array.from(webhookDeliveries.values()),
+    retention: Object.fromEntries(retentionPolicies),
   };
 }
 
@@ -925,6 +932,7 @@ export function deleteOrg(id: string) {
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
   for (const [k, v] of webhookDeliveries) if (v.orgId === id) webhookDeliveries.delete(k);
+  retentionPolicies.delete(id);
   orgSecrets.delete(id);
   orgs.delete(id);
   deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`);
@@ -1880,6 +1888,151 @@ export function deleteComment(orgId: string, id: string): boolean {
   return true;
 }
 
+// ------------------------------------------------------------ retention ----
+
+export function getRetention(orgId: string): RetentionPolicy | null {
+  return retentionPolicies.get(orgId) || null;
+}
+
+export function setRetention(orgId: string, policy: RetentionPolicy): RetentionPolicy {
+  retentionPolicies.set(orgId, policy);
+  scheduleSave();
+  return policy;
+}
+
+/** Persists an in-place resume change that does not alter the score (anonymise). */
+export function persistResume(rec: ResumeRecord): ResumeRecord {
+  rec.updatedAtISO = new Date().toISOString();
+  recomputeJob(rec.jobId);
+  scheduleSave();
+  return rec;
+}
+
+export interface AnonymizedCounts {
+  notes: number;
+  messages: number;
+  interviews: number;
+  offers: number;
+  scorecards: number;
+}
+
+/**
+ * Strips a candidate down to the numbers and deletes every free-text trace:
+ * the file, the notes, the message bodies, the interviewer's words. The score,
+ * the category and the dates stay, so the reports still add up — that is the
+ * whole point of anonymising instead of deleting.
+ */
+export function anonymizeCandidate(rec: ResumeRecord): AnonymizedCounts {
+  const ext = (rec.fileName.split('.').pop() || 'pdf').toLowerCase();
+  dropResumeFile(rec);
+  rec.fileName = `resume-${rec.id.slice(-6)}.${ext}`;
+  rec.candidateName = null;
+  rec.contact = null;
+  rec.extractedText = '';
+  rec.summary = '';
+  rec.whyCategory = '';
+  rec.strengths = [];
+  rec.weaknesses = [];
+  rec.knockoutMisses = [];
+  rec.criterionScores = rec.criterionScores.map((c) => ({ criterionId: c.criterionId, title: c.title, score: c.score, rationale: '', evidence: '' }));
+  rec.deepFindings = null;
+  rec.decisionNote = null;
+  rec.bankNote = null;
+  rec.facts = rec.facts ? { ...rec.facts, education: null, expectedSalary: null } : rec.facts;
+  rec.anonymizedAtISO = new Date().toISOString();
+
+  const counts: AnonymizedCounts = { notes: 0, messages: 0, interviews: 0, offers: 0, scorecards: 0 };
+  for (const [k, v] of comments) {
+    if (v.orgId === rec.orgId && v.resumeId === rec.id) {
+      comments.delete(k);
+      counts.notes++;
+    }
+  }
+  for (const row of sentEmails.values()) {
+    if (row.orgId === rec.orgId && row.resumeId === rec.id) {
+      row.to = 'حذف‌شده';
+      row.candidateName = null;
+      row.body = '';
+      row.subject = 'پیام حذف‌شده (نگه‌داری داده)';
+      counts.messages++;
+    }
+  }
+  for (const row of smsLog.values()) {
+    if (row.orgId === rec.orgId && row.resumeId === rec.id) {
+      row.to = 'حذف‌شده';
+      row.candidateName = null;
+      row.text = '';
+      counts.messages++;
+    }
+  }
+  for (const row of interviews.values()) {
+    if (row.orgId === rec.orgId && row.resumeId === rec.id) {
+      row.candidateName = 'کارجوی ناشناس';
+      row.candidateEmail = null;
+      counts.interviews++;
+    }
+  }
+  for (const row of offers.values()) {
+    if (row.orgId === rec.orgId && row.resumeId === rec.id) {
+      row.candidateName = 'کارجوی ناشناس';
+      row.candidateEmail = null;
+      row.signatureName = null;
+      row.signatureNote = null;
+      counts.offers++;
+    }
+  }
+  for (const row of interviewFeedback.values()) {
+    if (row.orgId === rec.orgId && row.resumeId === rec.id) {
+      row.notes = '';
+      row.reviewerName = 'مصاحبه‌گر';
+      counts.scorecards++;
+    }
+  }
+  persistResume(rec);
+  return counts;
+}
+
+/** Removes the stored file only — the record stays (anonymisation). */
+export function dropResumeFile(rec: ResumeRecord): void {
+  if (rec.filePath) deleteFileQuietly(rec.filePath);
+  rec.filePath = null;
+  rec.fileSize = null;
+}
+
+export interface ErasedCounts {
+  resumes: number;
+  notes: number;
+  interviews: number;
+  offers: number;
+  messages: number;
+  scorecards: number;
+  links: number;
+  automations: number;
+}
+
+/**
+ * A data-subject request («داده‌های من را پاک کنید»): every row that mentions the
+ * candidate, in one transaction-like pass. The file goes too. This is not
+ * reversible, so the route that calls it demands an explicit confirmation.
+ */
+export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
+  const rec = getResume(orgId, resumeId);
+  if (!rec) return null;
+  const counts: ErasedCounts = { resumes: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0 };
+  for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
+  for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
+  for (const [k, v] of offers) if (v.orgId === orgId && v.resumeId === resumeId) { offers.delete(k); counts.offers++; }
+  for (const [k, v] of sentEmails) if (v.orgId === orgId && v.resumeId === resumeId) { sentEmails.delete(k); counts.messages++; }
+  for (const [k, v] of smsLog) if (v.orgId === orgId && v.resumeId === resumeId) { smsLog.delete(k); counts.messages++; }
+  for (const [k, v] of interviewFeedback) if (v.orgId === orgId && v.resumeId === resumeId) { interviewFeedback.delete(k); counts.scorecards++; }
+  for (const [k, v] of schedulingLinks) if (v.orgId === orgId && v.resumeId === resumeId) { schedulingLinks.delete(k); counts.links++; }
+  for (const [k, v] of automationActions) if (v.orgId === orgId && v.resumeId === resumeId) { automationActions.delete(k); counts.automations++; }
+  deleteResume(rec);
+  counts.resumes = 1;
+  scheduleSave();
+  return counts;
+}
+
 // --------------------------------------------------------------- api keys --
 
 export function listApiKeys(orgId: string): ApiKeyRow[] {
@@ -2783,6 +2936,7 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     webhookDeliveries: Array.isArray(raw.webhookDeliveries)
       ? raw.webhookDeliveries.filter((d: any) => d && isStr(d.id) && isStr(d.orgId) && isStr(d.event))
       : [],
+    retention: raw.retention && typeof raw.retention === 'object' && !Array.isArray(raw.retention) ? raw.retention : undefined,
     aiStats: undefined,
   };
 }

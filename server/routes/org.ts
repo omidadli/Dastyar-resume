@@ -6,6 +6,7 @@ import type { Department, Role, TeamMember } from '../../src/types/app';
 import { aiStatus, testConnection } from '../ai/provider';
 import { isEnvAdmin } from '../platform';
 import { h, oneOf, str } from './util';
+import { RetentionError, policyOf, preview, savePolicy, sweep } from '../retention';
 
 function members(orgId: string, meId: string): TeamMember[] {
   return db.listMembers(orgId).map((u) => ({ ...db.publicUser(u), isYou: u.id === meId }));
@@ -29,6 +30,50 @@ export function orgRoutes(): express.Router {
     });
     res.json({ org: updated });
   });
+
+  // ------------------------------------------------------- داده و حریم خصوصی --
+
+  r.get('/org/retention', (req, res) => {
+    const { org } = ctxOf(req);
+    const policy = policyOf(org.id);
+    res.json({ policy, preview: policy.days > 0 ? preview(org.id) : { days: 0, action: policy.action, items: [] } });
+  });
+
+  r.put(
+    '/org/retention',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      try {
+        const policy = savePolicy(org.id, { days: req.body?.days, action: req.body?.action });
+        db.logActivity(
+          org.id,
+          actorOf(req),
+          'settings.changed',
+          policy.days === 0 ? 'سیاست نگه‌داری داده را خاموش کرد' : `سیاست نگه‌داری داده را روی ${policy.days.toLocaleString('fa-IR')} روز گذاشت`
+        );
+        res.json({ policy, preview: policy.days > 0 ? preview(org.id) : { days: 0, action: policy.action, items: [] } });
+      } catch (err) {
+        if (!(err instanceof RetentionError)) throw err;
+        res.status(err.status).json({ error: err.message, code: err.code });
+      }
+    })
+  );
+
+  r.post(
+    '/org/retention/run',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const days = req.body?.days === undefined ? undefined : Number(req.body.days);
+      const dryRun = req.body?.dryRun === true;
+      if (!dryRun && policyOf(org.id).days === 0 && days === undefined) {
+        return res.status(400).json({ error: 'اول سیاست نگه‌داری را روشن کنید یا تعداد روز را مشخص کنید.', code: 'POLICY_OFF' });
+      }
+      const result = sweep(org.id, { days, dryRun, actor: actorOf(req) });
+      res.json({ result, policy: policyOf(org.id) });
+    })
+  );
 
   r.put('/org/departments', requireRole('admin'), (req, res) => {
     const { org } = ctxOf(req);

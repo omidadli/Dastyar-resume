@@ -52,6 +52,7 @@ const NAV: NavItem[] = [
   { to: '/app/jobs', label: 'فرصت‌های شغلی', icon: BriefcaseBusiness, match: (p) => p.startsWith('/app/jobs') },
   { to: '/app/candidates', label: 'رزومه‌ها', icon: Users, match: (p) => p.startsWith('/app/candidates') || p.startsWith('/app/compare') },
   { to: '/app/sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch, match: (p) => p.startsWith('/app/sourcing') },
+  { to: '/app/automation', label: 'اتوماسیون جذب', icon: Sparkles, match: (p) => p.startsWith('/app/automation') },
   { to: '/app/talent', label: 'بانک استعداد', icon: Library, match: (p) => p.startsWith('/app/talent') },
   { to: '/app/reports', label: 'گزارش‌ها', icon: BarChart3, match: (p) => p.startsWith('/app/reports') },
   { to: '/app/settings', label: 'تنظیمات', icon: Settings, match: (p) => p.startsWith('/app/settings') },

@@ -138,5 +138,18 @@ assert(
   'the message modal offers organizational e-mail or explains how to connect it'
 );
 
+// 11. «اتوماسیون جذب» — the queue, the rules, and the promise that nothing is
+// sent to a candidate before a human approves it.
+navigate('/app/automation');
+assert(await waitFor(() => text().includes('اتوماسیون جذب'), 12000), 'automation page renders');
+assert(await waitFor(() => text().includes('صف تأیید') && text().includes('قواعد و متن‌ها'), 15000), 'the queue and the rules tabs are offered');
+assert(text().includes('تا شما تأیید نکنید'), 'the page states that nothing is sent before approval');
+assert(clickByText('پیش‌نمایش'), 'the dry-run button exists');
+assert(await waitFor(() => text().includes('پیش‌نمایش بدون ثبت'), 15000), 'a dry run says that nothing was saved');
+assert(clickByText('قواعد و متن‌ها'), 'the rules tab is reachable');
+assert(await waitFor(() => text().includes('آستانهٔ دعوت'), 12000), 'the rules tab shows the invite threshold');
+assert(text().includes('ارسال خودکار نامهٔ نتیجه'), 'the automatic-send rule is exposed with its warning');
+assert(text().includes('متغیرهای متن'), 'the template variables are documented on the page');
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

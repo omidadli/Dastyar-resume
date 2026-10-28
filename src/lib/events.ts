@@ -4,7 +4,8 @@ import { useEffect, useRef } from 'react';
  * Tiny in-app event bus so views refresh when something changes elsewhere
  * (a decision in the side panel, an analysis finishing in the background…).
  */
-export type DataScope = 'jobs' | 'resumes' | 'talent' | 'org' | 'activity' | 'interviews' | 'integrations';
+export type DataScope = 'jobs' | 'resumes' | 'talent' | 'org' | 'activity' | 'interviews' | 'integrations'
+  | 'automation';
 
 type Handler = (detail: { scope: DataScope; jobId?: string }) => void;
 const handlers = new Set<Handler>();

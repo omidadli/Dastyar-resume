@@ -80,6 +80,7 @@ NODE_ENV=production npm start
 - **پرامپت‌های آماده برای Manus** (ساخت حساب Apify، OAuth گوگل، SMTP، کلید AI و آزمون نهایی): [`docs/PROMPT-MANUS.md`](docs/PROMPT-MANUS.md).
 - **دسترسی LinkedIn را چطور بخرم و چه چیزی واقعاً قابل خرید است؟** [`docs/LINKEDIN-ACCESS-OPTIONS.md`](docs/LINKEDIN-ACCESS-OPTIONS.md).
 - **بدون هیچ API: وارد کردن فهرست پروفایل از فایل CSV** (خروجی Recruiter یا هر جدول) → [`docs/IMPORT-CSV.md`](docs/IMPORT-CSV.md).
+- **اتوماسیون جذب** (پیشنهاد دعوت/نامهٔ نتیجه/جلسه، با تأیید منابع انسانی) → [`docs/AUTOMATION.md`](docs/AUTOMATION.md).
 
 مقادیر ورودی در پنل با AES-256-GCM رمزنگاری می‌شوند، دوباره به مرورگر برنمی‌گردند و تنها بخش کوتاهی از آن‌ها نمایش داده
 می‌شود. سرویس جست‌وجو پیش از ذخیره و کلید گوگل هنگام ذخیره آزمایش می‌شوند.
@@ -196,6 +197,7 @@ cloudflare/*              Worker، مسیریابی لبه، پل ذخیره‌�
 wrangler.jsonc, Dockerfile پیکربندی Cloudflare و ایمیج سرور
 docs/DEPLOY-CLOUDFLARE.md راهنمای استقرار روی Cloudflare
 docs/DESIGN-SYSTEM.md     مستند سیستم طراحی
+docs/AUTOMATION.md        اتوماسیون جذب: قواعد، متن‌ها، تأیید و تاریخچه
 ```
 
 سیستم طراحی (رنگ‌ها، تایپوگرافی، اجزا و قواعد دسترس‌پذیری) در [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) مستند شده است.

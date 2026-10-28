@@ -25,7 +25,9 @@ import {
   sourcingStatus,
   startSearch,
 } from '../linkedin';
+import { EMAIL_HOURLY_LIMIT, noteEmailSend, withinEmailLimit } from '../email-rate';
 import { buildSearchBrief } from '../sourcing';
+import { bookInterview, InterviewInputError } from '../interviews';
 import { reminderHours, remindersEnabled, sendInterviewReminders } from '../reminders';
 import { sourcingConnection } from '../platform';
 import { csvSummary, profilesFromCsv } from '../csv-import';
@@ -49,8 +51,6 @@ import { TEHRAN_OFFSET_MINUTES, tehranIsoFromJalali, tehranJalaliOf, tehranNow }
 import type { SourcingBrief, SourcingProfile } from '../../src/types/integrations';
 
 const MAX_RESULTS = 50;
-const EMAIL_HOURLY_LIMIT = 120;
-const emailSendLog = new Map<string, number[]>();
 
 /**
  * «مصرف امروز» — how many provider searches ran since Tehran midnight, against
@@ -87,19 +87,6 @@ function emptySearchMessage(): string {
 function publicInterview(row: db.InterviewRecordRow) {
   const { orgId: _o, ...rest } = row;
   return rest;
-}
-
-function withinEmailLimit(orgId: string): boolean {
-  const now = Date.now();
-  const recent = (emailSendLog.get(orgId) || []).filter((t) => now - t < 3600_000);
-  emailSendLog.set(orgId, recent);
-  return recent.length < EMAIL_HOURLY_LIMIT;
-}
-
-function noteEmailSend(orgId: string) {
-  const list = emailSendLog.get(orgId) || [];
-  list.push(Date.now());
-  emailSendLog.set(orgId, list);
 }
 
 function emailSettingsOrThrow(orgId: string) {
@@ -294,7 +281,7 @@ export function integrationRoutes(): express.Router {
       if (!EMAIL_RE.test(to)) {
         return res.status(400).json({ error: 'نشانی ایمیل گیرنده معتبر نیست؛ ابتدا ایمیل کارجو را در رزومه یا فیلد گیرنده وارد کنید.' });
       }
-      if (!withinEmailLimit(org.id)) {
+      if (!withinEmailLimit(org.id, EMAIL_HOURLY_LIMIT)) {
         return res.status(429).json({ error: 'سقف ارسال ساعتی این فضای کاری (۱۲۰ ایمیل) پر شده است؛ کمی بعد تلاش کنید.' });
       }
 
@@ -399,163 +386,14 @@ export function integrationRoutes(): express.Router {
     '/interviews',
     h(async (req, res) => {
       const { org, user } = ctxOf(req);
-      const jobId = str(req.body?.jobId, 80);
-      const job = db.getJob(org.id, jobId);
-      if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
-      const resumeId = str(req.body?.resumeId, 80) || null;
-      const rec = resumeId ? db.getResume(org.id, resumeId) : null;
-      if (resumeId && !rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
-
-      const dateJalali = str(req.body?.date, 20);
-      const time = str(req.body?.time, 10);
-      const startsAtISO = tehranIsoFromJalali(dateJalali, time);
-      if (!startsAtISO) return res.status(400).json({ error: 'تاریخ یا ساعت جلسه معتبر نیست (نمونه: ۱۴۰۴/۰۷/۱۲ و ۱۰:۳۰).' });
-      const durationMin = Math.min(480, Math.max(15, Number(req.body?.durationMin) || 45));
-      if (new Date(startsAtISO).getTime() < Date.now() - 60_000) {
-        return res.status(400).json({ error: 'زمان جلسه در گذشته است؛ یک زمان آینده انتخاب کنید.' });
+      // The booking itself lives in server/interviews.ts so an approved
+      // automation proposal books exactly the same interview.
+      try {
+        res.json(await bookInterview({ org, user, body: req.body || {} }));
+      } catch (err) {
+        if (err instanceof InterviewInputError) return res.status(err.status).json({ error: err.message });
+        throw err;
       }
-
-      const interviewerIds: string[] = Array.isArray(req.body?.interviewerIds)
-        ? req.body.interviewerIds.filter((x: unknown): x is string => typeof x === 'string').slice(0, 12)
-        : [];
-      const members = db.listMembers(org.id);
-      const interviewers = members.filter((m) => interviewerIds.includes(m.id));
-      if (interviewerIds.length && !interviewers.length) {
-        return res.status(400).json({ error: 'مصاحبه‌گر انتخاب‌شده در این فضای کاری پیدا نشد.' });
-      }
-
-      const titleInput = str(req.body?.title, 160);
-      const candidateName = rec?.candidateName || str(req.body?.candidateName, 120) || 'کارجو';
-      const candidateEmail = (str(req.body?.candidateEmail, 200) || candidateEmailOf(rec || {}) || '').toLowerCase() || null;
-      if (candidateEmail && !EMAIL_RE.test(candidateEmail)) {
-        return res.status(400).json({ error: 'ایمیل کارجو معتبر نیست.' });
-      }
-      const withMeet = req.body?.withMeet !== false;
-      const sendInvite = Boolean(req.body?.sendInvite);
-      const notes = str(req.body?.notes, 1500);
-      const location = str(req.body?.location, 300);
-      const title = titleInput || `مصاحبهٔ ${candidateName} — ${job.roleTitle}`;
-
-      const stamp = new Date();
-      const row: db.InterviewRecordRow = {
-        id: db.uid('itv'),
-        orgId: org.id,
-        jobId: job.id,
-        jobTitle: job.roleTitle,
-        resumeId: rec?.id ?? null,
-        candidateName,
-        candidateEmail,
-        title,
-        startsAtISO,
-        durationMin,
-        timezone: 'Asia/Tehran',
-        interviewerIds: interviewers.map((m) => m.id),
-        interviewerNames: interviewers.map((m) => m.name),
-        interviewerEmails: interviewers.map((m) => m.email).filter(Boolean),
-        location,
-        notes,
-        calendarEventId: null,
-        calendarHtmlLink: null,
-        meetLink: null,
-        inviteSentTo: null,
-        reminderSentAtISO: null,
-        status: 'scheduled',
-        createdBy: user.id,
-        createdByName: user.name,
-        createdAtISO: stamp.toISOString(),
-        createdAtJalali: formatJalaliDate(tehranJalaliOf(stamp), true),
-      };
-
-      // ---- Google Calendar (the invitation the candidate receives) ----
-      let calendarError: string | null = null;
-      const secrets = db.getOrgSecrets(org.id);
-      if (secrets.calendar?.refreshTokenEnc) {
-        try {
-          const token = await accessTokenFor(secrets, decryptSecret, encryptSecret);
-          const attendeeEmails = [candidateEmail, ...interviewers.map((m) => m.email), secrets.calendar.accountEmail].filter(
-            (e): e is string => Boolean(e && EMAIL_RE.test(e))
-          );
-          const description = [
-            `فرصت شغلی: ${job.roleTitle} (${job.departmentName})`,
-            `کارجو: ${candidateName}`,
-            interviewers.length ? `مصاحبه‌گر: ${interviewers.map((m) => m.name).join('، ')}` : '',
-            notes,
-            'ثبت‌شده با هویدا',
-          ]
-            .filter(Boolean)
-            .join('\n');
-          const event = await createEvent(token, secrets.calendar.calendarId, {
-            title,
-            description,
-            startsAtISO,
-            durationMin,
-            attendeeEmails,
-            location,
-            withMeet,
-          });
-          row.calendarEventId = event.id || null;
-          row.calendarHtmlLink = event.htmlLink;
-          row.meetLink = event.meetLink;
-          row.inviteSentTo = candidateEmail;
-          db.patchOrgSecrets(org.id, { calendar: { ...secrets.calendar, accessTokenEnc: encryptSecret(token) } });
-        } catch (err: any) {
-          calendarError = err instanceof CalendarError ? err.message : 'ثبت رویداد در Google Calendar انجام نشد.';
-          console.error('[interviews] calendar:', err?.message || err);
-        }
-      }
-
-      // ---- No Google connection (or it failed): the workspace can still send
-      // the invitation itself, with a standard .ics attachment. ----
-      let emailError: string | null = null;
-      const emailSecrets = db.getOrgSecrets(org.id).email;
-      if (!row.calendarEventId && sendInvite) {
-        if (!isEmailConfigured(db.getOrgSecrets(org.id)) || !candidateEmail) {
-          emailError = !candidateEmail
-            ? 'ایمیلی برای کارجو ثبت نشده است؛ دعوت‌نامه ایمیلی فرستاده نشد.'
-            : 'ایمیل سازمان وصل نیست؛ دعوت‌نامه ایمیلی فرستاده نشد.';
-        } else {
-          try {
-            const ics = buildInviteIcs({
-              interview: { ...row, id: row.id, title: row.title, notes: row.notes, startsAtISO, durationMin, location, candidateName, jobTitle: job.roleTitle },
-              organizer: { name: emailSecrets!.fromName, email: emailSecrets!.fromAddress },
-              attendeeEmails: [candidateEmail, ...interviewers.map((m) => m.email)],
-            });
-            const when = `${formatJalaliDate(tehranJalaliOf(new Date(startsAtISO)), true)} ساعت ${time}`;
-            const text = [
-              `${candidateName} عزیز،`,
-              '',
-              `برای مصاحبهٔ «${job.roleTitle}» در ${org.name} در ${when} (به وقت تهران) با شما هماهنگ شده است.`,
-              interviewers.length ? `مصاحبه‌گر: ${interviewers.map((m) => m.name).join('، ')}` : '',
-              location ? `مکان: ${location}` : '',
-              notes ? `توضیح: ${notes}` : '',
-              '',
-              'فایل تقویم (ICS) این جلسه پیوست است؛ با باز کردن آن، جلسه به تقویم شما اضافه می‌شود.',
-              '',
-              org.messageSignature,
-            ]
-              .filter(Boolean)
-              .join('\n');
-            await sendMail(emailSecrets!, {
-              to: candidateEmail,
-              subject: `دعوت به مصاحبه — ${job.roleTitle} — ${org.name}`,
-              text,
-              attachments: [{ filename: 'interview.ics', content: Buffer.from(ics, 'utf-8'), contentType: 'text/calendar' }],
-            });
-            row.inviteSentTo = candidateEmail;
-            noteEmailSend(org.id);
-            if (rec) db.markMessageSent(rec);
-          } catch (err: any) {
-            emailError = friendlySmtpError(err);
-          }
-        }
-      }
-
-      db.saveInterview(row);
-      db.logActivity(org.id, actorOf(req), 'interview.scheduled', `جلسهٔ مصاحبه با «${candidateName}» را برای ${dateJalali} ساعت ${time} تنظیم کرد`, {
-        jobId: job.id,
-        resumeId: rec?.id,
-      });
-      res.json({ interview: publicInterview(row), calendarError, emailError, record: rec ? db.toListItem(rec) : null });
     })
   );
 

@@ -89,6 +89,8 @@ export type ActivityType =
   | 'interview.scheduled'
   | 'interview.cancelled'
   | 'interview.reminder'
+  | 'automation.run'
+  | 'automation.approved'
   | 'settings.changed';
 
 export interface ActivityItem {

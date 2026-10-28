@@ -32,6 +32,13 @@ import type {
   UserPublic,
 } from '../types/app';
 import type {
+  AutomationOverview,
+  AutomationPreviewItem,
+  AutomationProposal,
+  AutomationRunResult,
+  AutomationSettings,
+} from '../types/automation';
+import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
   IntegrationsStatus,
@@ -387,6 +394,19 @@ export const api = {
       ),
     reminderInfo: () => get<{ hours: number; enabled: boolean; dueNow: number }>('/api/interviews/reminders'),
     icsUrl: (id: string) => `/api/interviews/${encodeURIComponent(id)}/ics`,
+  },
+  automation: {
+    overview: (jobId?: string) => get<AutomationOverview>(`/api/automation${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ''}`),
+    saveSettings: (b: Partial<AutomationSettings>) =>
+      put<{ settings: AutomationSettings; warning: string | null }>('/api/automation/settings', b, { timeoutMs: 45_000 }),
+    preview: (b: { jobId?: string }) =>
+      post<{ enabled: boolean; items: AutomationPreviewItem[] }>('/api/automation/preview', b, { timeoutMs: 45_000 }),
+    run: (b: { jobId?: string }) =>
+      post<AutomationOverview & { result: AutomationRunResult }>('/api/automation/run', b, { timeoutMs: 120_000 }),
+    approve: (id: string, b: { subject?: string; body?: string; date?: string; time?: string; durationMin?: number } = {}) =>
+      post<AutomationOverview & { action: AutomationProposal }>(`/api/automation/${encodeURIComponent(id)}/approve`, b, { timeoutMs: 120_000 }),
+    skip: (id: string, note?: string) =>
+      post<AutomationOverview & { action: AutomationProposal }>(`/api/automation/${encodeURIComponent(id)}/skip`, { note }, { timeoutMs: 45_000 }),
   },
   sourcing: {
     status: () => get<{ sourcing: IntegrationsStatus['sourcing']; docPath: string }>('/api/sourcing/status'),

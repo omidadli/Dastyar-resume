@@ -53,6 +53,8 @@ import type {
 import { cloneDefaultDepartments } from '../src/shared/departments';
 import { tehranJalaliOf, tehranNow, tehranWallDate } from './tehran-time';
 import type { InterviewRecord, SentEmail, SourcingSearch } from '../src/types/integrations';
+import type { AutomationProposal, AutomationSettings } from '../src/types/automation';
+import { normalizeAutomationSettings } from './automation-settings';
 import {
   JALALI_MONTH_NAMES,
   compareJalali,
@@ -117,6 +119,10 @@ export interface StoreSnapshot {
    * serialised to a client by accident.
    */
   orgSecrets?: Record<string, OrgSecrets>;
+  /** Per-workspace «اتوماسیون جذب» rules (thresholds, templates, auto-send). */
+  automation?: Record<string, AutomationSettings>;
+  /** Every proposed action the engine produced — pending, approved or skipped. */
+  automationActions?: AutomationActionRow[];
 }
 
 /** Encrypted connection material for one workspace. */
@@ -166,6 +172,8 @@ export interface SourcingJobRef {
 }
 
 export type SourcingSearchRecord = SourcingSearch & { orgId: string; providerJob?: SourcingJobRef | null };
+/** A proposal as stored: it belongs to exactly one workspace. */
+export type AutomationActionRow = AutomationProposal & { orgId: string };
 export type InterviewRecordRow = InterviewRecord & { orgId: string };
 export type SentEmailRow = SentEmail & { orgId: string };
 
@@ -173,6 +181,8 @@ const sourcingSearches = new Map<string, SourcingSearchRecord>();
 const interviews = new Map<string, InterviewRecordRow>();
 const sentEmails = new Map<string, SentEmailRow>();
 const orgSecrets = new Map<string, OrgSecrets>();
+const automationSettings = new Map<string, AutomationSettings>();
+const automationActions = new Map<string, AutomationActionRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -211,6 +221,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.interviews?.forEach((x) => interviews.set(x.id, x));
   snap.emails?.forEach((x) => sentEmails.set(x.id, x));
   for (const [k, v] of Object.entries(snap.orgSecrets || {})) orgSecrets.set(k, v);
+  for (const [k, v] of Object.entries(snap.automation || {})) automationSettings.set(k, normalizeAutomationSettings(v));
+  snap.automationActions?.forEach((x) => automationActions.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -232,6 +244,8 @@ function clearMemory() {
   interviews.clear();
   sentEmails.clear();
   orgSecrets.clear();
+  automationSettings.clear();
+  automationActions.clear();
   activity = [];
   platformBlob = null;
   auditLog = [];
@@ -341,6 +355,8 @@ function snapshot(): StoreSnapshot {
     interviews: Array.from(interviews.values()),
     emails: Array.from(sentEmails.values()),
     orgSecrets: Object.fromEntries(orgSecrets),
+    automation: Object.fromEntries(automationSettings),
+    automationActions: Array.from(automationActions.values()),
   };
 }
 
@@ -725,6 +741,7 @@ export function updateOrg(id: string, patch: Partial<Pick<OrgRecord, 'name' | 'm
 
 /** Removes a whole workspace: members, sessions, jobs, candidates, files, activity. */
 export function deleteOrg(id: string) {
+  dropAutomationOf(id);
   for (const j of Array.from(jobs.values())) if (j.orgId === id) deleteJobRecord(j.id);
   for (const u of Array.from(users.values())) if (u.orgId === id) deleteUserRecord(u.id);
   activity = activity.filter((a) => a.orgId !== id);
@@ -1492,6 +1509,64 @@ export function connectionAdoption(): { orgs: number; email: number; calendar: n
   return { orgs: orgs.size, email, calendar };
 }
 
+// ------------------------------------------------------ «اتوماسیون جذب» ----
+
+/** The rules of one workspace (defaults when nothing was saved yet). */
+export function getAutomationSettings(orgId: string): AutomationSettings {
+  return automationSettings.get(orgId) || normalizeAutomationSettings(null);
+}
+
+export function saveAutomationSettings(orgId: string, settings: AutomationSettings): AutomationSettings {
+  automationSettings.set(orgId, settings);
+  scheduleSave();
+  return settings;
+}
+
+/** Newest first; `status` narrows to the pending queue or the history. */
+export function listAutomationActions(
+  orgId: string,
+  filter: { status?: AutomationProposal['status']; jobId?: string; limit?: number } = {}
+): AutomationActionRow[] {
+  return Array.from(automationActions.values())
+    .filter((a) => a.orgId === orgId)
+    .filter((a) => (filter.status ? a.status === filter.status : true))
+    .filter((a) => (filter.jobId ? a.jobId === filter.jobId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO))
+    .slice(0, Math.max(1, Math.min(500, filter.limit || 200)));
+}
+
+export function getAutomationAction(orgId: string, id: string): AutomationActionRow | null {
+  const a = automationActions.get(id);
+  return a && a.orgId === orgId ? a : null;
+}
+
+export function saveAutomationAction(action: AutomationActionRow): AutomationActionRow {
+  automationActions.set(action.id, action);
+  scheduleSave();
+  return action;
+}
+
+/** «این کار قبلاً پیشنهاد شده؟» — idempotence key for the engine. */
+export function findAutomationAction(orgId: string, resumeId: string, kind: AutomationProposal['kind']): AutomationActionRow | null {
+  for (const a of automationActions.values()) {
+    if (a.orgId === orgId && a.resumeId === resumeId && a.kind === kind) return a;
+  }
+  return null;
+}
+
+/** Candidate résumés of a workspace (optionally one opening) for the engine. */
+export function listOrgResumes(orgId: string, jobId?: string): ResumeRecord[] {
+  return orgResumes(orgId)
+    .filter((r) => (jobId ? r.jobId === jobId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+/** Deleting a workspace takes its automation history with it. */
+export function dropAutomationOf(orgId: string) {
+  automationSettings.delete(orgId);
+  for (const [k, v] of automationActions) if (v.orgId === orgId) automationActions.delete(k);
+}
+
 export function getOrgSecrets(orgId: string): OrgSecrets {
   return orgSecrets.get(orgId) || {};
 }
@@ -2136,8 +2211,25 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     activity: Array.isArray(raw.activity) ? raw.activity.filter((a: any) => a && typeof a === 'object') : [],
     platform: raw.platform && typeof raw.platform === 'object' ? raw.platform : undefined,
     audit: Array.isArray(raw.audit) ? raw.audit.filter((a: any) => a && typeof a === 'object') : [],
+    // The automation rules and its history are part of a workspace's data: a
+    // restored backup must bring back the team's thresholds and the record of
+    // what was already sent, not only the candidates.
+    automation: automationRules(raw.automation),
+    automationActions: Array.isArray(raw.automationActions)
+      ? raw.automationActions.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.resumeId))
+      : [],
     aiStats: undefined,
   };
+}
+
+/** Rules from a backup file, made safe before they touch a live workspace. */
+function automationRules(raw: unknown): Record<string, AutomationSettings> {
+  const out: Record<string, AutomationSettings> = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [orgId, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (isStr(orgId)) out[orgId] = normalizeAutomationSettings(value);
+  }
+  return out;
 }
 
 /**

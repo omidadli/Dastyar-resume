@@ -18,6 +18,7 @@ import { jobRoutes } from './server/routes/jobs';
 import { fileRoutes, resumeRoutes } from './server/routes/resumes';
 import { insightRoutes } from './server/routes/insights';
 import { integrationPublicRoutes, integrationRoutes } from './server/routes/integrations';
+import { automationRoutes } from './server/routes/automation';
 import { backupPublicRoutes } from './server/routes/backup';
 import { remindersEnabled, runRemindersQuietly } from './server/reminders';
 
@@ -90,6 +91,7 @@ async function startServer() {
   app.use('/api', resumeRoutes());
   app.use('/api', insightRoutes());
   app.use('/api', integrationRoutes());
+  app.use('/api', automationRoutes());
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------

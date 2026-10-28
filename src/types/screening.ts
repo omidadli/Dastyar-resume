@@ -3,6 +3,8 @@
 // Used by both the React client and the Express server.
 // ================================================================
 
+import type { PipelineStage } from './pipeline';
+
 export type Recommendation = 'INTERVIEW' | 'REVIEW' | 'REJECT';
 /**
  * Internal AI category codes. They are never shown raw in the UI: the client
@@ -207,6 +209,11 @@ export interface Job {
   criteriaSource: CriteriaSource;
   status: JobStatus;
   analysisStatus: AnalysisStatus;
+  /** Listed on the public career portal (`/careers/<slug>`). */
+  isPublic?: boolean;
+  publishedAtISO?: string | null;
+  /** The board's columns for this opening (defaults applied when absent). */
+  stages?: PipelineStage[];
   stats: JobStats;
   createdAtJalali: string;
   createdAtISO: string;
@@ -231,7 +238,8 @@ export interface AnalysisHistoryEntry {
 
 /** Where a candidate came from — set for sourced profiles, null for uploads. */
 export interface ResumeSource {
-  kind: 'linkedin';
+  /** `careers` = applied through the public career portal; `linkedin` also covers CSV imports. */
+  kind: 'linkedin' | 'careers';
   profileUrl: string;
   headline: string;
   company: string | null;
@@ -298,6 +306,9 @@ export interface ResumeRecord {
   bankTags: string[];
   addedToBankAtJalali: string | null;
   addedToBankAtISO: string | null;
+
+  /** Which column of the pipeline board this candidate sits in. */
+  stageId?: string | null;
 
   messageStatus: 'none' | 'sent';
   lastMessagedAtJalali: string | null;

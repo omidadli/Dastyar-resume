@@ -1,24 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
+  Briefcase,
   CalendarCheck2,
-  CheckCircle2,
   ExternalLink,
   Link2,
   Mail,
   PlugZap,
   Save,
   Send,
+  CheckCircle2,
   ShieldCheck,
   Trash2,
   Users,
 } from 'lucide-react';
-import { Button, Callout, Card, CardHeader, Chip, ConfirmDialog, Select, Switch, TextInput, toast } from '../../components/ui';
+import { Button, Callout, Card, CardHeader, Chip, ConfirmDialog, Select, Switch, TextArea, TextInput, toast } from '../../components/ui';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
-import { faDate } from '../../lib/format';
+import { faDate, faNumber } from '../../lib/format';
+import { copyText } from '../../lib/clipboard';
 import { useAsync } from '../../lib/useAsync';
-import type { EmailSettingsPublic } from '../../types/integrations';
+import type { EmailSettingsPublic, SmsProvider, SmsSettingsPublic } from '../../types/integrations';
 
 const HOST_PRESETS: { id: string; label: string; host: string; port: number; secure: boolean; hint: string }[] = [
   { id: 'gmail', label: 'Gmail / Google Workspace', host: 'smtp.gmail.com', port: 465, secure: true, hint: 'در حساب گوگل «App Password» بسازید (نیازمند تأیید دومرحله‌ای).' },
@@ -389,6 +391,240 @@ function CalendarCard({ redirectUri, connected, accountEmail, configured }: { re
   );
 }
 
+/**
+ * «پیامک سازمان» — in Iran e-mail alone loses candidates. The workspace brings
+ * its own gateway (Kavenegar or sms.ir); HOVIDA never sends from a shared line.
+ */
+/**
+ * «پورتال شغلی» — a public page on the workspace's own slug. Openings appear
+ * there only when a job is explicitly published from its page.
+ */
+function CareersCard() {
+  const can = useCan('admin');
+  const settings = useAsync(() => api.careers.settings(), []);
+  const [slug, setSlug] = useState('');
+  const [about, setAbout] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const data = settings.data?.careers;
+  useEffect(() => {
+    if (!data) return;
+    setSlug(data.slug);
+    setAbout(data.about);
+  }, [data?.slug, data?.about]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.careers.saveSettings({ slug, about });
+      settings.setData({ careers: res.careers });
+      toast('نشانی پورتال ذخیره شد.');
+    } catch (err: any) {
+      toast(err?.message || 'ذخیره نشد.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const copy = async () => {
+    if (!data) return;
+    const ok = await copyText(data.url);
+    setCopied(ok);
+    toast(ok ? 'نشانی پورتال کپی شد.' : 'کپی نشد؛ نشانی را دستی بردارید.', ok ? 'success' : 'error');
+    window.setTimeout(() => setCopied(false), 2000);
+  };
+
+  const dirty = Boolean(data && (slug !== data.slug || about !== data.about));
+  return (
+    <Card>
+      <CardHeader
+        icon={Briefcase}
+        title="پورتال شغلی"
+        subtitle="صفحهٔ عمومی فرصت‌های شغلی، روی دامنهٔ هویدا"
+        action={data ? <Chip tone="neutral">{`${faNumber(data.publishedJobs)} از ${faNumber(data.totalJobs)} منتشرشده`}</Chip> : undefined}
+      />
+      <div className="space-y-3">
+        <TextInput
+          label="نشانی پورتال (slug)"
+          value={slug}
+          onChange={(e) => setSlug(e.target.value.toLowerCase())}
+          latin
+          placeholder="hovida"
+          hint="حروف کوچک انگلیسی، رقم و خط تیره؛ بین ۳ تا ۴۰ نویسه."
+          disabled={!can || saving}
+        />
+        <TextArea
+          label="دربارهٔ سازمان (در پورتال دیده می‌شود)"
+          value={about}
+          onChange={(e) => setAbout(e.target.value.slice(0, 600))}
+          rows={3}
+          placeholder="چند خط دربارهٔ تیم، محصول و فرهنگ کاری…"
+          disabled={!can || saving}
+        />
+        {data && (
+          <div className="rounded-[12px] border border-line bg-canvas px-3 py-2.5 flex items-center gap-2">
+            <span className="text-[12.5px] text-ink-2 truncate flex-1" dir="ltr">
+              {data.url}
+            </span>
+            <Button size="sm" variant="ghost" icon={copied ? CheckCircle2 : Link2} onClick={() => void copy()}>
+              {copied ? 'کپی شد' : 'کپی نشانی'}
+            </Button>
+            <Button size="sm" variant="ghost" icon={ExternalLink} onClick={() => window.open(data.url, '_blank', 'noopener')}>
+              دیدن
+            </Button>
+          </div>
+        )}
+        {!can && <p className="text-[12px] text-ink-3">فقط مدیر فضای کاری می‌تواند نشانی پورتال را تغییر دهد.</p>}
+        <div className="flex items-center gap-2">
+          <Button icon={Save} onClick={() => void save()} loading={saving} disabled={!can || saving || !dirty || !slug}>
+            ذخیرهٔ پورتال
+          </Button>
+          {data?.publishedJobs === 0 && (
+            <span className="text-[11.5px] text-ink-4">هنوز فرصتی منتشر نشده؛ از صفحهٔ هر فرصت، «انتشار در پورتال» را بزنید.</span>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SmsCard() {
+  const status = useAsync(() => api.integrations.status(), []);
+  const can = useCan('admin');
+  const [sms, setSms] = useState<SmsSettingsPublic | undefined>(status.data?.sms);
+  const [provider, setProvider] = useState<SmsProvider>('kavenegar');
+  const [sender, setSender] = useState('');
+  const [apiKey, setApiKey] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
+  useEffect(() => setSms(status.data?.sms), [status.data?.sms]);
+  useEffect(() => {
+    if (sms?.provider) setProvider(sms.provider);
+    if (sms?.sender && !sender) setSender(sms.sender);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sms?.provider, sms?.sender]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.integrations.saveSms({ provider, sender, apiKey: apiKey || undefined });
+      setSms(res.sms);
+      setApiKey('');
+      toast('پیامک سازمان متصل و تأیید شد.');
+    } catch (err: any) {
+      toast(err?.message || 'اتصال پیامک ممکن نشد.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const test = async () => {
+    setTesting(true);
+    try {
+      const res = await api.integrations.testSms();
+      toast(res.ok ? 'سرویس پیامک پاسخ داد؛ اتصال سالم است.' : `سرویس پیامک پاسخ نداد: ${res.error}`, res.ok ? 'success' : 'error');
+      status.reload();
+    } catch (err: any) {
+      toast(err?.message || 'آزمایش اتصال ممکن نشد.', 'error');
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const disconnect = async () => {
+    try {
+      const res = await api.integrations.disconnectSms();
+      setSms(res.sms);
+      toast('اتصال پیامک برداشته شد؛ دیگر پیامکی فرستاده نمی‌شود.', 'info');
+    } catch (err: any) {
+      toast(err?.message || 'قطع اتصال ممکن نشد.', 'error');
+    } finally {
+      setConfirmOff(false);
+    }
+  };
+
+  const configured = Boolean(sms?.configured);
+  return (
+    <Card>
+      <CardHeader
+        icon={Send}
+        title="پیامک سازمان"
+        subtitle="کاوه‌نگار یا sms.ir — با حساب و خط خودتان"
+        action={configured ? <Chip tone="brand" icon={CheckCircle2}>متصل</Chip> : <Chip tone="neutral">وصل نشده</Chip>}
+      />
+      {!configured && (
+        <Callout tone="info" className="mb-4">
+          در ایران بخش زیادی از کارجوها ایمیل را نمی‌بینند. با اتصال پیامک، دعوت مصاحبه و یادآوری جلسه را هم می‌توانید
+          پیامک کنید. کلید API را از پنل کاوه‌نگار یا sms.ir بردارید؛ اعتبار و خط، مالِ خودتان می‌ماند.
+        </Callout>
+      )}
+      <div className="space-y-3">
+        <Select
+          label="سرویس پیامک"
+          value={provider}
+          onChange={(e) => setProvider(e.target.value as SmsProvider)}
+          options={[
+            { value: 'kavenegar', label: 'کاوه‌نگار (Kavenegar)' },
+            { value: 'smsir', label: 'sms.ir' },
+          ]}
+          disabled={!can || saving}
+          hint={sms?.provider ? `اتصال فعلی: ${sms.provider === 'smsir' ? 'sms.ir' : 'کاوه‌نگار'}` : undefined}
+        />
+        <TextInput
+          label="شمارهٔ خط فرستنده"
+          value={sender}
+          onChange={(e) => setSender(e.target.value)}
+          latin
+          placeholder="10004346"
+          hint="همان خطی که در پنل سرویس پیامک برای شما ثبت شده است."
+          disabled={!can || saving}
+        />
+        <TextInput
+          label={sms?.hasApiKey ? 'کلید API (برای تغییر وارد کنید)' : 'کلید API'}
+          type="password"
+          value={apiKey}
+          onChange={(e) => setApiKey(e.target.value)}
+          latin
+          placeholder={sms?.hasApiKey ? 'کلید ذخیره شده است' : 'کلید API'}
+          disabled={!can || saving}
+          hint="رمزنگاری‌شده ذخیره می‌شود و هرگز به مرورگر برنمی‌گردد."
+        />
+        {!can && <p className="text-[12px] text-ink-3">فقط مدیر فضای کاری می‌تواند پیامک را وصل کند.</p>}
+        {sms?.lastError && <p className="text-[12px] text-low-ink leading-relaxed">{sms.lastError}</p>}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button icon={Save} onClick={() => void save()} loading={saving} disabled={!can || saving || !sender || (!apiKey && !sms?.hasApiKey)}>
+            ذخیره و آزمایش
+          </Button>
+          {configured && (
+            <>
+              <Button variant="secondary" icon={Send} onClick={() => void test()} loading={testing} disabled={!can}>
+                آزمایش اتصال
+              </Button>
+              <Button variant="ghost" icon={Trash2} onClick={() => setConfirmOff(true)} disabled={!can}>
+                قطع اتصال
+              </Button>
+            </>
+          )}
+        </div>
+        {sms?.lastTestAtISO && (
+          <p className="text-[11.5px] text-ink-4">
+            آخرین آزمایش: {faDate(sms.lastTestAtISO)} — {sms.lastTestOk ? 'موفق' : 'ناموفق'}
+          </p>
+        )}
+      </div>
+      <ConfirmDialog
+        open={confirmOff}
+        onClose={() => setConfirmOff(false)}
+        onConfirm={() => void disconnect()}
+        title="قطع اتصال پیامک؟"
+        description="پس از قطع، هیچ پیامکی از این فضای کاری فرستاده نمی‌شود؛ تاریخچهٔ ارسال‌ها می‌ماند."
+        confirmLabel="قطع اتصال"
+      />
+    </Card>
+  );
+}
+
 function SourcingCard({ configured, providerLabel, endpointHost, setupHint, docPath }: { configured: boolean; providerLabel: string; endpointHost: string | null; setupHint: string; docPath: string }) {
   return (
     <Card>
@@ -431,6 +667,8 @@ export function IntegrationsTab() {
     <div className="grid xl:grid-cols-2 gap-5 max-w-[1200px] items-start">
       <div className="flex flex-col gap-5">
         <EmailCard />
+        <SmsCard />
+        <CareersCard />
         <SourcingCard
           configured={data?.sourcing.configured ?? false}
           providerLabel={data?.sourcing.providerLabel ?? 'LinkedIn'}
@@ -454,6 +692,9 @@ export function IntegrationsTab() {
             </li>
             <li>
               <b>ایمیل سازمان:</b> پیش‌نویس پیام کاندیدا را ویرایش می‌کنید و با همین حساب می‌فرستید؛ نسخهٔ ارسال‌شده در تاریخچهٔ کاندیدا می‌ماند.
+            </li>
+            <li>
+              <b>پیامک سازمان:</b> برای کارجویانی که ایمیل را نمی‌بینند؛ پیام‌های کوتاه (دعوت، یادآوری جلسه، تغییر وضعیت) از خط خودتان و با اعتبار پنل خودتان فرستاده می‌شود.
             </li>
             <li>
               <b>Google Calendar:</b> تاریخ و ساعت جلسه را انتخاب می‌کنید؛ رویداد با لینک Google Meet در تقویم شما ساخته می‌شود و دعوت‌نامه برای کارجو و مصاحبه‌گران می‌رود. اگر تقویم وصل نباشد، همین جلسه در هویدا ثبت می‌شود و می‌توانید فایل ICS را دانلود یا با ایمیل سازمان بفرستید.

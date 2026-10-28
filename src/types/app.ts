@@ -20,6 +20,12 @@ export interface OrgPublic {
   messageSignature: string;
   isDemo: boolean;
   demoExpiresAt: string | null;
+  /**
+   * Public career portal («پورتال شغلی»): the slug in `/careers/<slug>` and the
+   * short «دربارهٔ ما» shown above the openings. Editable by the workspace admin.
+   */
+  careerSlug: string;
+  careerAbout: string;
   createdAtISO: string;
   /** Suspended by a platform admin — members cannot sign in. */
   suspended?: boolean;
@@ -91,6 +97,8 @@ export type ActivityType =
   | 'interview.reminder'
   | 'automation.run'
   | 'automation.approved'
+  | 'stage.moved'
+  | 'scorecard.added'
   | 'settings.changed';
 
 export interface ActivityItem {

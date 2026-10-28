@@ -6,7 +6,9 @@ import {
   Columns3,
   CopyCheck,
   Download,
+  ExternalLink,
   FileStack,
+  Globe,
   ListChecks,
   MoreHorizontal,
   Pause,
@@ -26,6 +28,7 @@ import {
 import { PageHeader } from '../components/layout/AppShell';
 import { CandidatePanel } from '../components/candidates/CandidatePanel';
 import { CandidateTable } from '../components/candidates/CandidateTable';
+import { PipelineBoard } from '../components/jobs/PipelineBoard';
 import { InterviewList } from '../components/candidates/InterviewModal';
 import { AnalysisProgress } from '../components/jobs/AnalysisProgress';
 import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
@@ -70,7 +73,7 @@ import { useAsync, useDebounced, useMediaQuery } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { DecisionFilter, DecisionStatus, Job, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
-type JobTab = 'candidates' | 'interviews' | 'criteria';
+type JobTab = 'candidates' | 'board' | 'interviews' | 'criteria';
 
 function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean; onClose: () => void; onSaved: (j: Job) => void }) {
   const [roleTitle, setRoleTitle] = useState(job.roleTitle);
@@ -312,6 +315,10 @@ export default function JobDetail({ id }: { id: string }) {
 
   // Upload / job actions
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(false);
+  // The board is its own read (columns + light cards) and refreshes after a move.
+  const [boardVersion, setBoardVersion] = useState(0);
+  const boardQ = useAsync(() => api.jobs.board(id), [id, boardVersion, tab === 'board']);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -419,6 +426,43 @@ export default function JobDetail({ id }: { id: string }) {
   }
 
   const s = job.stats;
+  /** «پورتال شغلی» — publishing is one explicit switch, with its link in hand. */
+  const togglePublish = async () => {
+    if (!job) return;
+    setPublishBusy(true);
+    try {
+      const next = !job.isPublic;
+      const res = await api.careers.publish(job.id, next);
+      jobQ.setData((d) => (d ? { ...d, job: { ...d.job, ...res.job } } : d));
+      if (next) {
+        const settings = await api.careers.settings();
+        toast(
+          `آگهی منتشر شد. نشانی صفحه: ${settings.careers.url.replace(/^https?:\/\//, '')}/careers/…`,
+          'success',
+          { label: 'کپی نشانی', onClick: () => void navigator.clipboard?.writeText(`${location.origin}/careers/${settings.careers.slug}/jobs/${job.id}`) },
+          8000
+        );
+      } else {
+        toast('آگهی از پورتال شغلی برداشته شد؛ صفحهٔ عمومی دیگر نمایش داده نمی‌شود.', 'info');
+      }
+      emitChange('jobs');
+    } catch (err: any) {
+      toast(err?.message || 'تغییر وضعیت انتشار ممکن نشد.', 'error');
+    } finally {
+      setPublishBusy(false);
+    }
+  };
+
+  /** Opens the public page exactly as a candidate sees it. */
+  const openPublicPage = async () => {
+    try {
+      const settings = await api.careers.settings();
+      window.open(`${location.origin}/careers/${settings.careers.slug}/jobs/${job?.id}`, '_blank', 'noopener');
+    } catch (err: any) {
+      toast(err?.message || 'نشانی پورتال خوانده نشد.', 'error');
+    }
+  };
+
   const closed = job.status === 'closed';
   const panelOpen = Boolean(selected);
   const sidePanel = selected && (
@@ -427,6 +471,7 @@ export default function JobDetail({ id }: { id: string }) {
       record={selected}
       jobTitle={job.roleTitle}
       criteria={job.understanding.criteria}
+      stages={job.stages}
       onChange={updateItem}
       onDeleted={() => {
         const goneId = selected.id;
@@ -447,6 +492,11 @@ export default function JobDetail({ id }: { id: string }) {
           <span className="inline-flex flex-wrap items-center gap-2.5">
             {job.roleTitle}
             <JobStatusPill status={job.status} />
+            {job.isPublic && (
+              <Chip tone="brand" icon={Globe} title="این آگهی در پورتال شغلی عمومی دیده می‌شود">
+                منتشرشده
+              </Chip>
+            )}
             {job.criteriaSource === 'template' && (
               <Chip tone="outline" icon={FileStack} title="معیارهای این فرصت از الگوی آماده دپارتمان ساخته شده است">
                 الگوی آماده
@@ -463,11 +513,37 @@ export default function JobDetail({ id }: { id: string }) {
             <Button variant="secondary" icon={Download} onClick={doExport} loading={exporting} disabled={!s.total} className="max-sm:hidden">
               خروجی اکسل
             </Button>
+            <Button
+              variant={job.isPublic ? 'soft' : 'secondary'}
+              icon={Globe}
+              loading={publishBusy}
+              onClick={() => void togglePublish()}
+              disabled={closed}
+              title={job.isPublic ? 'آگهی در پورتال شغلی منتشر است؛ برای برداشتن کلیک کنید' : 'انتشار در پورتال شغلی عمومی'}
+              className="max-lg:hidden"
+            >
+              {job.isPublic ? 'منتشرشده در پورتال' : 'انتشار در پورتال'}
+            </Button>
             <Menu
               align="end"
               width={220}
               items={[
                 { label: 'ویرایش اطلاعات', icon: Pencil, onClick: () => setEditOpen(true) },
+                {
+                  label: job.isPublic ? 'برداشتن از پورتال شغلی' : 'انتشار در پورتال شغلی',
+                  icon: Globe,
+                  onClick: () => void togglePublish(),
+                  disabled: closed || publishBusy,
+                },
+                ...(job.isPublic
+                  ? [
+                      {
+                        label: 'باز کردن صفحهٔ عمومی',
+                        icon: ExternalLink,
+                        onClick: () => void openPublicPage(),
+                      },
+                    ]
+                  : []),
                 { label: exporting ? 'در حال ساخت فایل اکسل…' : 'خروجی اکسل', icon: Download, onClick: () => void doExport(), disabled: !s.total || exporting },
                 'divider',
                 job.status !== 'open'
@@ -507,10 +583,43 @@ export default function JobDetail({ id }: { id: string }) {
         onChange={setTab}
         items={[
           { id: 'candidates', label: 'کاندیداها', count: s.total },
+          { id: 'board', label: 'تختهٔ جذب', icon: Columns3, count: s.total },
           { id: 'interviews', label: 'جلسه‌های مصاحبه', icon: CalendarClock, count: interviews.length || undefined },
           { id: 'criteria', label: 'معیارها و پرسش‌نامه', icon: ListChecks },
         ]}
       />
+
+      {tab === 'board' && (
+        <Card>
+          <CardHeader
+            icon={Columns3}
+            title="تختهٔ جذب"
+            subtitle="همان کاندیداها، در ستون‌های مرحلهٔ استخدام. با «بعدی» یا منوی هر کارت جابه‌جا کنید؛ هر جابه‌جایی در فعالیت‌ها ثبت می‌شود."
+            action={
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setBoardVersion((v) => v + 1)}>
+                  تازه‌سازی
+                </Button>
+              </div>
+            }
+          />
+          <PipelineBoard
+            board={boardQ.data}
+            loading={boardQ.loading && !boardQ.data}
+            onRefresh={() => setBoardVersion((v) => v + 1)}
+            canMove={!closed}
+            onOpen={async (card) => {
+              try {
+                const res = await api.resumes.get(card.id);
+                setSelected(res.record);
+                setQuery({ c: card.id }, { replace: false });
+              } catch {
+                toast('این رزومه باز نشد؛ ممکن است حذف شده باشد.', 'error');
+              }
+            }}
+          />
+        </Card>
+      )}
 
       {tab === 'interviews' && (
         <Card>

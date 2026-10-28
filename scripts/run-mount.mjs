@@ -115,6 +115,8 @@ assert(text().includes('انتخاب فایل CSV') && text().includes('ساخت
 navigate('/app/settings/integrations');
 assert(await waitFor(() => text().includes('ایمیل سازمان') && text().includes('Google Calendar')), 'connection settings render both cards');
 assert(text().includes('اتصال‌ها'), 'the connections tab is reachable from settings');
+assert(text().includes('پیامک سازمان'), 'the connections tab offers the workspace SMS line');
+assert(text().includes('پورتال شغلی'), 'the connections tab offers the public career portal');
 
 // 9. Interview modal opens from the candidate panel
 const clickByText = (needle) => {

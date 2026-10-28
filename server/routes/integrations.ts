@@ -26,6 +26,7 @@ import {
   startSearch,
 } from '../linkedin';
 import { EMAIL_HOURLY_LIMIT, noteEmailSend, withinEmailLimit } from '../email-rate';
+import { friendlySmsError, isSmsConfigured, normalizeIranMobile, prepareSmsSettings, sendSms, smsStatus, verifySms } from '../sms';
 import { buildSearchBrief } from '../sourcing';
 import { bookInterview, InterviewInputError } from '../interviews';
 import { reminderHours, remindersEnabled, sendInterviewReminders } from '../reminders';
@@ -180,6 +181,7 @@ export function integrationRoutes(): express.Router {
       email: emailStatus(secrets),
       calendar: {
         ...calendarStatus(secrets, redirectUriFor(originOf(req))),
+        sms: smsStatus(secrets),
         configured: Boolean(googleClient()),
         ownerEmail: org.name,
       },
@@ -187,6 +189,126 @@ export function integrationRoutes(): express.Router {
   });
 
   // ---------------------------------------------------------------- email ----
+
+  // -------------------------------------------------- «پیامک سازمان» ----
+  // In Iran e-mail alone loses candidates: the workspace brings its own gateway
+  // (Kavenegar / sms.ir) and HOVIDA only ever sends from that line.
+  r.put(
+    '/integrations/sms',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const previous = db.getOrgSecrets(org.id).sms;
+      let prepared;
+      try {
+        prepared = prepareSmsSettings(
+          {
+            provider: (str(req.body?.provider, 20) || 'kavenegar') as any,
+            apiKey: typeof req.body?.apiKey === 'string' ? req.body.apiKey : '',
+            sender: str(req.body?.sender, 40),
+          },
+          previous
+        );
+      } catch (err: any) {
+        return res.status(400).json({ error: err?.message || 'تنظیمات پیامک معتبر نیست.' });
+      }
+      const check = await verifySms(prepared);
+      prepared.lastTestAtISO = new Date().toISOString();
+      prepared.lastTestOk = check.ok;
+      prepared.lastError = check.error;
+      if (!check.ok) {
+        return res.status(400).json({ error: `سرویس پیامک تأیید نشد: ${check.error}` });
+      }
+      db.patchOrgSecrets(org.id, { sms: prepared });
+      db.logActivity(org.id, { id: user.id, name: user.name }, 'settings.changed', 'پیامک سازمان را متصل کرد');
+      res.json({ sms: smsStatus(db.getOrgSecrets(org.id)) });
+    })
+  );
+
+  r.delete('/integrations/sms', requireRole('admin'), (req, res) => {
+    const { org } = ctxOf(req);
+    db.patchOrgSecrets(org.id, { sms: undefined });
+    db.logActivity(org.id, actorOf(req), 'settings.changed', 'اتصال پیامک سازمان را قطع کرد');
+    res.json({ sms: smsStatus(db.getOrgSecrets(org.id)) });
+  });
+
+  r.post(
+    '/integrations/sms/test',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const settings = db.getOrgSecrets(org.id).sms;
+      if (!settings) return res.status(409).json({ error: 'پیامک سازمان هنوز متصل نشده است.', code: 'SMS_NOT_CONFIGURED' });
+      const check = await verifySms(settings);
+      db.patchOrgSecrets(org.id, {
+        sms: { ...settings, lastTestAtISO: new Date().toISOString(), lastTestOk: check.ok, lastError: check.error },
+      });
+      res.json({ ok: check.ok, error: check.error });
+    })
+  );
+
+  /** Sends one text from the candidate panel (or a free recipient). */
+  r.post(
+    '/integrations/sms/send',
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const settings = db.getOrgSecrets(org.id).sms;
+      if (!settings || !isSmsConfigured(db.getOrgSecrets(org.id))) {
+        return res.status(409).json({
+          error: 'پیامک سازمان متصل نیست؛ در «تنظیمات ← اتصال‌ها» سرویس پیامک را وصل کنید.',
+          code: 'SMS_NOT_CONFIGURED',
+        });
+      }
+      const resumeId = str(req.body?.resumeId, 80);
+      const rec = resumeId ? db.getResume(org.id, resumeId) : null;
+      if (resumeId && !rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      const to = normalizeIranMobile(str(req.body?.to, 20) || rec?.contact?.phone || '');
+      if (!to) return res.status(400).json({ error: 'شمارهٔ موبایل گیرنده معتبر نیست (نمونه: ۰۹۱۲۱۲۳۴۵۶۷).' });
+      const text = str(req.body?.text, 900);
+      if (text.length < 3) return res.status(400).json({ error: 'متن پیامک را بنویسید.' });
+      if (!withinEmailLimit(org.id, EMAIL_HOURLY_LIMIT)) {
+        return res.status(429).json({ error: 'سقف ارسال ساعتی این فضای کاری پر شده است؛ کمی بعد تلاش کنید.' });
+      }
+      const stamp = new Date();
+      const row: db.SmsLogRow = {
+        id: db.uid('sms'),
+        orgId: org.id,
+        to,
+        text,
+        status: 'sent',
+        error: null,
+        resumeId: rec?.id ?? null,
+        candidateName: rec?.candidateName ?? null,
+        sentAtISO: stamp.toISOString(),
+        sentAtJalali: formatJalaliDate(tehranJalaliOf(stamp), true),
+        sentByName: user.name,
+      };
+      try {
+        await sendSms(settings, { to, text });
+      } catch (err: any) {
+        db.saveSms({ ...row, status: 'failed', error: friendlySmsError(err, 0) });
+        const status = err?.code === 'SMS_NOT_CONFIGURED' ? 409 : 502;
+        return res.status(status).json({ error: friendlySmsError(err, 0), code: err?.code || 'SMS_SEND_FAILED' });
+      }
+      noteEmailSend(org.id);
+      db.saveSms(row);
+      if (rec) db.markMessageSent(rec);
+      db.logActivity(org.id, { id: user.id, name: user.name }, 'message.sent', `پیامک به «${rec?.candidateName || to}» فرستاد`, {
+        jobId: rec?.jobId ?? null,
+        resumeId: rec?.id ?? null,
+      });
+      res.json({ sms: db.withoutOrg(row) });
+    })
+  );
+
+  r.get(
+    '/integrations/sms',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const resumeId = str(req.query.resumeId, 80) || undefined;
+      res.json({ items: db.listSms(org.id, resumeId).map(db.withoutOrg) });
+    })
+  );
 
   r.put(
     '/integrations/email',

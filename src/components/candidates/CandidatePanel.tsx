@@ -18,11 +18,13 @@ import {
   Info,
   Lightbulb,
   Link2,
+  Loader2,
   Mail,
   MapPin,
   MessageSquareText,
   MoreHorizontal,
   Phone,
+  Smartphone,
   RefreshCw,
   ScanSearch,
   ShieldAlert,
@@ -44,6 +46,7 @@ import { DECISION_META, matchMeta } from '../../lib/match';
 import {
   Button,
   ButtonLink,
+  Select,
   Callout,
   Chip,
   ConfidenceBadge,
@@ -59,7 +62,10 @@ import {
   toast,
 } from '../ui';
 import { MessageModal, RejectModal, TalentModal } from './CandidateModals';
+import { ScorecardSection } from './Scorecard';
+import { SmsModal } from './SmsModal';
 import { InterviewModal } from './InterviewModal';
+import type { PipelineStage } from '../../types/pipeline';
 
 type PanelTab = 'summary' | 'skills' | 'experience' | 'more';
 
@@ -67,6 +73,8 @@ export interface CandidatePanelProps {
   record: ResumeListItem;
   jobTitle?: string;
   criteria?: Criterion[];
+  /** The opening's board columns, when the parent knows them. */
+  stages?: PipelineStage[];
   onChange: (r: ResumeListItem) => void;
   onDeleted?: (id: string) => void;
   onClose?: () => void;
@@ -263,13 +271,15 @@ export function DecisionBar({ record, onChange, compact, short }: { record: Resu
 
 // ------------------------------------------------------------------ panel ----
 
-export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted, onClose, variant = 'panel' }: CandidatePanelProps) {
+export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, onDeleted, onClose, variant = 'panel' }: CandidatePanelProps) {
   const [tab, setTab] = useState<PanelTab>('summary');
   const [messageOpen, setMessageOpen] = useState(false);
   const [interviewOpen, setInterviewOpen] = useState(false);
   const [interviews, setInterviews] = useState<Array<{ id: string; startsAtISO: string; status: string; meetLink: string | null }>>([]);
   const [talentOpen, setTalentOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [stageBusy, setStageBusy] = useState(false);
+  const [smsOpen, setSmsOpen] = useState(false);
   const [rerunning, setRerunning] = useState<'standard' | 'deep' | null>(null);
   useCompare(); // re-render when the tray changes
   const inCompare = isInCompare(record.id);
@@ -278,6 +288,24 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
   const insufficient = meta.level === 'insufficient';
 
   useEffect(() => setTab('summary'), [record.id]);
+
+  /** Moving a candidate is one small, logged action — never a silent drag. */
+  const moveStage = async (stageId: string) => {
+    if (stageId === (record.stageId || stages?.[0]?.id)) return;
+    setStageBusy(true);
+    try {
+      const res = await api.resumes.stage(record.id, stageId);
+      onChange(res.record);
+      emitChange('resumes');
+      emitChange('activity');
+      toast(`به ستون «${res.stage.name}» منتقل شد.`);
+    } catch (err: any) {
+      toast(err?.message || 'تغییر ستون ممکن نشد.', 'error');
+    } finally {
+      setStageBusy(false);
+    }
+  };
+
 
   // Opened outside its job page (رزومه‌ها، بانک استعداد): fetch the opening's
   // criteria so weights and «الزامی» marks still show.
@@ -705,19 +733,41 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
 
         {tab === 'more' && (
           <div className="flex flex-col gap-6">
+            {stages && stages.length > 1 && (
+              <section>
+                <SectionTitle icon={Columns3}>ستون جذب</SectionTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    aria-label="ستون جذب"
+                    value={record.stageId || stages[0].id}
+                    onChange={(e) => void moveStage(e.target.value)}
+                    options={stages.map((st) => ({ value: st.id, label: st.name }))}
+                    disabled={stageBusy}
+                  />
+                  {stageBusy && <Loader2 className="w-4 h-4 animate-spin text-ink-3" />}
+                </div>
+                <p className="text-[11.5px] text-ink-4 mt-1.5">هر جابه‌جایی در فعالیت‌های تیم ثبت می‌شود.</p>
+              </section>
+            )}
             <section>
               <SectionTitle icon={Phone}>اطلاعات تماس</SectionTitle>
               <ContactRow icon={Phone} value={record.contact?.phone} href={telHref(record.contact?.phone)} />
               <ContactRow icon={Mail} value={record.contact?.email} href={record.contact?.email ? `mailto:${record.contact.email}` : undefined} />
               <div className="mt-3">
-                <Button size="sm" variant="secondary" icon={MessageSquareText} onClick={() => setMessageOpen(true)}>
-                  {record.messageStatus === 'sent' ? 'پیام دیگر' : 'نوشتن پیام'}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="secondary" icon={MessageSquareText} onClick={() => setMessageOpen(true)}>
+                    {record.messageStatus === 'sent' ? 'پیام دیگر' : 'نوشتن پیام'}
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={Smartphone} onClick={() => setSmsOpen(true)} disabled={!record.contact?.phone}>
+                    ارسال پیامک
+                  </Button>
+                </div>
                 {record.messageStatus === 'sent' && (
                   <span className="text-[12px] text-ink-3 mr-3">آخرین پیام: {record.lastMessagedAtJalali}</span>
                 )}
               </div>
             </section>
+            <ScorecardSection resumeId={record.id} criteria={criteria || []} compact />
             <section>
               <SectionTitle icon={FileText}>فایل رزومه</SectionTitle>
               <div className="flex items-center gap-3 rounded-[12px] border border-line p-3">
@@ -809,6 +859,7 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
       </div>
 
       {messageOpen && <MessageModal record={record} onClose={() => setMessageOpen(false)} onSent={onChange} />}
+      {smsOpen && <SmsModal record={record} onClose={() => setSmsOpen(false)} />}
       {interviewOpen && (
         <InterviewModal
           record={record}

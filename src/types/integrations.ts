@@ -211,4 +211,48 @@ export interface IntegrationsStatus {
   sourcing: SourcingStatusPublic;
   email: EmailSettingsPublic;
   calendar: CalendarStatusPublic;
+  sms: SmsSettingsPublic;
+}
+
+// ------------------------------------------------------------------- SMS ----
+
+/** Iranian SMS gateways the workspace can connect with its own account. */
+export type SmsProvider = 'kavenegar' | 'smsir';
+
+export const SMS_PROVIDER_LABEL: Record<SmsProvider, string> = {
+  kavenegar: 'کاوه‌نگار (Kavenegar)',
+  smsir: 'sms.ir',
+};
+
+export interface SmsSettingsPublic {
+  configured: boolean;
+  provider: SmsProvider | null;
+  /** The line/number the message is sent from (shown as stored). */
+  sender: string | null;
+  hasApiKey: boolean;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+export interface SmsSettingsInput {
+  provider: SmsProvider;
+  /** Omitted on edit means «keep the stored key». */
+  apiKey?: string;
+  sender: string;
+}
+
+export type SmsStatus = 'sent' | 'failed';
+
+export interface SentSms {
+  id: string;
+  to: string;
+  text: string;
+  status: SmsStatus;
+  error: string | null;
+  resumeId: string | null;
+  candidateName: string | null;
+  sentAtISO: string;
+  sentAtJalali: string;
+  sentByName: string | null;
 }

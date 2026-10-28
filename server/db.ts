@@ -52,8 +52,10 @@ import type {
 } from '../src/types/app';
 import { cloneDefaultDepartments } from '../src/shared/departments';
 import { tehranJalaliOf, tehranNow, tehranWallDate } from './tehran-time';
-import type { InterviewRecord, SentEmail, SourcingSearch } from '../src/types/integrations';
+import type { InterviewRecord, SentEmail, SentSms, SourcingSearch } from '../src/types/integrations';
 import type { AutomationProposal, AutomationSettings } from '../src/types/automation';
+import type { InterviewFeedback, PipelineBoard, PipelineStage } from '../src/types/pipeline';
+import { DEFAULT_STAGES } from '../src/types/pipeline';
 import { normalizeAutomationSettings } from './automation-settings';
 import {
   JALALI_MONTH_NAMES,
@@ -123,6 +125,10 @@ export interface StoreSnapshot {
   automation?: Record<string, AutomationSettings>;
   /** Every proposed action the engine produced — pending, approved or skipped. */
   automationActions?: AutomationActionRow[];
+  /** Human scorecards («کارت ارزیابی») written by interviewers. */
+  interviewFeedback?: InterviewFeedbackRow[];
+  /** Messages sent through the workspace's own SMS gateway. */
+  smsLog?: SmsLogRow[];
 }
 
 /** Encrypted connection material for one workspace. */
@@ -136,6 +142,15 @@ export interface OrgSecrets {
     fromName: string;
     fromAddress: string;
     replyTo: string | null;
+    lastTestAtISO: string | null;
+    lastTestOk: boolean | null;
+    lastError: string | null;
+  };
+  /** Iranian SMS gateway (Kavenegar / sms.ir) — the API key is encrypted. */
+  sms?: {
+    provider: 'kavenegar' | 'smsir';
+    apiKeyEnc: string;
+    sender: string;
     lastTestAtISO: string | null;
     lastTestOk: boolean | null;
     lastError: string | null;
@@ -174,6 +189,8 @@ export interface SourcingJobRef {
 export type SourcingSearchRecord = SourcingSearch & { orgId: string; providerJob?: SourcingJobRef | null };
 /** A proposal as stored: it belongs to exactly one workspace. */
 export type AutomationActionRow = AutomationProposal & { orgId: string };
+export type InterviewFeedbackRow = InterviewFeedback & { orgId: string };
+export type SmsLogRow = SentSms & { orgId: string };
 export type InterviewRecordRow = InterviewRecord & { orgId: string };
 export type SentEmailRow = SentEmail & { orgId: string };
 
@@ -183,6 +200,8 @@ const sentEmails = new Map<string, SentEmailRow>();
 const orgSecrets = new Map<string, OrgSecrets>();
 const automationSettings = new Map<string, AutomationSettings>();
 const automationActions = new Map<string, AutomationActionRow>();
+const interviewFeedback = new Map<string, InterviewFeedbackRow>();
+const smsLog = new Map<string, SmsLogRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -223,6 +242,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   for (const [k, v] of Object.entries(snap.orgSecrets || {})) orgSecrets.set(k, v);
   for (const [k, v] of Object.entries(snap.automation || {})) automationSettings.set(k, normalizeAutomationSettings(v));
   snap.automationActions?.forEach((x) => automationActions.set(x.id, x));
+  snap.interviewFeedback?.forEach((x) => interviewFeedback.set(x.id, x));
+  snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -246,6 +267,8 @@ function clearMemory() {
   orgSecrets.clear();
   automationSettings.clear();
   automationActions.clear();
+  interviewFeedback.clear();
+  smsLog.clear();
   activity = [];
   platformBlob = null;
   auditLog = [];
@@ -357,6 +380,8 @@ function snapshot(): StoreSnapshot {
     orgSecrets: Object.fromEntries(orgSecrets),
     automation: Object.fromEntries(automationSettings),
     automationActions: Array.from(automationActions.values()),
+    interviewFeedback: Array.from(interviewFeedback.values()),
+    smsLog: Array.from(smsLog.values()),
   };
 }
 
@@ -497,6 +522,38 @@ export function flushSaveSync() {
 
 // --------------------------------------------------------- normalization ----
 
+/**
+ * The board columns of an opening. Stored with the job so a workspace can rename
+ * them, but the `kind` is what the funnel and the automation read — renaming a
+ * column can never change a metric or a decision.
+ */
+export function sanitizeStages(raw: unknown): PipelineStage[] {
+  const clean: PipelineStage[] = [];
+  const seen = new Set<string>();
+  const kinds = new Set(['applied', 'screening', 'interview', 'offer', 'hired', 'rejected']);
+  for (const item of Array.isArray(raw) ? raw : []) {
+    const st = item as Partial<PipelineStage>;
+    const id = typeof st?.id === 'string' ? st.id.trim().slice(0, 40) : '';
+    const name = typeof st?.name === 'string' ? st.name.trim().slice(0, 40) : '';
+    const kind = typeof st?.kind === 'string' && kinds.has(st.kind) ? (st.kind as PipelineStage['kind']) : null;
+    if (!id || !name || !kind || seen.has(id)) continue;
+    seen.add(id);
+    clean.push({ id, name, kind });
+    if (clean.length >= 8) break;
+  }
+  // A board with one column is not a pipeline: fall back to the default.
+  return clean.length >= 2 ? clean : cloneStages(DEFAULT_STAGES);
+}
+
+function cloneStages(stages: PipelineStage[]): PipelineStage[] {
+  return stages.map((s) => ({ ...s }));
+}
+
+/** Columns of a job, with the defaults applied for older records. */
+export function stagesOf(job: Job | null | undefined): PipelineStage[] {
+  return job?.stages?.length ? job.stages : DEFAULT_STAGES;
+}
+
 function emptyStats(): JobStats {
   return {
     total: 0,
@@ -522,6 +579,8 @@ function normalizeOrg(o: OrgRecord): OrgRecord {
     demoExpiresAt: o.demoExpiresAt ?? null,
     suspended: Boolean(o.suspended),
     suspendedReason: o.suspendedReason ?? null,
+    careerSlug: (o.careerSlug || `org-${o.id.slice(-6)}`).toLowerCase(),
+    careerAbout: o.careerAbout ?? '',
   };
 }
 
@@ -536,6 +595,9 @@ function normalizeJob(j: Job): Job {
     criteriaSource: j.criteriaSource || 'ai',
     status: j.status || 'open',
     analysisStatus: j.analysisStatus || 'done',
+    isPublic: Boolean(j.isPublic),
+    publishedAtISO: j.publishedAtISO ?? null,
+    stages: sanitizeStages(j.stages),
     answers: j.answers || {},
     stats: j.stats || emptyStats(),
     updatedAtISO: j.updatedAtISO || j.createdAtISO,
@@ -560,6 +622,7 @@ function normalizeResume(r: ResumeRecord): ResumeRecord {
     deepFindings: r.deepFindings ?? null,
     fileHash: r.fileHash ?? null,
     source: r.source ?? null,
+    stageId: r.stageId ?? stagesOf(jobs.get(r.jobId))[0]?.id ?? DEFAULT_STAGES[0].id,
     novelty: r.novelty === 'new' || r.novelty === 'duplicate' || r.novelty === 'unknown' ? r.novelty : 'unknown',
     duplicateOf: r.duplicateOf ?? null,
     analysisHistory: Array.isArray(r.analysisHistory) ? r.analysisHistory : [],
@@ -668,6 +731,21 @@ export function getOrg(id: string | null | undefined): OrgRecord | null {
   return (id && orgs.get(id)) || null;
 }
 
+/** Public career portal lookup: the slug in the URL, never the internal id. */
+export function findOrgByCareerSlug(slug: string): OrgRecord | null {
+  const wanted = String(slug || '').trim().toLowerCase();
+  if (!wanted) return null;
+  for (const o of orgs.values()) if (o.careerSlug === wanted) return o;
+  return null;
+}
+
+/** True when another workspace already uses this slug. */
+export function careerSlugTaken(slug: string, exceptOrgId: string): boolean {
+  const wanted = String(slug || '').trim().toLowerCase();
+  for (const o of orgs.values()) if (o.careerSlug === wanted && o.id !== exceptOrgId) return true;
+  return false;
+}
+
 export function createOrg(input: { name: string; isDemo?: boolean; demoExpiresAt?: string | null; ownerEmail?: string }): OrgRecord {
   const org: OrgRecord = {
     id: uid('org'),
@@ -676,6 +754,8 @@ export function createOrg(input: { name: string; isDemo?: boolean; demoExpiresAt
     messageSignature: `با احترام\nواحد منابع انسانی ${input.name.trim().slice(0, 80)}`,
     isDemo: Boolean(input.isDemo),
     demoExpiresAt: input.demoExpiresAt ?? null,
+    careerSlug: `org-${Math.random().toString(36).slice(2, 8)}`,
+    careerAbout: '',
     createdAtISO: new Date().toISOString(),
   };
   orgs.set(org.id, org);
@@ -729,12 +809,17 @@ function claimLegacyDataOnStartup() {
   );
 }
 
-export function updateOrg(id: string, patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments'>>): OrgRecord | null {
+export function updateOrg(
+  id: string,
+  patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout'>>
+): OrgRecord | null {
   const org = orgs.get(id);
   if (!org) return null;
   if (typeof patch.name === 'string' && patch.name.trim()) org.name = patch.name.trim().slice(0, 80);
   if (typeof patch.messageSignature === 'string') org.messageSignature = patch.messageSignature.slice(0, 400);
   if (Array.isArray(patch.departments)) org.departments = patch.departments;
+  if (typeof patch.careerSlug === 'string') org.careerSlug = patch.careerSlug;
+  if (typeof patch.careerAbout === 'string') org.careerAbout = patch.careerAbout.slice(0, 1200);
   scheduleSave();
   return org;
 }
@@ -748,6 +833,8 @@ export function deleteOrg(id: string) {
   for (const [k, v] of sourcingSearches) if (v.orgId === id) sourcingSearches.delete(k);
   for (const [k, v] of interviews) if (v.orgId === id) interviews.delete(k);
   for (const [k, v] of sentEmails) if (v.orgId === id) sentEmails.delete(k);
+  for (const [k, v] of interviewFeedback) if (v.orgId === id) interviewFeedback.delete(k);
+  for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   orgSecrets.delete(id);
   orgs.delete(id);
   deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`);
@@ -986,6 +1073,9 @@ export function createJob(
     criteriaSource: input.criteriaSource,
     status: 'open',
     analysisStatus: 'idle',
+    isPublic: false,
+    publishedAtISO: null,
+    stages: cloneStages(DEFAULT_STAGES),
     stats: emptyStats(),
     createdAtJalali: stamp.jalali,
     createdAtISO: stamp.iso,
@@ -999,7 +1089,12 @@ export function createJob(
 export function updateJob(
   orgId: string,
   id: string,
-  patch: Partial<Pick<Job, 'roleTitle' | 'extraNotes' | 'location' | 'employmentType' | 'status' | 'analysisStatus'>>
+  patch: Partial<
+    Pick<
+      Job,
+      'roleTitle' | 'extraNotes' | 'location' | 'employmentType' | 'status' | 'analysisStatus' | 'isPublic' | 'publishedAtISO' | 'stages'
+    >
+  >
 ): Job | null {
   const j = getJob(orgId, id);
   if (!j) return null;
@@ -1009,6 +1104,25 @@ export function updateJob(
   if (patch.employmentType !== undefined) j.employmentType = patch.employmentType as EmploymentType | null;
   if (patch.status && ['open', 'paused', 'closed'].includes(patch.status)) j.status = patch.status;
   if (patch.analysisStatus) j.analysisStatus = patch.analysisStatus;
+  if (patch.isPublic !== undefined) {
+    j.isPublic = Boolean(patch.isPublic) && j.status === 'open';
+    if (j.isPublic && !j.publishedAtISO) j.publishedAtISO = new Date().toISOString();
+  }
+  if (patch.stages !== undefined) {
+    const next = sanitizeStages(patch.stages);
+    if (next.length !== stagesOf(j).length) {
+      // Candidates stay in a column that still exists; orphans fall to the first.
+      const ids = new Set(next.map((x) => x.id));
+      for (const r of resumes.values()) if (r.jobId === j.id && !ids.has(r.stageId || '')) r.stageId = next[0].id;
+    } else {
+      const before = stagesOf(j);
+      const renames = new Map(next.map((x) => [x.id, x]));
+      // A changed id would orphan candidates, so ids are kept stable by the route.
+      for (const r of resumes.values()) if (r.jobId === j.id && !renames.has(r.stageId || '')) r.stageId = next[0].id;
+      void before;
+    }
+    j.stages = next;
+  }
   j.updatedAtISO = new Date().toISOString();
   if (typeof patch.roleTitle === 'string') {
     for (const r of resumes.values()) if (r.jobId === j.id) r.roleTitle = j.roleTitle;
@@ -1209,6 +1323,7 @@ export async function saveEvaluation(input: {
     analysisHistory: ev
       ? [{ score: ev.score, atJalali: stamp.jalali, atISO: stamp.iso, reason: 'initial', engine: ev.engine }]
       : [],
+    stageId: stagesOf(job)[0]?.id ?? DEFAULT_STAGES[0].id,
     inBank: false,
     bankDepartmentId: null,
     bankNote: null,
@@ -1330,6 +1445,7 @@ export async function attachResumeFile(rec: ResumeRecord, fileName: string, base
 export function deleteResume(rec: ResumeRecord) {
   deleteFileQuietly(rec.filePath);
   resumes.delete(rec.id);
+  for (const [k, v] of interviewFeedback) if (v.resumeId === rec.id) interviewFeedback.delete(k);
   // The original may itself have been a duplicate, so the whole scope is rebuilt.
   refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
@@ -1482,6 +1598,18 @@ export function deleteInterview(orgId: string, id: string): boolean {
   return true;
 }
 
+export function listSms(orgId: string, resumeId?: string): SmsLogRow[] {
+  return Array.from(smsLog.values())
+    .filter((x) => x.orgId === orgId && (!resumeId || x.resumeId === resumeId))
+    .sort((a, b) => b.sentAtISO.localeCompare(a.sentAtISO));
+}
+
+export function saveSms(record: SmsLogRow): SmsLogRow {
+  smsLog.set(record.id, record);
+  scheduleSave();
+  return record;
+}
+
 export function listEmails(orgId: string, resumeId?: string): SentEmailRow[] {
   return Array.from(sentEmails.values())
     .filter((x) => x.orgId === orgId && (!resumeId || x.resumeId === resumeId))
@@ -1559,6 +1687,61 @@ export function listOrgResumes(orgId: string, jobId?: string): ResumeRecord[] {
   return orgResumes(orgId)
     .filter((r) => (jobId ? r.jobId === jobId : true))
     .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+// ------------------------------------------------ «تختهٔ جذب» و ارزیابی ----
+
+/** Moves a candidate to another column of its job's board. */
+export function setStage(rec: ResumeRecord, stageId: string): ResumeRecord {
+  rec.stageId = stageId;
+  rec.updatedAtISO = new Date().toISOString();
+  scheduleSave();
+  return rec;
+}
+
+/** Everything the kanban board needs for one opening, in one read. */
+export function jobBoard(orgId: string, jobId: string): PipelineBoard | null {
+  const job = getJob(orgId, jobId);
+  if (!job) return null;
+  const stages = stagesOf(job);
+  const cards = resumesOfJob(job.id)
+    .sort((a, b) => b.score - a.score)
+    .map((r) => ({
+      id: r.id,
+      name: r.candidateName || r.fileName,
+      score: r.score,
+      category: r.category,
+      decisionStatus: r.decisionStatus,
+      novelty: r.novelty || 'unknown',
+      stageId: r.stageId || stages[0].id,
+      hasEmail: Boolean(r.contact?.email),
+      engine: r.engine,
+      createdAtISO: r.createdAtISO,
+    }));
+  return {
+    jobId: job.id,
+    stages,
+    columns: stages.map((stage) => ({ stage, cards: cards.filter((c) => c.stageId === stage.id) })),
+    total: cards.length,
+  };
+}
+
+export function listFeedback(orgId: string, filter: { resumeId?: string; interviewId?: string } = {}): InterviewFeedbackRow[] {
+  return Array.from(interviewFeedback.values())
+    .filter((f) => f.orgId === orgId)
+    .filter((f) => (filter.resumeId ? f.resumeId === filter.resumeId : true))
+    .filter((f) => (filter.interviewId ? f.interviewId === filter.interviewId : true))
+    .sort((a, b) => b.atISO.localeCompare(a.atISO));
+}
+
+export function saveFeedback(row: InterviewFeedbackRow): InterviewFeedbackRow {
+  // One reviewer has one current opinion per candidate: saving replaces it.
+  for (const [k, v] of interviewFeedback) {
+    if (v.orgId === row.orgId && v.resumeId === row.resumeId && v.reviewerId === row.reviewerId) interviewFeedback.delete(k);
+  }
+  interviewFeedback.set(row.id, row);
+  scheduleSave();
+  return row;
 }
 
 /** Deleting a workspace takes its automation history with it. */
@@ -2218,6 +2401,10 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     automationActions: Array.isArray(raw.automationActions)
       ? raw.automationActions.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.resumeId))
       : [],
+    interviewFeedback: Array.isArray(raw.interviewFeedback)
+      ? raw.interviewFeedback.filter((f: any) => f && isStr(f.id) && isStr(f.orgId) && isStr(f.resumeId))
+      : [],
+    smsLog: Array.isArray(raw.smsLog) ? raw.smsLog.filter((x: any) => x && isStr(x.id) && isStr(x.orgId)) : [],
     aiStats: undefined,
   };
 }

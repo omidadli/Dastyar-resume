@@ -31,6 +31,8 @@ import type {
   TeamMember,
   UserPublic,
 } from '../types/app';
+import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PublicCareersPage, PublicJobDetail } from '../types/careers';
+import type { InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
 import type {
   AutomationOverview,
   AutomationPreviewItem,
@@ -41,6 +43,8 @@ import type {
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
+  SentSms,
+  SmsSettingsPublic,
   IntegrationsStatus,
   InterviewRecord,
   SentEmail,
@@ -282,6 +286,7 @@ export const api = {
     test: () => post<{ ok: boolean; latencyMs: number; error: string | null; status: AiStatus }>('/api/ai/test', {}, { timeoutMs: 45_000 }),
   },
   jobs: {
+    board: (id: string) => get<PipelineBoard>(`/api/jobs/${id}/board`),
     list: (p: { status?: string; q?: string } = {}) =>
       get<{ items: JobSummary[]; counts: { all: number; open: number; paused: number; closed: number } }>(`/api/jobs${qs(p)}`),
     understand: (b: JobInput, opts?: RequestOptions) =>
@@ -304,6 +309,18 @@ export const api = {
       }),
     calibrate: (id: string, count: number, opts?: RequestOptions) =>
       post<{ job: Job; adjusted: number }>(`/api/jobs/${id}/calibrate`, { count }, { timeoutMs: 60_000, ...opts }),
+  },
+  careers: {
+    /** Public: the workspace's published openings (no session needed). */
+    page: (slug: string) => get<PublicCareersPage>(`/api/careers/${encodeURIComponent(slug)}`),
+    job: (slug: string, jobId: string) =>
+      get<{ job: PublicJobDetail; org: { name: string; about: string } }>(`/api/careers/${encodeURIComponent(slug)}/jobs/${encodeURIComponent(jobId)}`),
+    apply: (slug: string, jobId: string, b: CareerApplicationInput) =>
+      post<CareerApplicationResult>(`/api/careers/${encodeURIComponent(slug)}/jobs/${encodeURIComponent(jobId)}/apply`, b, { timeoutMs: 120_000 }),
+    settings: () => get<{ careers: CareerSettings }>('/api/careers/settings'),
+    saveSettings: (b: { slug: string; about: string }) => put<{ careers: CareerSettings }>('/api/careers/settings', b),
+    publish: (jobId: string, isPublic: boolean) =>
+      post<{ job: JobSummary }>(`/api/jobs/${encodeURIComponent(jobId)}/publish`, { isPublic }),
   },
   resumes: {
     list: (q: ResumeQuery, opts?: RequestOptions) =>
@@ -342,6 +359,16 @@ export const api = {
     attachFile: (id: string, fileName: string, fileBase64: string) =>
       post<{ ok: boolean }>(`/api/resumes/${id}/file`, { fileName, fileBase64 }, { timeoutMs: 150_000 }),
     fileUrl: (id: string, inline: boolean) => get<FileUrlInfo>(`/api/resumes/${id}/file-url${inline ? '?inline=1' : ''}`),
+    /** «تختهٔ جذب» — move a candidate to another column. */
+    stage: (id: string, stageId: string) =>
+      post<{ record: ResumeListItem; stage: PipelineStage }>(`/api/resumes/${id}/stage`, { stageId }),
+    feedback: (id: string) => get<{ summary: ScorecardSummary; mine: InterviewFeedback | null }>(`/api/resumes/${id}/feedback`),
+    saveFeedback: (id: string, b: {
+      interviewId?: string | null;
+      recommendation: InterviewFeedback['recommendation'];
+      criteria: Array<{ criterionId: string; score: number; note: string }>;
+      notes: string;
+    }) => post<{ summary: ScorecardSummary; mine: InterviewFeedback }>(`/api/resumes/${id}/feedback`, b),
   },
   messages: {
     draft: (resumeId: string, kind: MessageKind, opts?: RequestOptions) =>
@@ -366,6 +393,13 @@ export const api = {
     emails: (resumeId?: string) => get<{ items: SentEmail[] }>(`/api/integrations/emails${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
     calendarConnectUrl: () => get<{ url: string; redirectUri: string }>('/api/integrations/calendar/connect-url'),
     disconnectCalendar: () => del<{ calendar: CalendarStatusPublic }>('/api/integrations/calendar'),
+    saveSms: (b: { provider: 'kavenegar' | 'smsir'; apiKey?: string; sender: string }) =>
+      put<{ sms: SmsSettingsPublic }>('/api/integrations/sms', b, { timeoutMs: 45_000 }),
+    disconnectSms: () => del<{ sms: SmsSettingsPublic }>('/api/integrations/sms'),
+    testSms: () => post<{ ok: boolean; error: string | null }>('/api/integrations/sms/test', {}, { timeoutMs: 45_000 }),
+    sendSms: (b: { resumeId?: string | null; to?: string; text: string }) =>
+      post<{ sms: SentSms }>('/api/integrations/sms/send', b, { timeoutMs: 60_000 }),
+    smsLog: (resumeId?: string) => get<{ items: SentSms[] }>(`/api/integrations/sms${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
   },
   interviews: {
     list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: InterviewRecord[] }>(`/api/interviews${qs(p)}`),

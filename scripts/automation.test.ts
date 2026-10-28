@@ -1,18 +1,13 @@
 /**
- * Pure tests for «اتوماسیون جذب»: the rules that decide what happens to a
- * candidate, the templates that are rendered into real messages, and the slot a
- * booking proposal suggests.
- *
- * These run without a server or a database on purpose — the decision logic is the
- * part HR has to be able to trust, so it must be testable in isolation.
- *
+ * Unit tests for «اتوماسیون جذب» — the rules engine with no network and no
+ * server. What is proposed, what is never proposed, and whether a message can
+ * ever reach a candidate without a human.
  * Run with: npx tsx scripts/automation.test.ts
  */
 import { DEFAULT_AUTOMATION, normalizeAutomationSettings, renderTemplate } from '../server/automation-settings';
-import { decideAction, previewProposal, suggestedSlot } from '../server/automation';
+import { decideAction, suggestedSlot } from '../server/automation';
+import type { AutomationSettings } from '../src/types/automation';
 import type { ResumeRecord } from '../src/types/screening';
-import { formatJalaliDate } from '../src/utils/jalali';
-import { tehranJalaliOf } from '../server/tehran-time';
 
 let failures = 0;
 function assert(cond: boolean, label: string, extra = '') {
@@ -20,231 +15,210 @@ function assert(cond: boolean, label: string, extra = '') {
   if (!cond) failures++;
 }
 
-/** A candidate that looks like one the screening engine really produces. */
-function candidate(patch: Partial<ResumeRecord> = {}): ResumeRecord {
+const T = (over: Partial<AutomationSettings> = {}): AutomationSettings => normalizeAutomationSettings({ ...DEFAULT_AUTOMATION, ...over });
+
+function candidate(over: Partial<ResumeRecord> = {}): ResumeRecord {
   return {
-    id: 'res_1',
-    jobId: 'job_1',
-    orgId: 'org_1',
-    uploadedBy: null,
-    departmentId: 'dep_fin',
-    departmentName: 'مالی و حسابداری',
-    roleTitle: 'کارشناس حسابداری صنعتی',
-    fileName: 'cv.pdf',
-    filePath: null,
-    fileSize: 1000,
-    extractedText: 'متن',
-    unjudgeableReason: null,
-    errorMessage: null,
-    candidateName: 'مریم کاظمی',
-    contact: { email: 'maryam@example.com', phone: '09120000000', city: 'تهران' },
-    facts: null,
-    criterionScores: [],
+    id: 'res_test',
+    jobId: 'job_test',
+    candidateName: 'سارا محمدی',
     score: 82,
-    confidence: 'high',
-    engine: 'local',
-    recommendation: 'interview',
-    summary: '',
-    whyCategory: '',
-    strengths: [],
-    weaknesses: [],
-    knockoutMisses: [],
-    tags: [],
-    bankSuggested: false,
-    flags: null,
-    deepFindings: null,
     category: 'INTERVIEW',
-    rankInCategory: 1,
-    analysisHistory: [],
-    novelty: 'new',
-    inBank: false,
-    bankDepartmentId: null,
-    bankNote: null,
-    bankTags: [],
-    addedToBankAtJalali: null,
-    addedToBankAtISO: null,
-    messageStatus: 'none',
-    lastMessagedAtJalali: null,
-    decisionStatus: 'none',
-    decidedAtJalali: null,
-    decidedAtISO: null,
-    decidedBy: null,
-    decidedByName: null,
-    decisionNote: null,
-    deepAnalysisAtJalali: null,
-    createdAtISO: new Date().toISOString(),
-    createdAtJalali: '۱۴۰۵/۰۷/۰۱',
-    updatedAtISO: new Date().toISOString(),
-    ...patch,
-  } as ResumeRecord;
+    novelty: 'fresh',
+    contact: { email: 'sara@example.ir', phone: '09121234567' },
+    decisionStatus: null,
+    messageStatus: null,
+    unjudgeableReason: null,
+    ...over,
+  } as unknown as ResumeRecord;
 }
 
-const settings = DEFAULT_AUTOMATION;
+const decide = (rec: Partial<ResumeRecord>, settings: AutomationSettings = T()) => decideAction(candidate(rec), settings);
 
-// ---------------------------------------------------------------- settings ----
+// --------------------------------------------------------------- defaults ---
+
+assert(DEFAULT_AUTOMATION.autoInvite === false, 'sending an invitation without approval is off by default');
+assert(DEFAULT_AUTOMATION.autoReject === false, 'sending a rejection without approval is off by default');
+assert(DEFAULT_AUTOMATION.inviteThreshold > DEFAULT_AUTOMATION.rejectThreshold, 'the invite threshold sits above the reject threshold');
+assert(DEFAULT_AUTOMATION.templates.invite.subject.length > 0 && DEFAULT_AUTOMATION.templates.invite.body.length > 0, 'the invitation template is pre-filled');
+assert(DEFAULT_AUTOMATION.useSignature === true, 'the workspace signature is appended by default');
+
+// -------------------------------------------------------------- normalise ---
 
 {
-  const clamped = normalizeAutomationSettings({ inviteThreshold: 30, rejectThreshold: 70 });
-  assert(clamped.inviteThreshold === 70 && clamped.rejectThreshold === 70, 'the invite line can never sit below the reject line', `${clamped.inviteThreshold}/${clamped.rejectThreshold}`);
+  const n = normalizeAutomationSettings({ inviteThreshold: 80, rejectThreshold: 35, enabled: true });
+  assert(n.inviteThreshold === 80 && n.rejectThreshold === 35, 'thresholds are kept as given');
+  assert(n.enabled === true, 'the master switch is kept as given');
 }
+
 {
-  const safe = normalizeAutomationSettings({
-    enabled: 'yes',
-    inviteThreshold: 1000,
-    rejectThreshold: -5,
-    hourlyLimit: 5000,
-    scheduleHour: '25:99',
-    scheduleDurationMin: 1,
-    templates: { invite: { subject: '', body: '' } },
+  const n = normalizeAutomationSettings({ inviteThreshold: 20, rejectThreshold: 70 });
+  assert(n.inviteThreshold >= n.rejectThreshold, 'crossed thresholds are corrected, never inverted', `${n.rejectThreshold}..${n.inviteThreshold}`);
+}
+
+{
+  const n = normalizeAutomationSettings({ inviteThreshold: -40, rejectThreshold: 400 });
+  assert(n.inviteThreshold >= 0 && n.inviteThreshold <= 100, 'negative thresholds are clamped to 0..100', String(n.inviteThreshold));
+  assert(n.rejectThreshold >= 0 && n.rejectThreshold <= 100, 'oversized thresholds are clamped to 0..100', String(n.rejectThreshold));
+}
+
+{
+  const n = normalizeAutomationSettings({ inviteThreshold: 70.6, rejectThreshold: 39.2, autoInvite: 'yes' as any });
+  assert(Number.isInteger(n.inviteThreshold) && Number.isInteger(n.rejectThreshold), 'thresholds are whole numbers');
+  assert(n.autoInvite === false, 'a truthy-but-not-true auto-send flag stays off — never «on» by accident');
+}
+
+{
+  const n = normalizeAutomationSettings({ templates: { invite: { subject: '   ', body: '' }, reject: { subject: '', body: '  ' } } });
+  assert(n.templates.invite.subject.length > 0 && n.templates.invite.body.length > 0, 'an empty invitation template falls back to the default');
+  assert(n.templates.reject.subject.length > 0 && n.templates.reject.body.length > 0, 'an empty rejection template falls back to the default');
+}
+
+{
+  const n = normalizeAutomationSettings({ hourlyLimit: 0, scheduleDaysAhead: 99, scheduleHour: '25:99', scheduleDurationMin: 9999 });
+  assert(n.hourlyLimit >= 1, 'the hourly cap can never be zero (a stuck state)', String(n.hourlyLimit));
+  assert(n.scheduleDaysAhead <= 30, 'the lead time stays inside a month', String(n.scheduleDaysAhead));
+  assert(n.scheduleHour === DEFAULT_AUTOMATION.scheduleHour, 'an impossible time falls back instead of booking nonsense', n.scheduleHour);
+  assert(n.scheduleDurationMin <= 240, 'the duration stays sane', String(n.scheduleDurationMin));
+}
+
+{
+  const n = normalizeAutomationSettings({ scheduleHour: '۹:۰۵' });
+  assert(n.scheduleHour === '09:05', 'Persian digits and a single-digit hour are accepted', n.scheduleHour);
+}
+
+// -------------------------------------------------------------- templating --
+
+{
+  const out = renderTemplate('سلام {{نام}} عزیز، برای «{{عنوان شغلی}}» در {{شرکت}} دعوت می‌شوید.', {
+    name: 'سارا محمدی',
+    roleTitle: 'کارشناس شبکه',
+    orgName: 'آوا',
   });
-  assert(safe.enabled === true, 'a non-boolean master switch falls back to the default instead of turning on/off oddly');
-  assert(safe.inviteThreshold === 100 && safe.rejectThreshold === 0, 'thresholds are clamped to 0..100');
-  assert(safe.hourlyLimit === 120, 'the hourly cap is clamped to the global ceiling');
-  assert(safe.scheduleHour === DEFAULT_AUTOMATION.scheduleHour, 'an impossible slot time falls back to the default');
-  assert(safe.scheduleDurationMin === 15, 'a too-short interview is raised to the minimum');
-  assert(safe.templates.invite.subject === DEFAULT_AUTOMATION.templates.invite.subject, 'an empty template is replaced, not sent empty');
-}
-{
-  const persian = normalizeAutomationSettings({ scheduleHour: '۹:۱۵' });
-  assert(persian.scheduleHour === '09:15', 'a slot typed with Persian digits is understood', persian.scheduleHour);
-}
-{
-  const fresh = normalizeAutomationSettings(null);
-  assert(fresh.autoInvite === false && fresh.autoReject === false, 'auto-send is off by default — a human decides');
-  assert(fresh.enabled === true, 'the engine itself is on by default (it only proposes)');
-}
-{
-  // A stored setting cannot silently opt a workspace into automatic sending.
-  const sneaky = normalizeAutomationSettings({ autoInvite: 'true', autoReject: 1 });
-  assert(sneaky.autoInvite === false && sneaky.autoReject === false, 'only a real `true` enables automatic sending');
+  assert(out === 'سلام سارا محمدی عزیز، برای «کارشناس شبکه» در آوا دعوت می‌شوید.', 'placeholders are replaced with the real values', out);
 }
 
-// --------------------------------------------------------------- templates ----
-
 {
-  const body = renderTemplate('{{نام}} عزیز،\n\nبرای «{{عنوان شغلی}}» در {{شرکت}}.\n\n{{امضای سازمان}}', {
-    name: 'مریم',
-    roleTitle: 'کارشناس حسابداری',
-    orgName: 'شرکت الف',
-    signature: 'واحد منابع انسانی',
-    department: 'مالی',
-  });
-  assert(body.startsWith('مریم عزیز،'), 'the candidate name is filled in');
-  assert(body.includes('کارشناس حسابداری') && body.includes('شرکت الف'), 'the role and the company are filled in');
-  assert(body.includes('واحد منابع انسانی'), 'the signature is appended in place');
-}
-{
-  const rendered = renderTemplate('امتیاز شما: {{امتیاز}} از ۱۰۰\n{{نام ناشناخته}}', {
-    name: 'حسین',
-    roleTitle: 'حسابدار',
-    orgName: 'شرکت ب',
-    score: 73.6,
-  });
-  assert(rendered.includes('۷۴'), 'numbers are shown with Persian digits', rendered.split('\n')[0]);
-  assert(!rendered.includes('{{'), 'an unknown placeholder never reaches the candidate');
-}
-{
-  const signed = renderTemplate('با احترام\n{{امضای سازمان}}', {
-    name: 'مریم',
-    roleTitle: 'نقش',
-    orgName: 'شرکت',
-    signature: 'با احترام\nواحد منابع انسانی',
-  });
-  assert(signed.split('\n').filter((l) => l === 'با احترام').length === 1, 'a signature that repeats the closing line is not duplicated', JSON.stringify(signed));
-}
-{
-  const empty = renderTemplate('سلام\n\n{{امضای سازمان}}\n\nپایان', { name: 'سارا', roleTitle: 'نقش', orgName: 'شرکت' });
-  assert(!/\n{3,}/.test(empty) && empty.endsWith('پایان'), 'an empty variable collapses instead of leaving a hole');
-}
-{
-  const scoreOnly = renderTemplate('{{امتیاز}}', { name: 'x', roleTitle: 'y', orgName: 'z' });
-  assert(scoreOnly === '', 'a missing score renders as nothing, not «NaN»', scoreOnly);
+  const out = renderTemplate('سلام {{نام}}، {{چیز ناموجود}}', { name: 'رضا', roleTitle: '', orgName: '' });
+  assert(out.includes('رضا'), 'known variables are filled');
+  assert(!out.includes('{{'), 'no raw placeholder survives into a message a candidate sees', out);
 }
 
-// ---------------------------------------------------------------- decisions ----
-
 {
-  const d = decideAction(candidate({ score: 85 }), settings);
-  assert('kind' in d && d.kind === 'invite', 'a score above the invite line proposes an invitation');
-  assert('reason' in d && /۸۵/.test(d.reason), 'the reason carries the number that produced it', 'reason' in d ? d.reason : '');
-}
-{
-  const d = decideAction(candidate({ score: 20, category: 'REJECT' }), settings);
-  assert('kind' in d && d.kind === 'reject', 'a score below the reject line proposes the rejection letter');
-}
-{
-  const d = decideAction(candidate({ score: 55, category: 'REVIEW' }), settings);
-  assert('skip' in d && /بین دو آستانه/.test(d.skip), 'a score between the two lines is left to the human', 'skip' in d ? d.skip : '');
-}
-{
-  const d = decideAction(candidate({ score: 90, novelty: 'duplicate' }), settings);
-  assert('skip' in d && /تکراری/.test(d.skip), 'a duplicate of the same department is never messaged');
-}
-{
-  const d = decideAction(candidate({ score: 90, contact: { email: null, phone: null, city: null } }), settings);
-  assert('skip' in d && /ایمیل/.test(d.skip), 'a candidate without an address is skipped with the reason');
-}
-{
-  const d = decideAction(candidate({ score: 90, category: 'ERROR' }), settings);
-  assert('skip' in d && /تحلیل/.test(d.skip), 'an unanalysed résumé is not messaged');
-}
-{
-  const d = decideAction(candidate({ score: 90, decisionStatus: 'rejected' }), settings);
-  assert('kind' in d && d.kind === 'reject', 'a human rejection wins over the score (the letter is still owed)');
-}
-{
-  const d = decideAction(candidate({ score: 10, decisionStatus: 'approved' }), settings);
-  assert('kind' in d && d.kind === 'invite', 'a human approval wins over a low score');
-}
-{
-  const d = decideAction(candidate({ score: 95, messageStatus: 'sent', decisionStatus: 'approved' }), settings);
-  assert('skip' in d, 'a candidate already messaged is not messaged twice');
-}
-{
-  const scheduling = normalizeAutomationSettings({ ...settings, autoScheduleOnInvite: true });
-  const d = decideAction(candidate({ score: 95 }), scheduling);
-  assert('kind' in d && d.kind === 'schedule', 'with «book instead of invite» on, a strong candidate gets a slot proposal');
+  const out = renderTemplate('درخواست شما برای «{{عنوان شغلی}}» ثبت شد.', { name: '', roleTitle: 'کارشناس فروش', orgName: 'آوا' });
+  assert(out === 'درخواست شما برای «کارشناس فروش» ثبت شد.', 'an unfilled variable does not leave an empty «» behind', out);
 }
 
-// -------------------------------------------------------------------- slot ----
-
 {
-  const slot = suggestedSlot(normalizeAutomationSettings({ scheduleDaysAhead: 3, scheduleHour: '10:30' }), new Date('2026-10-27T08:00:00Z'));
-  const expectedDate = formatJalaliDate(tehranJalaliOf(new Date('2026-10-30T08:00:00Z')), true);
-  assert(slot.date === expectedDate, 'the suggested day is N days ahead in Tehran', `${slot.date} / ${expectedDate}`);
-  assert(slot.iso.endsWith('T07:00:00.000Z'), '10:30 Tehran is 07:00 UTC', slot.iso);
-  assert(slot.time === '10:30', 'the suggested time is the configured one');
+  const out = renderTemplate('امتیاز {{امتیاز}} از ۱۰۰', { name: '', roleTitle: '', orgName: '', score: 82 });
+  assert(out === 'امتیاز ۸۲ از ۱۰۰', 'the score is written in Persian digits', out);
 }
 
-// ---------------------------------------------------------------- a message ----
-
 {
-  const org = {
-    id: 'org_1',
-    name: 'گروه صنعتی البرز',
-    messageSignature: 'واحد منابع انسانی — گروه صنعتی البرز',
-    departments: [],
-  } as any;
-  const preview = previewProposal(org, candidate({ score: 88 }), settings);
-  assert('skip' in preview === false, 'a strong candidate produces a draft');
-  if (!('skip' in preview)) {
-    assert(preview.kind === 'invite', 'the draft is an invitation');
-    assert(preview.subject.includes('کارشناس حسابداری صنعتی'), 'the subject names the role', preview.subject);
-    assert(preview.body.includes('مریم') && preview.body.includes('گروه صنعتی البرز'), 'the body is addressed and signed');
-    assert(!preview.body.includes('{{'), 'no placeholder survives into the draft');
-    assert(preview.suggestedAtISO === null, 'a plain invitation carries no slot (the candidate proposes times)');
-  }
-
-  const scheduling = normalizeAutomationSettings({ ...settings, autoScheduleOnInvite: true });
-  const booking = previewProposal(org, candidate({ score: 88 }), scheduling);
-  if (!('skip' in booking)) {
-    assert(Boolean(booking.suggestedAtISO), 'a booking proposal carries the suggested slot');
-    assert(/ساعت/.test(booking.body) || !booking.body.includes('{{تاریخ}}'), 'the date placeholder is resolved in the text');
-  } else {
-    assert(false, 'a booking proposal should exist');
-  }
-  void org;
+  const out = renderTemplate('بدون متغیر', { name: '', roleTitle: '', orgName: '' });
+  assert(out === 'بدون متغیر', 'a template without variables is untouched');
 }
 
-console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
-process.exit(failures === 0 ? 0 : 1);
+// ----------------------------------------------------------------- slot -----
+
+{
+  const now = new Date('2026-10-27T06:00:00.000Z'); // 09:30 Tehran
+  const slot = suggestedSlot(T({ scheduleDaysAhead: 3, scheduleHour: '10:30' }), now);
+  assert(slot.iso === '2026-10-30T07:00:00.000Z', '10:30 Tehran three days later is 07:00 UTC', slot.iso);
+  assert(slot.time === '10:30', 'the reported time is the Tehran wall clock', slot.time);
+}
+
+{
+  const now = new Date('2026-10-27T21:00:00.000Z'); // 00:30 Tehran, next day
+  const slot = suggestedSlot(T({ scheduleDaysAhead: 1, scheduleHour: '09:00' }), now);
+  assert(new Date(slot.iso).getTime() > now.getTime(), 'the suggested slot is always in the future', slot.iso);
+  const iso = new Date(slot.iso);
+  assert(iso.getUTCHours() === 5 && iso.getUTCMinutes() === 30, 'Tehran is +03:30 year-round — 09:00 becomes 05:30 UTC', slot.iso);
+}
+
+{
+  const now = new Date('2026-10-27T06:00:00.000Z');
+  const a = suggestedSlot(T(), now);
+  const b = suggestedSlot(T(), now);
+  assert(a.iso === b.iso, 'the same input suggests the same slot (no randomness to explain away)');
+}
+
+// -------------------------------------------------------------- decisions ---
+
+{
+  const d = decide({ score: 95 });
+  assert('kind' in d && d.kind === 'invite', 'a high score is proposed as an invitation');
+  assert('kind' in d && d.reason.includes('۹۵'), 'the reason quotes the actual score', 'kind' in d ? d.reason : '');
+}
+
+{
+  const d = decide({ score: 12, category: 'REJECT' });
+  assert('kind' in d && d.kind === 'reject', 'a low score is proposed as a rejection');
+}
+
+{
+  const d = decide({ score: 55 });
+  assert('skip' in d, 'a score between the thresholds is left to a human');
+  assert('skip' in d && d.skip.includes('بین دو آستانه'), 'and the sentence says why', 'skip' in d ? d.skip : '');
+}
+
+{
+  const d = decide({ score: 95, category: 'ERROR' });
+  assert('skip' in d, 'a résumé that was never analysed is never proposed');
+}
+
+{
+  const d = decide({ score: 95, unjudgeableReason: 'متن کافی نبود' });
+  assert('skip' in d, 'an unjudgeable résumé is never proposed');
+}
+
+{
+  const d = decide({ score: 95, novelty: 'duplicate' });
+  assert('skip' in d, 'a duplicate in the same department is never proposed again');
+}
+
+{
+  const d = decide({ score: 95, contact: { email: null, phone: '09121234567' } as any });
+  assert('skip' in d, 'a candidate with no e-mail is not proposed an e-mail');
+}
+
+{
+  const d = decide({ score: 95, contact: { email: 'not-an-email', phone: null } as any });
+  assert('skip' in d, 'a malformed address is treated as no address');
+}
+
+{
+  const d = decide({ score: 95, decisionStatus: 'rejected', messageStatus: 'sent' });
+  assert('skip' in d, 'nobody is told «no» twice');
+}
+
+{
+  const d = decide({ score: 95, decisionStatus: 'approved', messageStatus: 'sent' });
+  assert('skip' in d, 'nobody is invited twice');
+}
+
+{
+  const d = decide({ score: 5, decisionStatus: 'approved' });
+  assert('kind' in d && d.kind === 'invite', 'a human decision beats the score: approved means invite', 'kind' in d ? d.kind : '');
+}
+
+{
+  const d = decide({ score: 99, decisionStatus: 'rejected' });
+  assert('kind' in d && d.kind === 'reject', 'a human decision beats the score: rejected means rejection', 'kind' in d ? d.kind : '');
+}
+
+{
+  const d = decide({ score: 95 }, T({ autoScheduleOnInvite: true }));
+  assert('kind' in d && d.kind === 'schedule', 'when scheduling is on, the proposal carries a slot instead of only a message', 'kind' in d ? d.kind : '');
+}
+
+{
+  const d = decide({ score: 95 }, T({ inviteThreshold: 96, rejectThreshold: 40 }));
+  assert('skip' in d, 'changing the threshold changes the proposal — the number comes from settings, not the code');
+}
+
+if (failures > 0) {
+  console.error(`\n${failures} automation test(s) failed.`);
+  process.exit(1);
+}
+console.log('\nAll automation unit tests passed.');

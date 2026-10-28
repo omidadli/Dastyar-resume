@@ -1,9 +1,14 @@
 import type express from 'express';
 
-/** Wraps an async handler so rejections become JSON 500s instead of hanging requests. */
-export function h(fn: (req: express.Request, res: express.Response) => Promise<unknown> | unknown) {
+/**
+ * Wraps an async handler so rejections become JSON 500s instead of hanging requests.
+ * The third argument is `next`, so a router mounted ahead of another one can hand a
+ * path it does not own back (a public `/careers/:slug` vs. the authenticated
+ * `/careers/settings`).
+ */
+export function h(fn: (req: express.Request, res: express.Response, next: express.NextFunction) => Promise<unknown> | unknown) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    Promise.resolve(fn(req, res)).catch((err) => {
+    Promise.resolve(fn(req, res, next)).catch((err) => {
       console.error(`[api] ${req.method} ${req.originalUrl} failed:`, err?.message || err);
       if (res.headersSent) return next(err);
       res.status(500).json({ error: 'خطای داخلی سرور؛ لطفاً دوباره تلاش کنید.' });

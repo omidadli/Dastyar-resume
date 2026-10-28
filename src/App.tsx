@@ -58,6 +58,7 @@ const Talent = lazyPage(() => import('./pages/Talent'));
 const Reports = lazyPage(() => import('./pages/Reports'));
 const Sourcing = lazyPage(() => import('./pages/Sourcing'));
 const Automation = lazyPage(() => import('./pages/Automation'));
+const Careers = lazyPage(() => import('./pages/Careers'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
@@ -130,6 +131,23 @@ function Routes() {
   const { status } = useAuth();
 
   if (pathname === '/') return <Landing />;
+  // The public career portal: no session, no app shell — a candidate's page.
+  let m = matchPath('/careers/:slug/jobs/:jobId', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Careers slug={m.slug} jobId={m.jobId} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/careers/:slug', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Careers slug={m.slug} />
+      </Suspense>
+    );
+  }
   if (pathname === '/admin' || pathname.startsWith('/admin/')) {
     if (status === 'loading') return <FullScreenLoader />;
     return (

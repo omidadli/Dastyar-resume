@@ -161,5 +161,28 @@ assert(await waitFor(() => text().includes('آستانهٔ دعوت'), 12000), '
 assert(text().includes('ارسال خودکار نامهٔ نتیجه'), 'the automatic-send rule is exposed with its warning');
 assert(text().includes('متغیرهای متن'), 'the template variables are documented on the page');
 
+// 12. «تجربهٔ کارجو» — the public survey page a candidate opens from the e-mail.
+// Created through the API so the page is exercised exactly as a candidate sees it.
+const surveyRes = await nodeFetch(SERVER + '/api/surveys', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Hovida-Session': demo.token },
+  body: JSON.stringify({ resumeId: list.items[0].id, stage: 'after_interview' }),
+});
+const created = await surveyRes.json().catch(() => ({}));
+assert(Boolean(created?.survey?.url), 'a survey link can be created for a candidate', String(surveyRes.status));
+if (created?.survey?.url) {
+  const token = created.survey.url.split('/survey/')[1];
+  navigate(`/survey/${token}`);
+  assert(await waitFor(() => text().includes('معرفی'), 12000), 'the public survey page asks the NPS question');
+  assert(text().includes('روشن بودن مراحل') && text().includes('رفتار محترمانه'), 'the three experience dimensions are shown');
+  assert(text().includes('ثبت نظر'), 'the submit button is offered');
+  const zeroButton = Array.from(window.document.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '۰');
+  assert(Boolean(zeroButton), 'the 0–10 scale is rendered with Persian digits');
+  zeroButton?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(200);
+  assert(clickByText('ثبت نظر'), 'a score can be picked and submitted');
+  assert(await waitFor(() => text().includes('پاسخ شما ثبت شد'), 12000), 'the candidate is thanked after answering');
+}
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

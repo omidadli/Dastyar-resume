@@ -15,6 +15,7 @@ import {
   FileSignature,
   FileText,
   GraduationCap,
+  Heart,
   History,
   Info,
   Lightbulb,
@@ -70,6 +71,7 @@ import { SmsModal } from './SmsModal';
 import { OfferModal } from './OfferModal';
 import { SchedulingModal } from './SchedulingModal';
 import { CommentsSection } from './Comments';
+import { SurveyModal } from './SurveyModal';
 import { InterviewModal } from './InterviewModal';
 import type { PipelineStage } from '../../types/pipeline';
 
@@ -291,6 +293,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
   const [smsOpen, setSmsOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [surveyOpen, setSurveyOpen] = useState(false);
   const [rerunning, setRerunning] = useState<'standard' | 'deep' | null>(null);
   useCompare(); // re-render when the tray changes
   const inCompare = isInCompare(record.id);
@@ -821,6 +824,9 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   <Button size="sm" variant="ghost" icon={FileSignature} onClick={() => setOfferOpen(true)}>
                     پیشنهاد شغلی
                   </Button>
+                  <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)}>
+                    نظرسنجی تجربه
+                  </Button>
                 </div>
                 {record.messageStatus === 'sent' && (
                   <span className="text-[12px] text-ink-3 mr-3">آخرین پیام: {record.lastMessagedAtJalali}</span>
@@ -952,6 +958,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
         />
       )}
       {talentOpen && <TalentModal record={record} onClose={() => setTalentOpen(false)} onSaved={onChange} />}
+      <SurveyModal record={surveyOpen ? record : null} jobTitle={jobTitle} onClose={() => setSurveyOpen(false)} />
       <ConfirmDialog
         open={eraseOpen}
         onClose={() => setEraseOpen(false)}

@@ -44,6 +44,7 @@ import type {
 } from '../types/automation';
 import type { ApiKeyPublic, CreatedApiKey, DeveloperOverview, WebhookDeliveryPublic, WebhookEndpointPublic, WebhookTestResult } from '../types/developer';
 import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '../types/retention';
+import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -534,6 +535,21 @@ export const api = {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),
     list: (p: { departmentId?: string; q?: string; tags?: string[]; minScore?: number; minYears?: number; sort?: string; page?: number }) =>
       get<PagedResult<ResumeListItem>>(`/api/talent/list${qs({ ...p, tags: p.tags?.length ? p.tags.join(',') : undefined })}`),
+  },
+  surveys: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) =>
+      get<{ items: SurveyInvite[]; report: ExperienceReport }>(`/api/surveys${qs(p)}`),
+    create: (b: { resumeId?: string; stage: SurveyStage; candidateName?: string; candidateEmail?: string; jobTitle?: string }) =>
+      post<{ survey: SurveyInvite }>('/api/surveys', b),
+    send: (id: string) => post<{ survey: SurveyInvite; emailed: boolean; emailError: string | null }>(`/api/surveys/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ survey: SurveyInvite }>(`/api/surveys/${encodeURIComponent(id)}/cancel`, {}),
+    report: (range: number | 'all' = 365) => get<{ report: ExperienceReport }>(`/api/surveys/report?range=${range}`),
+    public: {
+      get: (token: string) => get<{ survey: PublicSurvey }>(`/api/survey/public/${encodeURIComponent(token)}`),
+      open: (token: string) => post<{ survey: PublicSurvey }>(`/api/survey/public/${encodeURIComponent(token)}/open`, {}),
+      answer: (token: string, b: SurveySubmitInput) =>
+        post<{ survey: PublicSurvey; thanks: string }>(`/api/survey/public/${encodeURIComponent(token)}/answer`, b),
+    },
   },
   developer: {
     overview: () => get<DeveloperOverview>('/api/developer/overview'),

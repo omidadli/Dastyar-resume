@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart3, CheckCircle2, Cpu, Download, FileCheck2, Gauge, Hourglass, Info, Scale, Sparkles } from 'lucide-react';
+import { BarChart3, CheckCircle2, Cpu, Download, FileCheck2, Gauge, Heart, Hourglass, Info, Scale, Sparkles } from 'lucide-react';
 import { Bar, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader } from '../components/layout/AppShell';
 import { Button, Card, CardHeader, EmptyState, ErrorState, JobStatusPill, Segmented, Skeleton, Stat, toast } from '../components/ui';
@@ -10,6 +10,7 @@ import { Link, setQuery, useLocation } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { ReportRange, ReportsData } from '../types/app';
+import type { ExperienceReport } from '../types/survey';
 
 const RANGES: { id: ReportRange; label: string }[] = [
   { id: '30', label: '۳۰ روز' },
@@ -32,6 +33,125 @@ function ChartTooltip({ active, payload, label }: any) {
         </p>
       ))}
     </div>
+  );
+}
+
+/**
+ * «تجربهٔ کارجو» — the NPS number and the three dimensions behind it.
+ * NPS is −۱۰۰…۱۰۰; anything below zero is stated as such, never rounded up to
+ * a friendly «خوب»: the number exists to start a conversation, not to flatter.
+ */
+function ExperienceCard({ nps, range }: { nps: ExperienceReport | null; range: ReportRange }) {
+  if (!nps) return null;
+  const days = range === 'all' ? 'all' : range;
+  const tone =
+    nps.nps === null
+      ? 'text-ink-3'
+      : nps.nps >= 50
+        ? 'text-brand-ink'
+        : nps.nps >= 0
+          ? 'text-review-ink'
+          : 'text-low-ink';
+  return (
+    <Card className="lg:col-span-3">
+      <CardHeader
+        title="تجربهٔ کارجو"
+        subtitle={`نتیجهٔ نظرسنجی‌های فرستاده‌شده در این بازه (${RANGES.find((r) => r.id === range)?.label || days})`}
+        action={<span className="text-[11.5px] text-ink-4">{toPersianDigits(nps.answered)} پاسخ از {toPersianDigits(nps.sent)} فرستاده‌شده</span>}
+      />
+      {nps.sent === 0 ? (
+        <div className="text-[13px] text-ink-3 leading-relaxed">
+          هنوز نظرسنجی‌ای فرستاده نشده است. از پروندهٔ کارجو › «نظرسنجی تجربه» یک لینک بسازید و بفرستید؛ پاسخ‌ها اینجا به NPS تبدیل می‌شوند.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-start">
+          <div className="rounded-[12px] bg-canvas border border-line-2 p-3">
+            <p className="text-[12px] text-ink-3 flex items-center gap-1.5">
+              <Heart className="w-3.5 h-3.5" strokeWidth={2} /> NPS
+            </p>
+            <p className={`text-[30px] font-extrabold leading-none mt-1 hv-num ${tone}`}>
+              {nps.nps === null ? '—' : toPersianDigits(nps.nps)}
+            </p>
+            <p className="text-[11px] text-ink-4 mt-1.5">
+              نرخ پاسخ {nps.responseRate === null ? '—' : `${toPersianDigits(nps.responseRate)}٪`}
+            </p>
+          </div>
+
+          <div className="rounded-[12px] border border-line-2 p-3 space-y-2">
+            <p className="text-[12px] text-ink-3">ترکیب پاسخ‌ها</p>
+            {[
+              { label: 'معرفی‌کننده (۹–۱۰)', value: nps.promoters, color: 'bg-brand' },
+              { label: 'بی‌طرف (۷–۸)', value: nps.passives, color: 'bg-[#F5C26B]' },
+              { label: 'منتقد (۰–۶)', value: nps.detractors, color: 'bg-low' },
+            ].map((b) => (
+              <div key={b.label}>
+                <div className="flex justify-between text-[11.5px] text-ink-2 mb-0.5">
+                  <span>{b.label}</span>
+                  <span className="hv-num">{toPersianDigits(b.value)}</span>
+                </div>
+                <div className="h-1.5 rounded-full bg-line-2 overflow-hidden">
+                  <div
+                    className={`h-full ${b.color}`}
+                    style={{ width: `${nps.answered ? Math.max(2, Math.round((b.value / nps.answered) * 100)) : 0}%` }}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-[12px] border border-line-2 p-3">
+            <p className="text-[12px] text-ink-3 mb-1.5">سه بُعد تجربه (از ۵)</p>
+            {[
+              { label: 'روشن بودن مراحل', value: nps.average.clarity },
+              { label: 'سرعت و اطلاع‌رسانی', value: nps.average.speed },
+              { label: 'رفتار محترمانه', value: nps.average.respect },
+            ].map((d) => (
+              <div key={d.label} className="flex items-center justify-between text-[12px] text-ink-2 py-0.5">
+                <span>{d.label}</span>
+                <span className="font-bold hv-num">{d.value === null ? '—' : toPersianDigits(d.value)}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="rounded-[12px] border border-line-2 p-3">
+            <p className="text-[12px] text-ink-3 mb-1.5">به تفکیک لحظه</p>
+            {nps.byStage.filter((s) => s.sent > 0).length ? (
+              nps.byStage
+                .filter((s) => s.sent > 0)
+                .map((s) => (
+                  <div key={s.stage} className="flex items-center justify-between text-[11.5px] text-ink-2 py-0.5">
+                    <span className="truncate">{s.label}</span>
+                    <span className="font-bold hv-num">{s.nps === null ? '—' : toPersianDigits(s.nps)}</span>
+                  </div>
+                ))
+            ) : (
+              <p className="text-[11.5px] text-ink-4">در این بازه نظرسنجی‌ای نبوده است.</p>
+            )}
+          </div>
+
+          {nps.comments.length > 0 && (
+            <div className="sm:col-span-2 lg:col-span-4 rounded-[12px] bg-canvas border border-line-2 p-3">
+              <p className="text-[12px] font-semibold text-ink-2 mb-1.5">آخرین نظرها</p>
+              <ul className="space-y-1.5">
+                {nps.comments.slice(0, 4).map((c) => (
+                  <li key={c.id} className="text-[12px] text-ink-2 leading-relaxed">
+                    <span className={`font-bold hv-num ${c.score >= 9 ? 'text-brand-ink' : c.score >= 7 ? 'text-review-ink' : 'text-low-ink'}`}>
+                      {toPersianDigits(c.score)}
+                    </span>
+                    {' — '}
+                    <span dir="auto">«{c.comment}»</span>
+                    <span className="text-ink-4"> · {c.atJalali}{c.jobTitle ? ` · ${c.jobTitle}` : ''}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+      <p className="text-[11.5px] text-ink-4 mt-3 leading-relaxed">
+        NPS = درصد معرفی‌کننده‌ها منهای درصد منتقدها؛ عددی بین −۱۰۰ و ۱۰۰. «بی‌پاسخ»ها در محاسبه نمی‌آیند اما در نرخ پاسخ دیده می‌شوند.
+      </p>
+    </Card>
   );
 }
 
@@ -108,6 +228,9 @@ export default function Reports() {
   const rawRange = query.get('range');
   const range: ReportRange = RANGES.some((r) => r.id === rawRange) ? (rawRange as ReportRange) : '90';
   const { data, error, loading, reload } = useAsync(() => api.insights.reports(range), [range]);
+  // «تجربهٔ کارجو» is its own question and its own endpoint: an NPS answer has
+  // nothing to do with the screening funnel.
+  const nps = useAsync(() => api.surveys.report(range === 'all' ? 'all' : Number(range)), [range]);
 
   const dist = data
     ? (['high', 'review', 'low', 'insufficient'] as const).map((lvl) => ({
@@ -369,6 +492,10 @@ export default function Reports() {
                 {toPersianDigits(data.hiring.interviews.scheduled)} مصاحبه ثبت‌شده، {toPersianDigits(data.hiring.interviews.upcoming)} پیشِ‌رو
               </p>
             </Card>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <ExperienceCard nps={nps.data?.report ?? null} range={range} />
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_340px] gap-5">

@@ -61,6 +61,7 @@ const Automation = lazyPage(() => import('./pages/Automation'));
 const Careers = lazyPage(() => import('./pages/Careers'));
 const Offer = lazyPage(() => import('./pages/Offer'));
 const Schedule = lazyPage(() => import('./pages/Schedule'));
+const Survey = lazyPage(() => import('./pages/Survey'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
@@ -156,6 +157,15 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <Schedule token={m.token} />
+      </Suspense>
+    );
+  }
+  // «تجربهٔ کارجو» — the survey the candidate got by e-mail.
+  m = matchPath('/survey/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Survey token={m.token} />
       </Suspense>
     );
   }

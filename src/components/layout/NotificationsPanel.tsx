@@ -17,6 +17,7 @@ import {
   Scale,
   Sparkles,
   Trash2,
+  MessageSquareHeart,
   ShieldCheck,
   UserPlus,
   UserMinus,
@@ -62,6 +63,8 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'deep.review': FileSearch2,
   'resume.deleted': Trash2,
   'retention.applied': ShieldCheck,
+  'survey.sent': MessageSquareHeart,
+  'survey.answered': MessageSquareHeart,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

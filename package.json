@@ -32,7 +32,8 @@
     "test:scheduling": "npm run build && tsx scripts/scheduling-api.test.ts",
     "test:collab": "npm run build && tsx scripts/collab-api.test.ts",
     "test:developer": "npm run build && tsx scripts/developer-api.test.ts",
-    "test:retention": "npm run build && tsx scripts/retention-api.test.ts"
+    "test:retention": "npm run build && tsx scripts/retention-api.test.ts",
+    "test:survey": "npm run build && tsx scripts/survey-api.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

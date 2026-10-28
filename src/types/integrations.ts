@@ -282,6 +282,8 @@ export const CHAT_EVENT_LABEL: Record<string, string> = {
   'automation.run': 'اجرای اتوماسیون جذب',
   'automation.approved': 'تأیید پیشنهاد اتوماسیون',
   'comment.added': 'یادداشت تیمی روی کارجو',
+  'survey.sent': 'ارسال نظرسنجی تجربهٔ کارجو',
+  'survey.answered': 'پاسخ کارجو به نظرسنجی',
 };
 
 export interface ChatStatusPublic {

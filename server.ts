@@ -25,6 +25,7 @@ import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/schedu
 import { commentRoutes } from './server/routes/comments';
 import { developerRoutes } from './server/routes/developer';
 import { privacyRoutes } from './server/routes/privacy';
+import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { apiV1Routes } from './server/routes/api-v1';
 import { forwardActivity } from './server/chat-webhook';
 import { deliverActivity } from './server/webhooks';
@@ -101,6 +102,7 @@ async function startServer() {
   app.use('/api', careerPublicRoutes()); // public career portal (no session)
   app.use('/api', offerPublicRoutes()); // public offer page + the candidate's signature
   app.use('/api', schedulingPublicRoutes()); // public «choose an interview time» page
+  app.use('/api', surveyPublicRoutes()); // public «تجربهٔ کارجو» survey page
   app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
 
   // ---------------- Authenticated API ----------------
@@ -117,6 +119,7 @@ async function startServer() {
   app.use('/api', offerRoutes());
   app.use('/api', schedulingRoutes());
   app.use('/api', commentRoutes());
+  app.use('/api', surveyRoutes()); // candidate-experience surveys (NPS)
   app.use('/api', privacyRoutes()); // candidate data export + erasure (DSAR)
   app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));

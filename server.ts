@@ -18,6 +18,7 @@ import { jobRoutes } from './server/routes/jobs';
 import { fileRoutes, resumeRoutes } from './server/routes/resumes';
 import { insightRoutes } from './server/routes/insights';
 import { integrationPublicRoutes, integrationRoutes } from './server/routes/integrations';
+import { ssoPublicRoutes, ssoRoutes } from './server/routes/sso';
 import { automationRoutes } from './server/routes/automation';
 import { careerPublicRoutes, careerRoutes } from './server/routes/careers';
 import { offerPublicRoutes, offerRoutes } from './server/routes/offers';
@@ -99,6 +100,7 @@ async function startServer() {
 
   app.use('/api', backupPublicRoutes()); // signed backup download + restore progress
   app.use('/api', integrationPublicRoutes()); // Google Calendar OAuth callback
+  app.use('/api', ssoPublicRoutes()); // «ورود سازمانی»: lookup, start, callback (no session yet)
   app.use('/api', careerPublicRoutes()); // public career portal (no session)
   app.use('/api', offerPublicRoutes()); // public offer page + the candidate's signature
   app.use('/api', schedulingPublicRoutes()); // public «choose an interview time» page
@@ -114,6 +116,7 @@ async function startServer() {
   app.use('/api', resumeRoutes());
   app.use('/api', insightRoutes());
   app.use('/api', integrationRoutes());
+  app.use('/api', ssoRoutes()); // connect / check / disconnect the workspace's SSO
   app.use('/api', automationRoutes());
   app.use('/api', careerRoutes());
   app.use('/api', offerRoutes());

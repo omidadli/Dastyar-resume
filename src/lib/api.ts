@@ -17,6 +17,7 @@ import type {
 } from '../types/screening';
 import type { InterviewKit } from '../types/interview-kit';
 import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
+import type { SsoCheck, SsoLookup, SsoSaveInput, SsoStatus } from '../types/sso';
 import type {
   ActivityFeed,
   AiStatus,
@@ -280,6 +281,9 @@ export const api = {
     twoFactor: (b: { challenge: string; code?: string; recoveryCode?: string }) =>
       post<AuthPayload>('/api/auth/2fa', b, { anonymous: true }),
     twoFactorStatus: () => get<TwoFactorStatus>('/api/auth/2fa'),
+    /** «ورود سازمانی»: does this e-mail domain belong to a workspace with SSO? */
+    ssoLookup: (email: string) =>
+      get<SsoLookup>(`/api/auth/sso/lookup?email=${encodeURIComponent(email)}`, { anonymous: true, timeoutMs: 10_000 }),
     twoFactorSetup: (b: { password: string }) =>
       post<{ secret: string; otpauth: string; qr: string; recoveryCodes: string[] }>('/api/auth/2fa/setup', b),
     twoFactorEnable: (b: { code: string }) =>
@@ -600,6 +604,12 @@ export const api = {
         { timeoutMs: 45_000 }
       ),
     deliveries: (limit = 50) => get<{ deliveries: WebhookDeliveryPublic[] }>(`/api/developer/deliveries?limit=${limit}`),
+  },
+  sso: {
+    status: () => get<{ sso: SsoStatus }>('/api/org/sso'),
+    check: (issuer: string) => post<SsoCheck>('/api/org/sso/check', { issuer }, { timeoutMs: 25_000 }),
+    save: (b: SsoSaveInput) => put<{ sso: SsoStatus }>('/api/org/sso', b, { timeoutMs: 25_000 }),
+    remove: () => del<{ sso: SsoStatus }>('/api/org/sso'),
   },
   insights: {
     dashboard: () => get<DashboardData>('/api/dashboard'),

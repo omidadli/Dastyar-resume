@@ -86,6 +86,7 @@ NODE_ENV=production npm start
 - **API و وب‌هوک** (کلید API، شش مسیر `/api/v1`، وب‌هوک امضاشده با HMAC و نمونهٔ بررسی امضا) → [`docs/API.md`](docs/API.md).
 - **نگه‌داری داده و حذف دادهٔ شخصی (DSAR)** (سیاست روزشمار، ناشناس‌سازی، خروجی و پاک‌سازی) → [`docs/DATA-RETENTION.md`](docs/DATA-RETENTION.md).
 - **ورود دومرحله‌ای** (QR برنامهٔ احراز هویت، کدهای بازیابی، بازنشانی توسط مدیر) → [`docs/TWO-FACTOR.md`](docs/TWO-FACTOR.md).
+- **ورود سازمانی (SSO)** (OIDC با Google Workspace، Microsoft 365، Okta یا Keycloak؛ دامنه‌های مجاز، ورود خودکار اعضا، «فقط SSO») → [`docs/SSO.md`](docs/SSO.md).
 - **غربالگری بی‌طرف** (پنهان‌سازی هویت سمت سرور، بستن تماس تا آشکارسازی، ثبت آشکارسازی) → [`docs/BLIND-SCREENING.md`](docs/BLIND-SCREENING.md).
 - **تجربهٔ کارجو (نظرسنجی و NPS)** (لینک عمومی، فرم دو دقیقه‌ای، محاسبهٔ NPS و گزارش) → [`docs/EXPERIENCE-SURVEY.md`](docs/EXPERIENCE-SURVEY.md).
 - **کیت مصاحبه** (بانک ۳۰ بسته / ۳۰ نقش / ۷۰ پرسش، «بشنوید» و «علامت هشدار»، کیت شخصی از رزومه، کپی و چاپ) → [`docs/INTERVIEW-KIT.md`](docs/INTERVIEW-KIT.md).
@@ -214,6 +215,7 @@ docs/DATA-RETENTION.md    سیاست نگه‌داری، ناشناس‌سازی
 docs/EXPERIENCE-SURVEY.md نظرسنجی تجربهٔ کارجو، محاسبهٔ NPS و گزارش
 docs/INTERVIEW-KIT.md     کیت مصاحبه: بانک پرسش و چیدمان روی معیارهای شغل
 docs/TEAM-AND-COST.md     عملکرد تیم و هزینهٔ هر استخدام (فرمول، API، محدودیت‌ها)
+docs/SSO.md               ورود سازمانی با OIDC: راه‌اندازی، قواعد امنیتی، خطاها
 ```
 
 سیستم طراحی (رنگ‌ها، تایپوگرافی، اجزا و قواعد دسترس‌پذیری) در [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) مستند شده است.

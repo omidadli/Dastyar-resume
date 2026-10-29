@@ -213,6 +213,25 @@ export interface OrgSecrets {
     lastTestOk: boolean | null;
     lastError: string | null;
   };
+  /**
+   * «ورود سازمانی (SSO)» — OIDC configuration. The client secret is encrypted
+   * like every other credential and never leaves the server.
+   */
+  sso?: {
+    enabled: boolean;
+    issuer: string;
+    clientId: string;
+    clientSecretEnc: string;
+    /** Email domains allowed through this workspace, lowercased. */
+    domains: string[];
+    autoJoin: boolean;
+    defaultRole: 'admin' | 'member';
+    requireSso: boolean;
+    updatedAtISO: string;
+    updatedByName: string | null;
+    lastLoginAtISO: string | null;
+    lastError: string | null;
+  };
   calendar?: {
     accountEmail: string;
     refreshTokenEnc: string;

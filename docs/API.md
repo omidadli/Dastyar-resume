@@ -341,6 +341,26 @@ PUT    /api/costs/assumption          → { assumption }   (مدیر/مالک)
 
 ---
 
+## ۵ج) ورود سازمانی (SSO با OIDC) — داخل برنامه
+
+```http
+GET    /api/auth/sso/lookup?email=sara@company.ir  → { available, orgName, passwordBlocked }   (عمومی)
+GET    /api/auth/sso/start?email=…&next=/app/jobs  → 302 به authorization_endpoint            (عمومی)
+GET    /api/auth/sso/callback?code=…&state=…       → 302 /app#sso=<token>  یا  /login?sso=…  (عمومی)
+GET    /api/org/sso        → { sso }                        (مدیر/مالک)
+PUT    /api/org/sso        → { sso }                        (مدیر/مالک)
+DELETE /api/org/sso        → { ok }                         (مدیر/مالک)
+POST   /api/org/sso/check  → { ok, issuer, message, keys }   (مدیر/مالک؛ هیچ چیز ذخیره نمی‌شود)
+```
+
+`/lookup` عمداً فقط سه فیلد برمی‌گرداند — نه فهرست اعضا، نه تنظیمات سازمان — و محدودیت
+نرخ دارد. `clientSecret` هرگز در پاسخ نمی‌آید؛ فقط `clientSecretSet: true`. توکن نشست در
+fragment بازمی‌گردد و پاسخ callback سرآیند `Referrer-Policy: no-referrer` دارد.
+جدول کامل دلیل‌های بازگشت (`?sso=none|misconfigured|provider|expired|off|cancelled|code|denied|failed`)
+و ترتیب راه‌اندازی در [`SSO.md`](SSO.md) است.
+
+---
+
 ## ۶) آنچه در این API نیست (و چرا)
 
 | نیست | دلیل |

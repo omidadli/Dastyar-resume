@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Building2, CheckCircle2, KeyRound, Mail, ShieldCheck, Sparkles, UserRound } from 'lucide-react';
+import { ArrowLeft, Building2, CheckCircle2, KeyRound, Mail, ShieldCheck, Sparkles, UserRound, Workflow } from 'lucide-react';
 import { HovidaLogo, HovidaMark } from '../components/brand/Logo';
 import { Button, Callout, TextInput } from '../components/ui';
 import { api, ApiError } from '../lib/api';
@@ -73,6 +73,88 @@ function DemoButton() {
         یک فضای کاری نمونه با داده‌های ساختگی که پس از {demoHours.toLocaleString('fa-IR')} ساعت پاک می‌شود.
       </p>
     </>
+  );
+}
+
+const SSO_NOTICE: Record<string, { text: string; tone: 'warning' | 'danger' }> = {
+  none: { text: 'برای این ایمیل، ورود سازمانی روی هیچ فضای کاری تنظیم نشده است؛ با رمز عبور وارد شوید.', tone: 'warning' },
+  misconfigured: { text: 'ورود سازمانی این سازمان ناقص تنظیم شده است؛ با مدیر فضای کاری تماس بگیرید.', tone: 'danger' },
+  provider: { text: 'سرویس ورود سازمانی پاسخ نداد؛ کمی بعد دوباره تلاش کنید یا با رمز وارد شوید.', tone: 'danger' },
+  expired: { text: 'این ورود منقضی شده است (بیش از ده دقیقه). یک‌بار دیگر روی «ورود سازمانی» بزنید.', tone: 'warning' },
+  off: { text: 'ورود سازمانی این فضای کاری خاموش شده است.', tone: 'warning' },
+  cancelled: { text: 'ورود سازمانی لغو شد.', tone: 'warning' },
+  code: { text: 'سرویس سازمانی کد ورود را برنگرداند؛ دوباره تلاش کنید.', tone: 'danger' },
+  denied: { text: 'این حساب اجازهٔ ورود به این فضای کاری را ندارد (ایمیل تأییدنشده، دامنهٔ دیگر، یا عضویت نداشتن).', tone: 'danger' },
+  failed: { text: 'ورود سازمانی کامل نشد؛ دوباره تلاش کنید یا با رمز عبور وارد شوید.', tone: 'danger' },
+};
+
+/** «ورود سازمانی»: the browser leaves for the provider, so this is a plain navigation. */
+function SsoBox({ initialEmail }: { initialEmail: string }) {
+  const { query } = useLocation();
+  const [email, setEmail] = useState(initialEmail);
+  const [looking, setLooking] = useState(false);
+  const [found, setFound] = useState<{ orgName: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const reason = query.get('sso');
+  const notice = reason ? SSO_NOTICE[reason] : null;
+
+  const start = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const em = email.trim();
+    if (!em) return setError('ایمیل کاری سازمانی خود را وارد کنید.');
+    setError(null);
+    setLooking(true);
+    try {
+      const res = await api.auth.ssoLookup(em);
+      if (!res.available) {
+        setFound(null);
+        setError('برای این ایمیل، ورود سازمانی تنظیم نشده است؛ با رمز عبور وارد شوید.');
+        return;
+      }
+      setFound({ orgName: res.orgName });
+      const next = query.get('next');
+      // A real navigation: the provider's page takes over from here.
+      window.location.assign(`/api/auth/sso/start?email=${encodeURIComponent(em)}${next && next.startsWith('/app') ? `&next=${encodeURIComponent(next)}` : ''}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'بررسی ورود سازمانی ممکن نشد.');
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  return (
+    <div className="mt-7">
+      {notice && (
+        <Callout tone={notice.tone} className="mb-4">
+          {notice.text}
+        </Callout>
+      )}
+      <div className="flex items-center gap-3 mb-4 text-[12px] text-ink-4">
+        <span className="flex-1 h-px bg-line" />
+        ورود سازمانی
+        <span className="flex-1 h-px bg-line" />
+      </div>
+      <form onSubmit={start} className="flex flex-col gap-3">
+        <TextInput
+          label="ایمیل سازمانی"
+          name="sso-email"
+          type="email"
+          icon={Workflow}
+          latin
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="name@company.ir"
+          hint="اگر سازمان شما ورود با Google Workspace یا Microsoft را فعال کرده باشد، اینجا به صفحهٔ سازمان می‌روید."
+        />
+        {error && <p className="text-[12.5px] text-low-ink font-medium" role="alert">{error}</p>}
+        {found?.orgName && !error && (
+          <p className="text-[12.5px] text-brand-ink font-medium">در حال رفتن به صفحهٔ ورود «{found.orgName}»…</p>
+        )}
+        <Button type="submit" variant="secondary" size="lg" block loading={looking} icon={Workflow}>
+          ادامه با حساب سازمانی
+        </Button>
+      </form>
+    </div>
   );
 }
 
@@ -233,6 +315,7 @@ export function LoginPage() {
           ورود
         </Button>
       </form>
+      <SsoBox initialEmail={email} />
       <DemoButton />
     </AuthLayout>
   );

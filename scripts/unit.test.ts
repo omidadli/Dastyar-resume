@@ -12,6 +12,9 @@ import { blindLabel, maskText, redactRecord } from '../server/blind';
 import { bankSummary, matchPacksByCriteria, matchRole } from '../server/interview-kit';
 import { buildTeamReport } from '../server/team-report';
 import { COST_KINDS, byKind, normalizeAssumption, readAssumptionInput, readCostInput } from '../server/costs';
+import { OidcError, decodeJwt, safeEndpoint, verifyIdToken, clearOidcCaches } from '../server/oidc';
+import { emailDomain, identityFromClaims, normalizeDomains } from '../server/sso';
+import crypto from 'crypto';
 import { base32Decode, base32Encode, generateRecoveryCodes, generateSecret, hashRecoveryCode, hotp, otpauthUrl, secondsLeft, stepAt, verifyTotp } from '../server/totp';
 import fs from 'fs';
 import path from 'path';
@@ -374,6 +377,113 @@ const u: JobUnderstanding = {
   const kinds = byKind(entries);
   assert(kinds.length === 2 && kinds[0].kind === 'agency', 'empty kinds are hidden and the biggest comes first');
   assert(kinds.find((k) => k.kind === 'advertising')!.count === 2, 'kinds also count their rows');
+}
+
+// ---- «ورود سازمانی»: the token checks that keep a session trustworthy ----
+{
+  const key = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const other = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...(key.publicKey.export({ format: 'jwk' }) as any), kid: 'k1', alg: 'RS256', use: 'sig' };
+  const issuer = 'https://idp.example.ir';
+  const doc = {
+    issuer,
+    authorization_endpoint: `${issuer}/authorize`,
+    token_endpoint: `${issuer}/token`,
+    jwks_uri: `${issuer}/jwks`,
+  };
+  const realFetch = globalThis.fetch;
+  // Only the key set is fetched during verification; everything else stays real.
+  (globalThis as any).fetch = async (url: any, init?: any) => {
+    if (String(url) === doc.jwks_uri) return new Response(JSON.stringify({ keys: [jwk] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return realFetch(url, init);
+  };
+  clearOidcCaches();
+
+  const sign = (claims: Record<string, unknown>, signingKey = key.privateKey, alg = 'RS256') => {
+    const h = Buffer.from(JSON.stringify({ alg, typ: 'JWT', kid: 'k1' })).toString('base64url');
+    const p = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    const sig = crypto.sign('sha256', Buffer.from(`${h}.${p}`), signingKey).toString('base64url');
+    return `${h}.${p}.${sig}`;
+  };
+  const base = {
+    iss: issuer,
+    aud: 'hovida',
+    sub: 'sub-1',
+    exp: Math.floor(Date.now() / 1000) + 300,
+    iat: Math.floor(Date.now() / 1000),
+    nonce: 'n-1',
+    email: 'sara@company.ir',
+    email_verified: true,
+    name: 'سارا محمدی',
+  };
+
+  const good = await verifyIdToken(sign(base), { doc, clientId: 'hovida', nonce: 'n-1' });
+  assert(good.email === 'sara@company.ir', 'a correctly signed token is accepted');
+  const identity = identityFromClaims(good);
+  assert(identity.name === 'سارا محمدی' && identity.subject === 'sub-1', 'the identity keeps the provider name and subject');
+
+  const rejects = async (label: string, token: string, nonce = 'n-1') => {
+    let code = '';
+    try {
+      await verifyIdToken(token, { doc, clientId: 'hovida', nonce });
+    } catch (e) {
+      code = e instanceof OidcError ? e.code : 'OTHER';
+    }
+    assert(Boolean(code), label, code);
+  };
+
+  await rejects('a token signed with an unknown key is refused', sign(base, other.privateKey));
+  await rejects('a token for another audience is refused', sign({ ...base, aud: 'someone-else' }));
+  await rejects('an expired token is refused', sign({ ...base, exp: Math.floor(Date.now() / 1000) - 120 }));
+  await rejects('a token from another issuer is refused', sign({ ...base, iss: 'https://evil.example' }));
+  await rejects('a token issued for another login (nonce) is refused', sign({ ...base, nonce: 'n-2' }));
+  await rejects('an unsigned (alg=none) token is refused', sign(base, undefined, 'none'));
+  await rejects('a malformed token is refused', 'not-a-jwt');
+
+  let emailCode = '';
+  try {
+    identityFromClaims({ ...base, email_verified: false } as any);
+  } catch (e) {
+    emailCode = e instanceof OidcError ? e.code : '';
+  }
+  assert(emailCode === 'EMAIL_UNVERIFIED', 'an unverified e-mail is not a verified identity', emailCode);
+  let noEmail = '';
+  try {
+    identityFromClaims({ ...base, email: undefined, preferred_username: undefined } as any);
+  } catch (e) {
+    noEmail = e instanceof OidcError ? e.code : '';
+  }
+  assert(noEmail === 'NO_EMAIL', 'a token without an e-mail is refused', noEmail);
+
+  (globalThis as any).fetch = realFetch;
+  clearOidcCaches();
+
+  // URLs: https everywhere, except a provider on loopback.
+  assert(safeEndpoint('https://accounts.google.com').host === 'accounts.google.com', 'an https issuer is accepted');
+  assert(safeEndpoint('http://127.0.0.1:8080/realms/x').port === '8080', 'a loopback provider may use http (self-hosted Keycloak)');
+  let insecure = '';
+  try {
+    safeEndpoint('http://idp.example.ir');
+  } catch (e) {
+    insecure = e instanceof OidcError ? e.code : '';
+  }
+  assert(insecure === 'INSECURE_URL', 'a public http issuer is refused', insecure);
+  let badUrl = '';
+  try {
+    safeEndpoint('not a url');
+  } catch (e) {
+    badUrl = e instanceof OidcError ? e.code : '';
+  }
+  assert(badUrl === 'BAD_URL', 'a non-URL is refused', badUrl);
+
+  const parts = decodeJwt(sign(base));
+  assert(parts.header.alg === 'RS256' && parts.payload.aud === 'hovida', 'a JWT can be inspected without trusting it');
+
+  // Domains: what the workspace may claim.
+  assert(JSON.stringify(normalizeDomains(['@Company.IR', 'company.ir', ' x ', 'bad domain', 'sub.company.ir'])) === JSON.stringify(['company.ir', 'sub.company.ir']), 'domains are cleaned, lowercased and de-duplicated');
+  assert(normalizeDomains('a.ir, b.com').length === 2, 'a comma-separated string works too');
+  assert(normalizeDomains([]).length === 0 && normalizeDomains('localhost').length === 0, 'an empty or single-label domain is not accepted');
+  assert(emailDomain('Sara@Company.IR') === 'company.ir' && emailDomain('nope') === null, 'the domain is read from the address, honestly');
 }
 
 // ---- file extensions are preserved (bug #4) ----

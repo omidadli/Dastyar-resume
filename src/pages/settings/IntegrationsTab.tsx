@@ -21,6 +21,7 @@ import { useCan } from '../../lib/auth';
 import { faDate, faNumber } from '../../lib/format';
 import { copyText } from '../../lib/clipboard';
 import { useAsync } from '../../lib/useAsync';
+import { SsoCard } from '../../components/settings/SsoCard';
 import type { ChatProvider, ChatStatusPublic, EmailSettingsPublic, SmsProvider, SmsSettingsPublic } from '../../types/integrations';
 import { CHAT_EVENT_LABEL } from '../../types/integrations';
 
@@ -819,6 +820,7 @@ export function IntegrationsTab() {
         <SmsCard />
         <ChatCard />
         <CareersCard />
+        <SsoCard />
         <SourcingCard
           configured={data?.sourcing.configured ?? false}
           providerLabel={data?.sourcing.providerLabel ?? 'LinkedIn'}

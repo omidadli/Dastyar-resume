@@ -15,6 +15,7 @@ import {
 import { aiStatus } from '../ai/provider';
 import { demoAllowed, demoTtlMs, isEnvAdmin, isPlatformAdmin, publicConfig, systemSettings } from '../platform';
 import { createDemoWorkspace } from '../demo-seed';
+import { orgRequiresSso } from './sso';
 import { h, str } from './util';
 import {
   TwoFactorError,
@@ -99,6 +100,15 @@ export function authRoutes(): express.Router {
       const ip = clientIp(req);
       for (const limit of [loginFailByIp.check(ip), loginFailByIpAccount.check(`${ip}|${email}`), loginFailByAccount.check(email)]) {
         if (!limit.ok) return tooMany(res, limit.retryAfterSec);
+      }
+      // A workspace that asked for «فقط SSO» gets no password fallback. Answered
+      // before the password is even checked, so a right password changes nothing.
+      const ssoOnly = email ? orgRequiresSso(email) : null;
+      if (ssoOnly) {
+        return res.status(403).json({
+          error: `ورود این فضای کاری («${ssoOnly.orgName}») فقط با حساب سازمانی انجام می‌شود؛ رمز عبور پذیرفته نیست.`,
+          code: 'SSO_REQUIRED',
+        });
       }
       const user = email ? db.findUserByEmail(email) : null;
       const ok = user ? await verifyPassword(password, user.passwordHash) : await verifyPassword(password, 'scrypt$16384$8$1$AAAA$AAAA');

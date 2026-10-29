@@ -27,6 +27,16 @@ if (typeof window !== 'undefined') {
     setToken(m[1], { persist: false });
     window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
   }
+  /**
+   * «ورود سازمانی» comes back from the provider as /app#sso=<token>: the token
+   * arrives in the fragment so it never reaches a server log or a referrer.
+   * This one is a real sign-in, so it is stored like a password login.
+   */
+  const sso = window.location.hash.match(/^#sso=([A-Za-z0-9_-]{20,256})$/);
+  if (sso) {
+    setToken(sso[1]);
+    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+  }
 }
 
 const EXPIRED_NOTICE = 'نشست شما به پایان رسیده است؛ لطفاً دوباره وارد شوید.';

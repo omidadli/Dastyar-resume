@@ -10,6 +10,8 @@ import { faRelative } from '../src/lib/format';
 import { assemblePageText, restoreZwnj, type PdfTextItem } from '../src/lib/pdfLayout';
 import { blindLabel, maskText, redactRecord } from '../server/blind';
 import { bankSummary, matchPacksByCriteria, matchRole } from '../server/interview-kit';
+import { buildTeamReport } from '../server/team-report';
+import { COST_KINDS, byKind, normalizeAssumption, readAssumptionInput, readCostInput } from '../server/costs';
 import { base32Decode, base32Encode, generateRecoveryCodes, generateSecret, hashRecoveryCode, hotp, otpauthUrl, secondsLeft, stepAt, verifyTotp } from '../server/totp';
 import fs from 'fs';
 import path from 'path';
@@ -290,6 +292,88 @@ const u: JobUnderstanding = {
   const top = many.slice(0, 2).map((m) => m.pack.id).sort();
   assert(top.join(',') === 'negotiation,targets', 'the packs pulled by the heaviest criterion come first', top.join(','));
   assert(many.every((m) => Boolean(m.criterionId)), 'each matched pack records which criterion pulled it');
+}
+
+// ---- «عملکرد تیم»: counts real work, never ranks people ----
+{
+  const now = new Date().toISOString();
+  const report = buildTeamReport({
+    range: '90',
+    nowISO: now,
+    members: [
+      { id: 'u1', name: 'مریم', role: 'admin', title: 'مدیر منابع انسانی' },
+      { id: 'u2', name: 'حسین', role: 'member', title: 'کارشناس جذب' },
+      { id: 'u3', name: 'رضا', role: 'member', title: 'مدیر فنی' },
+    ],
+    decisions: [
+      { resumeId: 'r1', decidedBy: 'u1', decidedAtISO: now, arrivedAtISO: now, approved: true },
+      { resumeId: 'r2', decidedBy: 'u1', decidedAtISO: now, arrivedAtISO: new Date(Date.now() - 10 * 86400_000).toISOString(), approved: false },
+      { resumeId: 'r3', decidedBy: 'u2', decidedAtISO: now, arrivedAtISO: now, approved: true },
+    ],
+    scorecards: [{ reviewerId: 'u2', atISO: now }],
+    comments: [{ authorId: 'u1', atISO: now }],
+    interviews: [{ interviewerIds: ['u3'], startsAtISO: now, status: 'scheduled' }],
+    offersSent: [{ userId: 'u2', atISO: now }],
+    activity: [{ userId: 'u3', atISO: now }],
+  });
+  const by = (id: string) => report.members.find((m) => m.userId === id)!;
+  assert(report.totals.decisions === 3 && report.totals.approved === 2 && report.totals.rejected === 1, 'decisions are split by outcome');
+  assert(by('u1').decisions === 2 && by('u1').comments === 1, 'each member carries only their own work');
+  assert(by('u2').scorecards === 1 && by('u2').offersSent === 1, 'scorecards and offers land on their author');
+  assert(by('u3').interviews === 1 && by('u3').decisions === 0, 'an interviewer with no decisions still appears');
+  assert(report.members[report.members.length - 1].userId === 'u3', 'the lightest workload sorts last');
+  assert(report.totals.activeMembers === 3 && report.totals.members === 3, 'every member is counted');
+  assert(report.concentration === 67, 'the busiest member holds two of three decisions', String(report.concentration));
+  assert(report.fastShare === 67, 'two of three decisions came within 72 hours', String(report.fastShare));
+  assert(by('u1').medianDecideHours === 120, 'the median sits between immediate and ten days', String(by('u1').medianDecideHours));
+
+  const empty = buildTeamReport({
+    range: '30',
+    nowISO: now,
+    members: [{ id: 'u1', name: 'مریم', role: 'owner', title: '' }],
+    decisions: [],
+    scorecards: [],
+    comments: [],
+    interviews: [],
+    offersSent: [],
+    activity: [],
+  });
+  assert(empty.concentration === null && empty.fastShare === null, 'no decisions ⇒ no percentages, not zero');
+  assert(empty.members[0].totalActions === 0 && empty.members[0].lastActiveISO === null, 'an idle member is shown honestly');
+}
+
+// ---- «هزینهٔ هر استخدام»: money only when a human typed it ----
+{
+  assert(COST_KINDS.length === 7 && new Set(COST_KINDS.map((k) => k.id)).size === 7, 'seven distinct cost kinds');
+  const clamp = normalizeAssumption({ hourlyRate: -5, minutesPerScorecard: 9999, minutesPerComment: 'x', minutesPerDecision: 12 });
+  assert(clamp.hourlyRate === 0, 'a negative rate becomes zero');
+  assert(clamp.minutesPerScorecard === 600, 'absurd minutes are capped');
+  assert(clamp.minutesPerComment === 5 && clamp.minutesPerDecision === 12, 'missing fields fall back, typed ones are kept');
+
+  const ok = readCostInput({ kind: 'advertising', amount: '۲٬۵۰۰٬۰۰۰', note: '  آگهی  ' });
+  assert(!('error' in ok) && ok.amount === 2500000 && ok.note === 'آگهی', 'a Persian-digit amount with separators is accepted, and the note is trimmed');
+  assert(!('error' in ok) && ok.jobId === null && ok.atISO === null, 'empty date and opening stay null');
+
+  const bad = (body: unknown) => 'error' in readCostInput(body);
+  assert(bad({ kind: 'nope', amount: 10 }), 'an unknown kind is refused');
+  assert(bad({ kind: 'tools', amount: -1 }), 'a negative amount is refused');
+  assert(bad({ kind: 'tools', amount: 0 }), 'zero is refused');
+  assert(bad({ kind: 'tools', amount: 1_000_000_000_001 }), 'an absurd amount is refused');
+  assert(bad({ kind: 'tools', amount: 10, atISO: 'not-a-date' }), 'an unreadable date is refused');
+  assert(bad({ kind: 'tools', amount: 10, atISO: new Date(Date.now() + 30 * 86400_000).toISOString() }), 'a future date is refused');
+
+  assert('error' in readAssumptionInput({ hourlyRate: 999_999_999 }, normalizeAssumption({})), 'an absurd hourly rate is refused');
+  const kept = readAssumptionInput({ hourlyRate: 250_000 }, normalizeAssumption({ minutesPerComment: 7 }));
+  assert(!('error' in kept) && kept.value.hourlyRate === 250_000 && kept.value.minutesPerComment === 7, 'saving the rate keeps the minute settings');
+
+  const entries = [
+    { id: 'c1', kind: 'advertising', amount: 3_000_000 },
+    { id: 'c2', kind: 'advertising', amount: 1_000_000 },
+    { id: 'c3', kind: 'agency', amount: 5_000_000 },
+  ] as any[];
+  const kinds = byKind(entries);
+  assert(kinds.length === 2 && kinds[0].kind === 'agency', 'empty kinds are hidden and the biggest comes first');
+  assert(kinds.find((k) => k.kind === 'advertising')!.count === 2, 'kinds also count their rows');
 }
 
 // ---- file extensions are preserved (bug #4) ----

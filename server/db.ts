@@ -64,6 +64,9 @@ import type { ResumeSourceKind } from '../src/types/app';
 import type { InterviewFeedback, PipelineBoard, PipelineStage } from '../src/types/pipeline';
 import { DEFAULT_STAGES } from '../src/types/pipeline';
 import { normalizeAutomationSettings } from './automation-settings';
+import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../src/types/reports';
+import { byKind as costsByKind, DEFAULT_ASSUMPTION, normalizeAssumption, sumDirect } from './costs';
+import { buildTeamReport } from './team-report';
 import {
   JALALI_MONTH_NAMES,
   compareJalali,
@@ -167,6 +170,10 @@ export interface StoreSnapshot {
   webhookDeliveries?: WebhookDeliveryRow[];
   /** Per-workspace retention policy («نگه‌داری داده»). */
   retention?: Record<string, RetentionPolicy>;
+  /** «هزینهٔ هر استخدام»: every cost row the workspace typed in. */
+  costs?: CostRow[];
+  /** The workspace's own hourly-rate assumption for internal recruiting time. */
+  costAssumptions?: Record<string, CostAssumption>;
 }
 
 /** Encrypted connection material for one workspace. */
@@ -251,6 +258,8 @@ export type InterviewFeedbackRow = InterviewFeedback & { orgId: string };
 export type SchedulingLinkRow = SchedulingLink & { orgId: string; token: string };
 
 export type CommentRow = CandidateComment & { orgId: string };
+/** A cost row as stored: the workspace-facing record plus its tenant. */
+export type CostRow = CostEntry & { orgId: string };
 /** A survey invitation plus the secret that opens its public page. */
 export type SurveyInviteRow = SurveyInvite & { orgId: string; token: string; expiresAtISO: string };
 
@@ -293,6 +302,8 @@ const apiKeys = new Map<string, ApiKeyRow>();
 const webhooks = new Map<string, WebhookEndpointRow>();
 const webhookDeliveries = new Map<string, WebhookDeliveryRow>();
 const retentionPolicies = new Map<string, RetentionPolicy>();
+const costRows = new Map<string, CostRow>();
+const costAssumptions = new Map<string, CostAssumption>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -343,6 +354,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
   snap.webhookDeliveries?.forEach((x) => webhookDeliveries.set(x.id, x));
   for (const [k, v] of Object.entries(snap.retention || {})) retentionPolicies.set(k, v);
+  snap.costs?.forEach((x) => costRows.set(x.id, x));
+  for (const [k, v] of Object.entries(snap.costAssumptions || {})) costAssumptions.set(k, normalizeAssumption(v));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -376,6 +389,8 @@ function clearMemory() {
   webhooks.clear();
   webhookDeliveries.clear();
   retentionPolicies.clear();
+  costRows.clear();
+  costAssumptions.clear();
   activity = [];
   platformBlob = null;
   auditLog = [];
@@ -497,6 +512,8 @@ function snapshot(): StoreSnapshot {
     webhooks: Array.from(webhooks.values()),
     webhookDeliveries: Array.from(webhookDeliveries.values()),
     retention: Object.fromEntries(retentionPolicies),
+    costs: Array.from(costRows.values()),
+    costAssumptions: Object.fromEntries(costAssumptions),
   };
 }
 
@@ -963,6 +980,8 @@ export function deleteOrg(id: string) {
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
   for (const [k, v] of webhookDeliveries) if (v.orgId === id) webhookDeliveries.delete(k);
   retentionPolicies.delete(id);
+  for (const [k, v] of costRows) if (v.orgId === id) costRows.delete(k);
+  costAssumptions.delete(id);
   orgSecrets.delete(id);
   orgs.delete(id);
   deletePrefixQuietly(`${RESUMES_PREFIX}${id}/`);
@@ -2733,6 +2752,233 @@ export function reports(orgId: string, range: ReportRange): ReportsData {
   };
 }
 
+// ------------------------------------------------ cost & team performance ----
+
+function rangeCutoff(range: ReportRange): number {
+  return range === 'all' ? 0 : Date.now() - Number(range) * 86_400_000;
+}
+
+function publicCost(row: CostRow): CostEntry {
+  const { orgId: _org, ...rest } = row;
+  return rest;
+}
+
+/** Cost rows in the period, newest first. `range` filters on the cost date, not on when it was typed. */
+export function listCosts(orgId: string, range: ReportRange = 'all'): CostEntry[] {
+  const cutoff = rangeCutoff(range);
+  return Array.from(costRows.values())
+    .filter((c) => c.orgId === orgId && new Date(c.atISO).getTime() >= cutoff)
+    .sort((a, b) => b.atISO.localeCompare(a.atISO))
+    .map(publicCost);
+}
+
+export function addCost(
+  orgId: string,
+  input: { kind: CostKind; amount: number; atISO: string | null; jobId: string | null; jobTitle: string | null; note: string },
+  actorName: string
+): CostEntry {
+  const stamp = nowStamp(input.atISO ? new Date(input.atISO) : undefined);
+  const row: CostRow = {
+    id: uid('cost'),
+    orgId,
+    kind: input.kind,
+    amount: Math.round(input.amount),
+    atISO: stamp.iso,
+    atJalali: stamp.jalali,
+    jobId: input.jobId,
+    jobTitle: input.jobTitle,
+    note: input.note,
+    createdByName: actorName,
+    createdAtISO: new Date().toISOString(),
+  };
+  costRows.set(row.id, row);
+  scheduleSave();
+  return publicCost(row);
+}
+
+export function updateCost(
+  orgId: string,
+  id: string,
+  patch: { kind?: CostKind; amount?: number; atISO?: string | null; jobId?: string | null; jobTitle?: string | null; note?: string }
+): CostEntry | null {
+  const row = costRows.get(id);
+  if (!row || row.orgId !== orgId) return null;
+  if (patch.kind) row.kind = patch.kind;
+  if (typeof patch.amount === 'number' && patch.amount > 0) row.amount = Math.round(patch.amount);
+  if (patch.atISO !== undefined) {
+    const stamp = nowStamp(patch.atISO ? new Date(patch.atISO) : undefined);
+    row.atISO = stamp.iso;
+    row.atJalali = stamp.jalali;
+  }
+  if (patch.jobId !== undefined) {
+    row.jobId = patch.jobId;
+    row.jobTitle = patch.jobTitle ?? null;
+  }
+  if (typeof patch.note === 'string') row.note = patch.note;
+  scheduleSave();
+  return publicCost(row);
+}
+
+export function deleteCost(orgId: string, id: string): boolean {
+  const row = costRows.get(id);
+  if (!row || row.orgId !== orgId) return false;
+  costRows.delete(id);
+  scheduleSave();
+  return true;
+}
+
+export function getCostAssumption(orgId: string): CostAssumption {
+  return costAssumptions.get(orgId) || { ...DEFAULT_ASSUMPTION };
+}
+
+export function setCostAssumption(orgId: string, value: CostAssumption): CostAssumption {
+  const clean = normalizeAssumption(value);
+  costAssumptions.set(orgId, clean);
+  scheduleSave();
+  return clean;
+}
+
+/** Candidates who reached a «استخدام‌شده» stage and were decided inside the period. */
+function hiresInRange(orgId: string, cutoff: number): ResumeRecord[] {
+  return orgResumes(orgId).filter((r) => {
+    if (r.decisionStatus !== 'approved' || !r.decidedAtISO || !r.stageId) return false;
+    if (new Date(r.decidedAtISO).getTime() < cutoff) return false;
+    const job = jobs.get(r.jobId);
+    const stage = (job?.stages || DEFAULT_STAGES).find((st) => st.id === r.stageId);
+    return stage?.kind === 'hired';
+  });
+}
+
+/**
+ * Who is doing the hiring work — counted from decisions, scorecards, notes,
+ * interviews and sent offers. Not a ranking: a hiring manager who only joins
+ * interviews should look like exactly that, not like a low performer.
+ */
+export function teamReport(orgId: string, range: ReportRange): TeamReport {
+  const cutoff = rangeCutoff(range);
+  const inRange = (iso: string | null | undefined) => Boolean(iso) && new Date(iso as string).getTime() >= cutoff;
+  const now = Date.now();
+  const members = listMembers(orgId).map((u) => ({ id: u.id, name: u.name, role: u.role, title: u.title }));
+  const decisions = orgResumes(orgId)
+    .filter((r) => inRange(r.decidedAtISO) && (r.decisionStatus === 'approved' || r.decisionStatus === 'rejected'))
+    .map((r) => ({
+      resumeId: r.id,
+      decidedBy: r.decidedBy,
+      decidedAtISO: r.decidedAtISO as string,
+      arrivedAtISO: r.createdAtISO,
+      approved: r.decisionStatus === 'approved',
+    }));
+  const scorecards = Array.from(interviewFeedback.values())
+    .filter((f) => f.orgId === orgId && inRange(f.atISO))
+    .map((f) => ({ reviewerId: f.reviewerId, atISO: f.atISO }));
+  const notes = Array.from(comments.values())
+    .filter((c) => c.orgId === orgId && inRange(c.atISO))
+    .map((c) => ({ authorId: c.authorId, atISO: c.atISO }));
+  const interviewRows = Array.from(interviews.values())
+    .filter((i) => i.orgId === orgId && i.status !== 'cancelled' && inRange(i.startsAtISO) && new Date(i.startsAtISO).getTime() <= now)
+    .map((i) => ({ interviewerIds: i.interviewerIds || [], startsAtISO: i.startsAtISO, status: i.status }));
+  const acts = activity.filter((a) => a.orgId === orgId && inRange(a.atISO)).map((a) => ({ userId: a.userId, atISO: a.atISO }));
+  return buildTeamReport({
+    range,
+    nowISO: new Date().toISOString(),
+    members,
+    decisions,
+    scorecards,
+    comments: notes,
+    interviews: interviewRows,
+    offersSent: activity
+      .filter((a) => a.orgId === orgId && a.type === 'offer.sent' && inRange(a.atISO))
+      .map((a) => ({ userId: a.userId, atISO: a.atISO })),
+    activity: acts,
+  });
+}
+
+/**
+ * Cost per hire: real cost rows plus an internal-time estimate. The estimate is
+ * zero unless the workspace enters an hourly rate — never a salary we guessed.
+ */
+export function costReport(orgId: string, range: ReportRange): CostReport {
+  const cutoff = rangeCutoff(range);
+  const entries = listCosts(orgId, range);
+  const assumption = getCostAssumption(orgId);
+  const inRange = (iso: string | null | undefined) => Boolean(iso) && new Date(iso as string).getTime() >= cutoff;
+  const now = Date.now();
+
+  const minutesByJob = new Map<string, number>();
+  const addMinutes = (jobId: string | null, minutes: number) => {
+    if (!jobId || minutes <= 0) return;
+    minutesByJob.set(jobId, (minutesByJob.get(jobId) || 0) + minutes);
+  };
+  let scorecardMin = 0;
+  let commentMin = 0;
+  let decisionMin = 0;
+  let interviewMin = 0;
+
+  for (const f of interviewFeedback.values()) {
+    if (f.orgId !== orgId || !inRange(f.atISO)) continue;
+    scorecardMin += assumption.minutesPerScorecard;
+    addMinutes(f.jobId, assumption.minutesPerScorecard);
+  }
+  for (const c of comments.values()) {
+    if (c.orgId !== orgId || !inRange(c.atISO)) continue;
+    commentMin += assumption.minutesPerComment;
+    addMinutes(c.jobId, assumption.minutesPerComment);
+  }
+  for (const r of orgResumes(orgId)) {
+    if (!inRange(r.decidedAtISO) || (r.decisionStatus !== 'approved' && r.decisionStatus !== 'rejected')) continue;
+    decisionMin += assumption.minutesPerDecision;
+    addMinutes(r.jobId, assumption.minutesPerDecision);
+  }
+  for (const i of interviews.values()) {
+    if (i.orgId !== orgId || i.status === 'cancelled' || !inRange(i.startsAtISO) || new Date(i.startsAtISO).getTime() > now) continue;
+    const minutes = Math.max(0, Number(i.durationMin) || 0);
+    interviewMin += minutes;
+    addMinutes(i.jobId, minutes);
+  }
+
+  const hoursOf = (m: number) => Math.round((m / 60) * 10) / 10;
+  const hours = {
+    scorecards: hoursOf(scorecardMin),
+    comments: hoursOf(commentMin),
+    decisions: hoursOf(decisionMin),
+    interviews: hoursOf(interviewMin),
+    total: hoursOf(scorecardMin + commentMin + decisionMin + interviewMin),
+  };
+  const direct = sumDirect(entries);
+  const timeCost = Math.round(hours.total * assumption.hourlyRate);
+  const hires = hiresInRange(orgId, cutoff);
+
+  const jobMap = new Map<string, { jobId: string; roleTitle: string; direct: number; time: number; hires: number }>();
+  const ensureJob = (jobId: string, fallbackTitle?: string | null) => {
+    const job = jobs.get(jobId);
+    const title = job ? job.roleTitle || job.departmentName : fallbackTitle || 'فرصت حذف‌شده';
+    const row = jobMap.get(jobId) || { jobId, roleTitle: title, direct: 0, time: 0, hires: 0 };
+    jobMap.set(jobId, row);
+    return row;
+  };
+  for (const e of entries) if (e.jobId) ensureJob(e.jobId, e.jobTitle).direct += e.amount;
+  for (const [jobId, minutes] of minutesByJob) ensureJob(jobId).time += Math.round((minutes / 60) * assumption.hourlyRate);
+  for (const r of hires) ensureJob(r.jobId, r.roleTitle || r.departmentName).hires += 1;
+
+  const byJob = Array.from(jobMap.values())
+    .map((j) => ({ ...j, perHire: j.hires ? Math.round((j.direct + j.time) / j.hires) : null }))
+    .sort((a, b) => b.direct + b.time - (a.direct + a.time));
+
+  const total = direct + timeCost;
+  const unattributed = entries.filter((e) => !e.jobId).reduce((sum, e) => sum + e.amount, 0);
+  return {
+    range,
+    entries,
+    totals: { direct, time: timeCost, total, unattributed },
+    byKind: costsByKind(entries),
+    hires: hires.length,
+    perHire: hires.length ? Math.round(total / hires.length) : null,
+    assumption,
+    hours,
+    byJob,
+  };
+}
+
 export function search(orgId: string, query: string): SearchResults {
   if (!query.trim()) return { jobs: [], candidates: [] };
   const jobHits = listJobs(orgId)
@@ -3035,6 +3281,10 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       ? raw.webhookDeliveries.filter((d: any) => d && isStr(d.id) && isStr(d.orgId) && isStr(d.event))
       : [],
     retention: raw.retention && typeof raw.retention === 'object' && !Array.isArray(raw.retention) ? raw.retention : undefined,
+    costs: Array.isArray(raw.costs)
+      ? raw.costs.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && Number.isFinite(Number(c.amount)) && Number(c.amount) > 0)
+      : [],
+    costAssumptions: raw.costAssumptions && typeof raw.costAssumptions === 'object' && !Array.isArray(raw.costAssumptions) ? raw.costAssumptions : undefined,
     aiStats: undefined,
   };
 }

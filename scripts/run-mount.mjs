@@ -178,6 +178,21 @@ navigate(`/app/jobs/${hr.id}/kit?c=${list.items[0].id}`);
 assert(await waitFor(() => text().includes('پرسش از خود این رزومه'), 15000), 'with a candidate, the kit asks about that résumé');
 assert(text().includes('این کیت برای'), 'and says whose kit it is');
 
+// 11a2. «عملکرد تیم» و «هزینهٔ هر استخدام» — the numbers a manager asks for.
+navigate('/app/reports/team');
+assert(await waitFor(() => text().includes('عملکرد تیم') && text().includes('هر عضو، چه کاری انجام داده'), 15000), 'the team report opens');
+assert(await waitFor(() => text().includes('تصمیم‌های ثبت‌شده') && text().includes('کارت ارزیابی'), 15000), 'team KPIs are counted, not placeholders');
+assert(text().includes('این گزارش چه چیزی نیست'), 'the team report says plainly what it is not');
+assert(!text().includes('مینا'), 'no candidate name appears in the team report');
+navigate('/app/reports/cost');
+assert(await waitFor(() => text().includes('هزینهٔ هر استخدام') && text().includes('ردیف‌های هزینه'), 15000), 'the cost report opens for the demo owner');
+assert(await waitFor(() => text().includes('هزینهٔ زمان تیم'), 15000), 'the time-cost card is present');
+assert(text().includes('آگهی و تبلیغ') || text().includes('شرکت مشاور'), 'the demo cost rows are listed');
+assert(text().includes('مستقیم + برآورد زمان تیم'), 'direct cost and the estimate are labelled separately');
+navigate('/app/reports');
+assert(await waitFor(() => text().includes('روند رزومه‌ها'), 15000), 'the screening report still opens');
+assert(text().includes('غربالگری') && text().includes('عملکرد تیم') && text().includes('هزینهٔ استخدام'), 'all three reports are one click apart');
+
 // 11b. «غربالگری بی‌طرف» — the switch, the masked table, the reveal.
 const setBlind = (on) =>
   nodeFetch(SERVER + '/api/org', {

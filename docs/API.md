@@ -324,6 +324,23 @@ GET /api/interview-kit/bank
 
 ---
 
+## ۵ب) عملکرد تیم و هزینهٔ استخدام (داخل برنامه)
+
+```http
+GET    /api/reports/team?range=90     → { members, totals, concentration, fastShare }
+GET    /api/reports/cost?range=365    → { entries, totals, byKind, hires, perHire, assumption, hours, byJob }
+POST   /api/costs                     → { entry }        (مدیر/مالک)
+PATCH  /api/costs/:id                 → { entry }        (مدیر/مالک)
+DELETE /api/costs/:id                 → { ok }           (مدیر/مالک)
+PUT    /api/costs/assumption          → { assumption }   (مدیر/مالک)
+```
+
+هزینه و نرخ ساعتی مالی سازمان‌اند: خواندن و نوشتنشان فقط با نقش مدیر یا مالک. گزارش
+عملکرد تیم برای همهٔ اعضا باز است. جزئیات، فرمول و نمونه در
+[`TEAM-AND-COST.md`](TEAM-AND-COST.md).
+
+---
+
 ## ۶) آنچه در این API نیست (و چرا)
 
 | نیست | دلیل |

@@ -2,6 +2,7 @@ import React from 'react';
 import { BarChart3, CheckCircle2, Cpu, Download, FileCheck2, Gauge, Heart, Hourglass, Info, Scale, Sparkles } from 'lucide-react';
 import { Bar, CartesianGrid, Cell, ComposedChart, Line, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { PageHeader } from '../components/layout/AppShell';
+import { ReportTabs } from '../components/reports/ReportTabs';
 import { Button, Card, CardHeader, EmptyState, ErrorState, JobStatusPill, Segmented, Skeleton, Stat, toast } from '../components/ui';
 import { api } from '../lib/api';
 import { faNumber, faPercent, toPersianDigits } from '../lib/format';
@@ -260,6 +261,7 @@ export default function Reports() {
           </>
         }
       />
+      <ReportTabs active="screening" />
       {error && <ErrorState message={error} onRetry={reload} />}
       {!error && loading && !data && (
         <div className="flex flex-col gap-4">

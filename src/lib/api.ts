@@ -16,6 +16,7 @@ import type {
   ScreeningAnswers,
 } from '../types/screening';
 import type { InterviewKit } from '../types/interview-kit';
+import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
 import type {
   ActivityFeed,
   AiStatus,
@@ -603,6 +604,14 @@ export const api = {
   insights: {
     dashboard: () => get<DashboardData>('/api/dashboard'),
     reports: (range: ReportRange) => get<ReportsData>(`/api/reports?range=${range}`),
+    teamReport: (range: ReportRange) => get<TeamReport>(`/api/reports/team?range=${range}`),
+    costReport: (range: ReportRange) => get<CostReport>(`/api/reports/cost?range=${range}`),
+    addCost: (b: { kind: CostKind; amount: number; atISO?: string | null; jobId?: string | null; note?: string }) =>
+      post<{ entry: CostEntry }>('/api/costs', b),
+    updateCost: (id: string, b: Partial<{ kind: CostKind; amount: number; atISO: string | null; jobId: string | null; note: string }>) =>
+      patch<{ entry: CostEntry }>(`/api/costs/${encodeURIComponent(id)}`, b),
+    deleteCost: (id: string) => del<{ ok: boolean }>(`/api/costs/${encodeURIComponent(id)}`),
+    setCostAssumption: (b: Partial<CostAssumption>) => put<{ assumption: CostAssumption }>('/api/costs/assumption', b),
     search: (q: string, opts?: RequestOptions) => get<SearchResults>(`/api/search?q=${encodeURIComponent(q)}`, opts),
     activity: (limit = 30) => get<ActivityFeed>(`/api/activity?limit=${limit}`),
     markSeen: () => post<{ unread: number }>('/api/activity/seen'),

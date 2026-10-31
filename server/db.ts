@@ -1003,7 +1003,12 @@ function claimLegacyDataOnStartup() {
 
 export function updateOrg(
   id: string,
-  patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'blindScreening' | 'offerApproval'>>
+  patch: Partial<
+    Pick<
+      OrgRecord,
+      'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'careerLanguages' | 'careerDefaultLang' | 'blindScreening' | 'offerApproval'
+    >
+  >
 ): OrgRecord | null {
   const org = orgs.get(id);
   if (!org) return null;
@@ -1012,6 +1017,8 @@ export function updateOrg(
   if (Array.isArray(patch.departments)) org.departments = patch.departments;
   if (typeof patch.careerSlug === 'string') org.careerSlug = patch.careerSlug;
   if (typeof patch.careerAbout === 'string') org.careerAbout = patch.careerAbout.slice(0, 1200);
+  if (Array.isArray(patch.careerLanguages)) org.careerLanguages = patch.careerLanguages;
+  if (patch.careerDefaultLang === 'fa' || patch.careerDefaultLang === 'en') org.careerDefaultLang = patch.careerDefaultLang;
   if (typeof patch.blindScreening === 'boolean') org.blindScreening = patch.blindScreening;
   if (patch.offerApproval && typeof patch.offerApproval === 'object') org.offerApproval = patch.offerApproval;
   scheduleSave();
@@ -1334,6 +1341,8 @@ export function updateJob(
       | 'stages'
       | 'accessMode'
       | 'allowedUserIds'
+      | 'titleEn'
+      | 'descriptionEn'
     >
   >
 ): Job | null {
@@ -1355,6 +1364,8 @@ export function updateJob(
   // travels with backups like every other field.
   if (patch.accessMode !== undefined) j.accessMode = patch.accessMode === 'restricted' ? 'restricted' : 'everyone';
   if (patch.allowedUserIds !== undefined) j.allowedUserIds = Array.from(new Set(patch.allowedUserIds)).slice(0, 200);
+  if (patch.titleEn !== undefined) j.titleEn = patch.titleEn ? String(patch.titleEn).slice(0, 160) : null;
+  if (patch.descriptionEn !== undefined) j.descriptionEn = patch.descriptionEn ? String(patch.descriptionEn).slice(0, 4000) : null;
   if (patch.stages !== undefined) {
     const next = sanitizeStages(patch.stages);
     if (next.length !== stagesOf(j).length) {

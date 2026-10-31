@@ -567,17 +567,21 @@ function CareersCard() {
   const [about, setAbout] = useState('');
   const [saving, setSaving] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [english, setEnglish] = useState(false);
+  const [defaultLang, setDefaultLang] = useState<'fa' | 'en'>('fa');
   const data = settings.data?.careers;
   useEffect(() => {
     if (!data) return;
     setSlug(data.slug);
     setAbout(data.about);
-  }, [data?.slug, data?.about]);
+    setEnglish(data.languages.includes('en'));
+    setDefaultLang(data.defaultLang);
+  }, [data?.slug, data?.about, data?.languages?.join(','), data?.defaultLang]);
 
   const save = async () => {
     setSaving(true);
     try {
-      const res = await api.careers.saveSettings({ slug, about });
+      const res = await api.careers.saveSettings({ slug, about, languages: english ? ['fa', 'en'] : ['fa'], defaultLang: english ? defaultLang : 'fa' });
       settings.setData({ careers: res.careers });
       toast('نشانی پورتال ذخیره شد.');
     } catch (err: any) {
@@ -595,7 +599,13 @@ function CareersCard() {
     window.setTimeout(() => setCopied(false), 2000);
   };
 
-  const dirty = Boolean(data && (slug !== data.slug || about !== data.about));
+  const dirty = Boolean(
+    data &&
+      (slug !== data.slug ||
+        about !== data.about ||
+        english !== data.languages.includes('en') ||
+        (english ? defaultLang : 'fa') !== data.defaultLang)
+  );
   return (
     <Card>
       <CardHeader
@@ -622,6 +632,30 @@ function CareersCard() {
           placeholder="چند خط دربارهٔ تیم، محصول و فرهنگ کاری…"
           disabled={!can || saving}
         />
+        <div className="rounded-[12px] border border-line-2 px-3.5 py-3 space-y-3">
+          <Switch
+            checked={english}
+            onChange={(v) => {
+              setEnglish(v);
+              if (!v) setDefaultLang('fa');
+            }}
+            label="نسخهٔ انگلیسی پورتال"
+            description="دکمهٔ زبان در صفحهٔ عمومی، و نشانی‌های hreflang برای گوگل. متن آگهی همان است که می‌نویسید؛ اگر نسخهٔ انگلیسی ننوشته باشید، صفحهٔ انگلیسی متن اصلی را با یک یادداشت صادقانه نشان می‌دهد."
+            disabled={!can || saving}
+          />
+          {english && (
+            <Select
+              label="زبانی که بازدیدکننده اول می‌بیند"
+              value={defaultLang}
+              onChange={(e) => setDefaultLang(e.target.value as 'fa' | 'en')}
+              options={[
+                { value: 'fa', label: 'فارسی' },
+                { value: 'en', label: 'English' },
+              ]}
+              disabled={!can || saving}
+            />
+          )}
+        </div>
         {data && (
           <div className="rounded-[12px] border border-line bg-canvas px-3 py-2.5 flex items-center gap-2">
             <span className="text-[12.5px] text-ink-2 truncate flex-1" dir="ltr">

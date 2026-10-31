@@ -219,6 +219,13 @@ export interface Job {
   criteriaSource: CriteriaSource;
   status: JobStatus;
   analysisStatus: AnalysisStatus;
+  /**
+   * «نسخهٔ انگلیسی آگهی» — what the bilingual portal shows to an English reader.
+   * Empty means the posting is Persian-only and the portal says so; HOVIDA never
+   * puts a machine translation in the employer's mouth.
+   */
+  titleEn?: string | null;
+  descriptionEn?: string | null;
   /** Listed on the public career portal (`/careers/<slug>`). */
   isPublic?: boolean;
   publishedAtISO?: string | null;

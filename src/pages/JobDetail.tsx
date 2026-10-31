@@ -85,6 +85,10 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
   // «مهلت درخواست» — a Jalali date the public page and the schema.org markup
   // both honour; empty means «تا اطلاع ثانوی».
   const [applyBy, setApplyBy] = useState(job.applyByJalali || '');
+  // «نسخهٔ انگلیسی آگهی» — free text the recruiter writes (or approves); the
+  // bilingual portal never machine-translates on its own.
+  const [titleEn, setTitleEn] = useState(job.titleEn || '');
+  const [descriptionEn, setDescriptionEn] = useState(job.descriptionEn || '');
   const [saving, setSaving] = useState(false);
   const jobRef = useRef(job);
   jobRef.current = job;
@@ -96,6 +100,8 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
       setLocation(jobRef.current.location);
       setExtraNotes(jobRef.current.extraNotes);
       setApplyBy(jobRef.current.applyByJalali || '');
+      setTitleEn(jobRef.current.titleEn || '');
+      setDescriptionEn(jobRef.current.descriptionEn || '');
     }
   }, [open]);
   const save = async () => {
@@ -106,6 +112,8 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
         location: location.trim(),
         extraNotes,
         applyBy: applyBy.trim(),
+        titleEn: titleEn.trim(),
+        descriptionEn,
       });
       onSaved(updated);
       emitChange('jobs', job.id);
@@ -146,6 +154,27 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
           onChange={(e) => setApplyBy(e.target.value)}
           hint="خالی بگذارید تا باز بماند. پس از این تاریخ، آگهی از پورتال شغلی و نتایج گوگل برداشته می‌شود و فرم بسته می‌شود."
         />
+        <div className="rounded-[12px] border border-line-2 px-3.5 py-3 space-y-3">
+          <p className="text-[12.5px] font-semibold text-ink-2">نسخهٔ انگلیسی (برای پورتال دوزبانه)</p>
+          <TextInput
+            label="عنوان انگلیسی"
+            optional
+            latin
+            placeholder="Senior Backend Engineer"
+            value={titleEn}
+            onChange={(e) => setTitleEn(e.target.value)}
+            hint="اگر خالی بماند، صفحهٔ انگلیسی عنوان فارسی را نشان می‌دهد و توضیح می‌دهد که آگهی فارسی است."
+          />
+          <TextArea
+            label="شرح انگلیسی"
+            optional
+            dir="ltr"
+            rows={4}
+            placeholder="What the role is about, in English…"
+            value={descriptionEn}
+            onChange={(e) => setDescriptionEn(e.target.value)}
+          />
+        </div>
       </div>
     </Modal>
   );

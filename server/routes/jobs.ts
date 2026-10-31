@@ -178,6 +178,9 @@ export function jobRoutes(): express.Router {
       ...(typeof req.body?.location === 'string' ? { location: str(req.body.location, 80) } : {}),
       ...(req.body?.employmentType !== undefined ? { employmentType: employmentOf(req.body.employmentType) } : {}),
       ...(status ? { status } : {}),
+      // «نسخهٔ انگلیسی»: empty clears it, so the portal falls back honestly.
+      ...(req.body?.titleEn !== undefined ? { titleEn: str(req.body.titleEn, 160) } : {}),
+      ...(req.body?.descriptionEn !== undefined ? { descriptionEn: str(req.body.descriptionEn, 4000) } : {}),
     });
     if (updated && status && status !== prevStatus) {
       db.logActivity(org.id, actorOf(req), 'job.status', `وضعیت «${updated.roleTitle}» را به «${STATUS_LABEL[status]}» تغییر داد`, { jobId: job.id });

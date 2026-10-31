@@ -38,7 +38,7 @@ import type {
   TeamMember,
   UserPublic,
 } from '../types/app';
-import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PublicCareersPage, PublicJobDetail } from '../types/careers';
+import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PortalLang, PublicCareersPage, PublicJobDetail } from '../types/careers';
 import type { CandidateComment, InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
 import type { JobOffer, OfferApprovalConfig, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
@@ -346,7 +346,8 @@ export const api = {
     /** «کیت مصاحبه» — composed from the job's criteria, plus this candidate's résumé. */
     interviewKit: (id: string, resumeId?: string) =>
       get<{ kit: InterviewKit }>(`/api/jobs/${id}/interview-kit${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
-    update: (id: string, b: Partial<JobInput> & { status?: Job['status']; applyBy?: string }) => patch<{ job: Job }>(`/api/jobs/${id}`, b),
+    update: (id: string, b: Partial<JobInput> & { status?: Job['status']; applyBy?: string; titleEn?: string; descriptionEn?: string; accessMode?: JobAccessMode; allowedUserIds?: string[] }) =>
+      patch<{ job: Job }>(`/api/jobs/${id}`, b),
     remove: (id: string) => del<{ ok: boolean }>(`/api/jobs/${id}`),
     analysis: (id: string, state: 'start' | 'cancel', opts?: RequestOptions) =>
       post<{ job: Job }>(`/api/jobs/${id}/analysis`, { state }, opts),
@@ -368,7 +369,8 @@ export const api = {
     apply: (slug: string, jobId: string, b: CareerApplicationInput) =>
       post<CareerApplicationResult>(`/api/careers/${encodeURIComponent(slug)}/jobs/${encodeURIComponent(jobId)}/apply`, b, { timeoutMs: 120_000 }),
     settings: () => get<{ careers: CareerSettings }>('/api/careers/settings'),
-    saveSettings: (b: { slug: string; about: string }) => put<{ careers: CareerSettings }>('/api/careers/settings', b),
+    saveSettings: (b: { slug: string; about: string; languages?: PortalLang[]; defaultLang?: PortalLang }) =>
+      put<{ careers: CareerSettings }>('/api/careers/settings', b),
     publish: (jobId: string, isPublic: boolean) =>
       post<{ job: JobSummary }>(`/api/jobs/${encodeURIComponent(jobId)}/publish`, { isPublic }),
   },

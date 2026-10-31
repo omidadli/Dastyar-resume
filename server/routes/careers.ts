@@ -18,7 +18,7 @@ import { isEmailConfigured, sendMail } from '../mailer';
 import { friendlySmtpError } from '../mailer';
 import { formatJalaliDate, toPersianDigits } from '../../src/utils/jalali';
 import { tehranJalaliOf } from '../tehran-time';
-import type { CareerSettings, PublicCareersPage, PublicJobDetail, PublicJobSummary } from '../../src/types/careers';
+import type { CareerSettings, PortalLang, PublicCareersPage, PublicJobDetail, PublicJobSummary } from '../../src/types/careers';
 import type { FeedbackRecommendation, InterviewFeedback, ScorecardSummary } from '../../src/types/pipeline';
 import type { Job, ResumeRecord } from '../../src/types/screening';
 import { systemSettings } from '../platform';
@@ -59,7 +59,16 @@ function publicSummary(job: Job): PublicJobSummary {
     publishedAtJalali: job.publishedAtISO ? formatJalaliDate(tehranJalaliOf(new Date(job.publishedAtISO)), true) : job.createdAtJalali,
     applyByJalali: job.applyByJalali || null,
     expired: isExpired(job),
+    titleEn: job.titleEn || null,
   };
+}
+
+/** What the portal switch needs: which languages are on, and the landing one. */
+function portalOf(org: { careerLanguages?: string[]; careerDefaultLang?: string }): { languages: PortalLang[]; defaultLang: PortalLang } {
+  const enabled = Array.isArray(org.careerLanguages) && org.careerLanguages.includes('en') ? ['fa', 'en'] : ['fa'];
+  const languages = enabled as PortalLang[];
+  const defaultLang: PortalLang = org.careerDefaultLang === 'en' && languages.includes('en') ? 'en' : 'fa';
+  return { languages, defaultLang };
 }
 
 function publicDetail(job: Job): PublicJobDetail {
@@ -71,6 +80,7 @@ function publicDetail(job: Job): PublicJobDetail {
   return {
     ...publicSummary(job),
     description: String(job.extraNotes || u?.plainExplanation || '').slice(0, 4000),
+    descriptionEn: job.descriptionEn ? String(job.descriptionEn).slice(0, 4000) : null,
     requirements,
     questions: (u?.questions || []).slice(0, 8).map((q) => ({
       id: q.id,
@@ -156,8 +166,10 @@ export function jobPostingJson(job: Job, org: { name: string; careerSlug: string
   const detail: any = {
     '@context': 'https://schema.org',
     '@type': 'JobPosting',
-    title: job.roleTitle,
-    description: descriptionHtml(job.extraNotes || u?.plainExplanation || job.roleTitle),
+    // The employer's own words: the English title only when HR wrote it.
+    title: job.titleEn || job.roleTitle,
+    description: descriptionHtml(job.descriptionEn || job.extraNotes || u?.plainExplanation || job.roleTitle),
+    inLanguage: job.titleEn || job.descriptionEn ? 'en' : 'fa',
     datePosted: job.publishedAtISO || job.createdAtISO,
     hiringOrganization: {
       '@type': 'Organization',
@@ -234,6 +246,21 @@ export function jobPostingLd(slug: string, jobId: string | undefined, origin: st
   return `<script type="application/ld+json">${json}</script>`;
 }
 
+/**
+ * `hreflang` alternates for a bilingual portal: a search engine must know the
+ * English page is the same posting, not a duplicate.
+ */
+function altLinks(org: { careerSlug: string; careerLanguages?: string[] }, jobId: string | undefined, origin: string): string[] {
+  if (!portalOf(org).languages.includes('en')) return [];
+  const path = `/careers/${org.careerSlug}${jobId ? `/jobs/${jobId}` : ''}`;
+  const base = origin.replace(/\/$/, '');
+  return [
+    `<link rel="alternate" hreflang="fa" href="${base}${path}?lang=fa" />`,
+    `<link rel="alternate" hreflang="en" href="${base}${path}?lang=en" />`,
+    `<link rel="alternate" hreflang="x-default" href="${base}${path}" />`,
+  ];
+}
+
 /** The <head> a career page needs: its own title, description and the JSON-LD. */
 export function careersHeadHtml(slug: string, jobId: string | undefined, origin: string): string | null {
   const org = db.findOrgByCareerSlug(slug);
@@ -251,6 +278,7 @@ export function careersHeadHtml(slug: string, jobId: string | undefined, origin:
       `<meta property="og:title" content="${esc(title)}" />`,
       `<meta property="og:description" content="${esc(desc)}" />`,
       `<meta property="og:type" content="website" />`,
+      ...altLinks(org, jobId, origin),
       expired ? `<meta name="robots" content="noindex,follow" />` : jobPostingLd(slug, jobId, origin),
     ].join('\n    ');
   }
@@ -263,6 +291,7 @@ export function careersHeadHtml(slug: string, jobId: string | undefined, origin:
     `<meta property="og:title" content="${esc(title)}" />`,
     `<meta property="og:description" content="${esc(desc)}" />`,
     `<meta property="og:type" content="website" />`,
+    ...altLinks(org, undefined, origin),
     jobListLd(slug, origin),
   ].join('\n    ');
 }
@@ -387,6 +416,7 @@ export function careerPublicRoutes() {
       const page: PublicCareersPage = {
         org: { name: org.name, about: org.careerAbout || '', slug: org.careerSlug },
         jobs: jobs.map(publicSummary),
+        portal: portalOf(org),
       };
       res.json(page);
     })
@@ -599,6 +629,7 @@ export function careerRoutes() {
         url: `${careerOriginOf(req)}/careers/${org.careerSlug}`,
         publishedJobs: jobs.filter((j) => j.isPublic && j.status === 'open').length,
         totalJobs: jobs.filter((j) => j.status === 'open').length,
+        ...portalOf(org),
       };
       res.json({ careers: settings });
     })
@@ -617,7 +648,21 @@ export function careerRoutes() {
       if (RESERVED_SLUGS.has(slug)) return res.status(400).json({ error: 'این نشانی رزرو شده است؛ نشانی دیگری انتخاب کنید.' });
       if (db.careerSlugTaken(slug, org.id)) return res.status(409).json({ error: 'این نشانی قبلاً برای سازمان دیگری ثبت شده است.' });
       const about = typeof req.body?.about === 'string' ? req.body.about.slice(0, 1200) : org.careerAbout;
-      const updated = db.updateOrg(org.id, { careerSlug: slug, careerAbout: about })!;
+      // «پورتال دوزبانه»: Persian is always on; English is a switch. A default
+      // language that is not enabled would send a visitor to a page that cannot exist.
+      let languages = portalOf(org).languages;
+      if (Array.isArray(req.body?.languages)) {
+        languages = req.body.languages.filter((l: unknown): l is PortalLang => l === 'fa' || l === 'en');
+        if (!languages.includes('fa')) languages = ['fa', ...languages];
+      }
+      const wanted = req.body?.defaultLang === 'en' || req.body?.defaultLang === 'fa' ? (req.body.defaultLang as PortalLang) : null;
+      const defaultLang: PortalLang = wanted && languages.includes(wanted) ? wanted : 'fa';
+      const updated = db.updateOrg(org.id, {
+        careerSlug: slug,
+        careerAbout: about,
+        careerLanguages: Array.from(new Set(languages)),
+        careerDefaultLang: defaultLang,
+      })!;
       db.logActivity(org.id, { id: user.id, name: user.name }, 'settings.changed', 'تنظیمات پورتال شغلی را تغییر داد');
       res.json({
         careers: {
@@ -626,6 +671,7 @@ export function careerRoutes() {
           url: `${careerOriginOf(req)}/careers/${updated.careerSlug}`,
           publishedJobs: db.listJobs(org.id).filter((j) => j.isPublic && j.status === 'open').length,
           totalJobs: db.listJobs(org.id).filter((j) => j.status === 'open').length,
+          ...portalOf(updated),
         } as CareerSettings,
       });
     })

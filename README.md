@@ -87,6 +87,7 @@ NODE_ENV=production npm start
 - **دیده‌شدن آگهی در گوگل:** نشانه‌گذاری `JobPosting`، مهلت درخواست، نقشهٔ سایت و جمع‌کننده‌های ایرانی: [`docs/JOB-POSTING.md`](docs/JOB-POSTING.md).
 - **معرفی همکار:** لینک اختصاصی هر عضو، ثبت خودکار معرفی در قیف، پاداش با دو تأیید انسانی و شرط دورهٔ آزمایشی: [`docs/REFERRALS.md`](docs/REFERRALS.md).
 - **دسترسی به هر آگهی:** استخدام محرمانه را به افراد مشخص محدود کنید؛ قفل روی فهرست، تخته، کارجو، فایل، پیشنهاد و جست‌وجو اعمال می‌شود: [`docs/JOB-ACCESS.md`](docs/JOB-ACCESS.md).
+- **پورتال دوزبانه:** فارسی و انگلیسی، نسخهٔ انگلیسی هر آگهی به قلم و تأیید منابع انسانی، `hreflang` و `JobPosting.inLanguage`: [`docs/PORTAL-LANGUAGES.md`](docs/PORTAL-LANGUAGES.md).
 - **Google Calendar:** راهنما: [`docs/CONNECT-GOOGLE-CALENDAR.md`](docs/CONNECT-GOOGLE-CALENDAR.md).
 - **چه کلیدی از کجا و کجای سایت؟** پرامپت آماده برای گرفتن راهنمای گام‌به‌گام: [`docs/PROMPT-API-KEYS.md`](docs/PROMPT-API-KEYS.md).
 - **پرامپت‌های آماده برای Manus** (ساخت حساب Apify، OAuth گوگل، SMTP، کلید AI و آزمون نهایی): [`docs/PROMPT-MANUS.md`](docs/PROMPT-MANUS.md).
@@ -177,6 +178,7 @@ npm run test:credentials      # مرکز کلیدها: صندوق/خط مشتر�
 npm run test:jobposting       # schema.org JobPosting در پورتال شغلی: نشانه‌گذاری سرور، مهلت درخواست، نقشهٔ سایت (۴۶ بررسی)
 npm run test:referrals        # معرفی همکار: کد اختصاصی، ثبت در قیف، پاداش در انتظار/تأیید/پرداخت (۴۵ بررسی)
 npm run test:job-access       # دسترسی هر آگهی: پنهان‌بودن آگهی محرمانه در فهرست، تخته، کارجو، پیشنهاد و جست‌وجو (۴۱ بررسی)
+npm run test:portal-langs     # پورتال دوزبانه: زبان پیش‌فرض، نسخهٔ انگلیسی آگهی، hreflang و JobPosting.inLanguage (۲۷ بررسی)
 npm run build && npm run test:backup  # پشتیبان کامل و بازیابی سرتاسری (دیسک → ذخیره‌ساز راه دور)
 npm run build && npm run test:cloudflare   # Worker، مسیریابی لبه و R2 در محیط واقعی workerd (بدون Docker)
 npm run test:offers           # پیشنهاد شغلی، امضا، گردش تأیید و سقف ارسال (۷۵ بررسی)

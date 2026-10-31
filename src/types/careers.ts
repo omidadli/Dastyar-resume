@@ -4,6 +4,10 @@
 // ================================================================
 import type { EmploymentType } from './screening';
 
+/** The languages the public portal can be read in. Persian is always available. */
+export type PortalLang = 'fa' | 'en';
+export const PORTAL_LANGS: PortalLang[] = ['fa', 'en'];
+
 export interface PublicJobSummary {
   id: string;
   roleTitle: string;
@@ -17,6 +21,12 @@ export interface PublicJobSummary {
   applyByJalali: string | null;
   /** True once that Tehran day is over: readable, but nothing can be submitted. */
   expired: boolean;
+  /**
+   * The English version, written (or approved) by the recruiter. Null means the
+   * posting is Persian-only — the English portal then shows the original text and
+   * says so, instead of pretending a machine translation is the employer's words.
+   */
+  titleEn: string | null;
 }
 
 export interface PublicOrg {
@@ -25,13 +35,22 @@ export interface PublicOrg {
   slug: string;
 }
 
+/** Which languages this workspace publishes in, and which one a newcomer lands on. */
+export interface PublicPortalLanguages {
+  languages: PortalLang[];
+  defaultLang: PortalLang;
+}
+
 export interface PublicCareersPage {
   org: PublicOrg;
   jobs: PublicJobSummary[];
+  portal: PublicPortalLanguages;
 }
 
 export interface PublicJobDetail extends PublicJobSummary {
   description: string;
+  /** The English body, if the recruiter wrote one. */
+  descriptionEn: string | null;
   requirements: string[];
   /** The workspace's own knockout/bonus questions, if it wants them answered. */
   questions: Array<{ id: string; label: string; kind: 'knockout' | 'bonus'; type: string; options?: string[] }>;
@@ -65,6 +84,9 @@ export interface CareerApplicationResult {
 export interface CareerSettings {
   slug: string;
   about: string;
+  /** Enabled languages (`fa` always) and the one the portal opens in. */
+  languages: PortalLang[];
+  defaultLang: PortalLang;
   /** Absolute URL a workspace can put on its website (built on the server). */
   url: string;
   publishedJobs: number;

@@ -28,6 +28,13 @@ export interface OrgPublic {
   careerSlug: string;
   careerAbout: string;
   /**
+   * «پورتال دوزبانه»: `fa` is always on; adding `en` puts a language switch on
+   * the public portal and English metadata for search engines.
+   */
+  careerLanguages?: ('fa' | 'en')[];
+  /** Which language a newcomer lands on (`fa` when unset). */
+  careerDefaultLang?: 'fa' | 'en';
+  /**
    * «غربالگری بی‌طرف»: while on, screening views are redacted on the server and
    * contacting a candidate waits for an explicit, logged reveal.
    */

@@ -59,6 +59,7 @@ import type { SchedulingLink } from '../src/types/scheduling';
 import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
 import type { VideoAnswer, VideoInvite, VideoQuestion, VideoSettings } from '../src/types/video';
 import type { Transcript } from '../src/types/transcript';
+import type { OnboardingPlan, OnboardingStatus, OnboardingTask } from '../src/types/onboarding';
 import type { CandidateComment } from '../src/types/pipeline';
 import type { ApiKeyPublic, ApiScope, WebhookDeliveryPublic, WebhookEndpointPublic } from '../src/types/developer';
 import type { RetentionPolicy } from '../src/types/retention';
@@ -172,6 +173,8 @@ export interface StoreSnapshot {
   videoSettings?: Record<string, VideoSettings>;
   /** «رونویسی گفتار» — transcripts of calls, voice notes and video answers. */
   transcripts?: TranscriptRow[];
+  /** «تحویل پس از استخدام» — the checklist that outlives the funnel. */
+  onboarding?: OnboardingRow[];
   /** Team comments (@mentions) written on a candidate. */
   comments?: CommentRow[];
   /** API keys — only a SHA-256 hash of the key is ever stored. */
@@ -297,6 +300,9 @@ export type SchedulingLinkRow = SchedulingLink & { orgId: string; token: string 
 export type CommentRow = CandidateComment & { orgId: string };
 /** A cost row as stored: the workspace-facing record plus its tenant. */
 export type CostRow = CostEntry & { orgId: string };
+/** «تحویل پس از استخدام» — one plan per hire, with its checklist. */
+export type OnboardingRow = Omit<OnboardingPlan, 'doneCount' | 'total' | 'daysUntil'> & { orgId: string };
+
 /** A «رونویسی گفتار» row: the text plus where the file lives. */
 export type TranscriptRow = Omit<Transcript, 'audioUrl'> & { orgId: string; filePath: string | null };
 
@@ -364,6 +370,7 @@ const assessments = new Map<string, AssessmentInviteRow>();
 const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
 const transcripts = new Map<string, TranscriptRow>();
+const onboardingPlans = new Map<string, OnboardingRow>();
 const smsLog = new Map<string, SmsLogRow>();
 const apiKeys = new Map<string, ApiKeyRow>();
 const webhooks = new Map<string, WebhookEndpointRow>();
@@ -422,6 +429,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
   snap.transcripts?.forEach((x) => transcripts.set(x.id, x));
+  snap.onboarding?.forEach((x) => onboardingPlans.set(x.id, x));
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   snap.apiKeys?.forEach((x) => apiKeys.set(x.id, x));
   snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
@@ -463,6 +471,7 @@ function clearMemory() {
   videoInvites.clear();
   videoSettings.clear();
   transcripts.clear();
+  onboardingPlans.clear();
   smsLog.clear();
   apiKeys.clear();
   webhooks.clear();
@@ -592,6 +601,7 @@ function snapshot(): StoreSnapshot {
     videoInvites: Array.from(videoInvites.values()),
     videoSettings: Object.fromEntries(videoSettings),
     transcripts: Array.from(transcripts.values()),
+    onboarding: Array.from(onboardingPlans.values()),
     smsLog: Array.from(smsLog.values()),
     apiKeys: Array.from(apiKeys.values()),
     webhooks: Array.from(webhooks.values()),
@@ -1087,6 +1097,7 @@ export function deleteOrg(id: string) {
   for (const [k, v] of videoInvites) if (v.orgId === id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${id}/${k}/`); }
   for (const k of Array.from(videoSettings.keys())) if (k.startsWith(`${id}:`)) videoSettings.delete(k);
   for (const [k, v] of transcripts) if (v.orgId === id) { transcripts.delete(k); deletePrefixQuietly(`transcripts/${id}/${v.resumeId}/`); }
+  for (const [k, v] of onboardingPlans) if (v.orgId === id) onboardingPlans.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
@@ -2225,6 +2236,38 @@ export function saveAssessment(row: AssessmentInviteRow): AssessmentInviteRow {
   return row;
 }
 
+// -------------------------------------------------------------- onboarding ----
+
+export function listOnboarding(orgId: string, filter: { resumeId?: string } = {}): OnboardingRow[] {
+  return Array.from(onboardingPlans.values())
+    .filter((o) => o.orgId === orgId)
+    .filter((o) => (filter.resumeId ? o.resumeId === filter.resumeId : true))
+    .sort((a, b) => a.startDateISO.localeCompare(b.startDateISO));
+}
+
+export function getOnboarding(orgId: string, id: string): OnboardingRow | null {
+  const row = onboardingPlans.get(id);
+  return row && row.orgId === orgId ? row : null;
+}
+
+export function onboardingFor(orgId: string, resumeId: string): OnboardingRow | null {
+  return listOnboarding(orgId, { resumeId }).find((o) => o.status !== 'cancelled') || null;
+}
+
+export function saveOnboarding(row: OnboardingRow): OnboardingRow {
+  onboardingPlans.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deleteOnboarding(orgId: string, id: string): boolean {
+  const row = getOnboarding(orgId, id);
+  if (!row) return false;
+  onboardingPlans.delete(id);
+  scheduleSave();
+  return true;
+}
+
 // ------------------------------------------------------------ transcripts ----
 
 export function listTranscripts(orgId: string, filter: { resumeId?: string; videoInviteId?: string } = {}): TranscriptRow[] {
@@ -2460,6 +2503,7 @@ export interface ErasedCounts {
   assessments: number;
   videos: number;
   transcripts: number;
+  onboarding: number;
 }
 
 /**
@@ -2470,7 +2514,7 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
   for (const [k, v] of offers) if (v.orgId === orgId && v.resumeId === resumeId) { offers.delete(k); counts.offers++; }
@@ -2480,6 +2524,11 @@ export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | 
   for (const [k, v] of schedulingLinks) if (v.orgId === orgId && v.resumeId === resumeId) { schedulingLinks.delete(k); counts.links++; }
   for (const [k, v] of surveys) if (v.orgId === orgId && v.resumeId === resumeId) { surveys.delete(k); counts.surveys++; }
   for (const [k, v] of assessments) if (v.orgId === orgId && v.resumeId === resumeId) { assessments.delete(k); counts.assessments++; }
+  for (const [k, v] of onboardingPlans)
+    if (v.orgId === orgId && v.resumeId === resumeId) {
+      onboardingPlans.delete(k);
+      counts.onboarding++;
+    }
   for (const [k, v] of transcripts)
     if (v.orgId === orgId && v.resumeId === resumeId) {
       transcripts.delete(k);
@@ -2712,6 +2761,8 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of videoInvites) if (v.orgId === job.orgId && v.jobId === job.id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${job.orgId}/${k}/`); }
   videoSettings.delete(`${job.orgId}:${job.id}`);
   for (const [k, v] of transcripts) if (v.orgId === job.orgId && v.jobId === job.id) { transcripts.delete(k); deletePrefixQuietly(`transcripts/${job.orgId}/${v.resumeId}/`); }
+  // A plan is about the person, not the opening: it stays when the job record goes.
+  for (const [k, v] of onboardingPlans) if (v.orgId === job.orgId && v.jobId === job.id) onboardingPlans.set(k, { ...v, jobId: null });
   for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
 }
 
@@ -3675,6 +3726,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
         )
       : undefined,
     videoSettings: raw.videoSettings && typeof raw.videoSettings === 'object' && !Array.isArray(raw.videoSettings) ? raw.videoSettings : undefined,
+    onboarding: Array.isArray(raw.onboarding)
+      ? raw.onboarding.filter((o: any) => o && isStr(o.id) && isStr(o.orgId) && isStr(o.resumeId) && Array.isArray(o.tasks))
+      : undefined,
     transcripts: Array.isArray(raw.transcripts)
       ? raw.transcripts.filter((t: any) => t && isStr(t.id) && isStr(t.orgId) && isStr(t.resumeId) && typeof t.text === 'string')
       : undefined,

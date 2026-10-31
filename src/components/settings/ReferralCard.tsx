@@ -259,7 +259,7 @@ export function ReferralCard() {
                     {m.link}
                   </code>
                   <span className="text-[11px] text-ink-4">
-                    {toPersianDigits(m.total)} معرفی · {toPersianDigits(m.hired)} استخدام
+                    {toPersianDigits(m.total)} معرفی، {toPersianDigits(m.hired)} استخدام
                   </span>
                   <Button size="sm" variant="ghost" icon={Copy} onClick={() => copy(m.link)}>
                     کپی

@@ -21,6 +21,7 @@ import { templateById } from './assessment-bank';
 import type { InterviewFeedback } from '../src/types/pipeline';
 import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
+import { createPlan } from './onboarding';
 
 // ---------------------------------------------------------------------------
 // A tiny, dependency-free PDF writer (single page, Helvetica, ASCII text).
@@ -794,6 +795,19 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
       db.updateJob(org.id, job.id, { analysisStatus: 'done' });
     }
     job.updatedAtISO = daysAgo(Math.max(0, spec.createdAgo - 3)).toISOString();
+  }
+
+  // «تحویل پس از استخدام»: the people the demo hired get their handover, so the
+  // page opens with a real checklist instead of an empty state.
+  for (const rec of db.listOrgResumes(org.id)) {
+    const job = rec.jobId ? db.getJob(org.id, rec.jobId) : null;
+    const stage = db.stagesOf(job).find((s) => s.id === rec.stageId);
+    if (stage?.kind !== 'hired' || db.onboardingFor(org.id, rec.id)) continue;
+    try {
+      createPlan(org.id, { id: 'demo', name: people.maryam.name }, { resumeId: rec.id, ownerName: 'مریم احمدی' });
+    } catch {
+      // A demo must never fail to load because of one optional page.
+    }
   }
 
   // «هزینهٔ هر استخدام»: a small, believable budget. Money is only ever what a

@@ -163,6 +163,8 @@ export type ActivityType =
   | 'video.reviewed'
   | 'video.cancelled'
   | 'transcript.added'
+  | 'onboarding.started'
+  | 'onboarding.completed'
   | 'settings.changed';
 
 export interface ActivityItem {

@@ -409,9 +409,9 @@ export default function VideoInterviews() {
                           )}
                         </div>
                         <p className="text-[11.5px] text-ink-3 mt-0.5">
-                          {invite.jobTitle || 'بدون فرصت'} · {toPersianDigits(rec)} از {toPersianDigits(invite.questions.length)} پاسخ ·{' '}
+                          {invite.jobTitle || 'بدون فرصت'}، {toPersianDigits(rec)} از {toPersianDigits(invite.questions.length)} پاسخ،{' '}
                           {faDate(invite.createdAtISO)}
-                          {invite.views > 0 ? ` · ${toPersianDigits(invite.views)} بار تماشا` : ''}
+                          {invite.views > 0 ? `، ${toPersianDigits(invite.views)} بار تماشا` : ''}
                           {invite.sentAtISO ? ' · ایمیل فرستاده شد' : ''}
                         </p>
                       </div>

@@ -22,6 +22,7 @@ import {
   Trash2,
   MessageSquareHeart,
   ClipboardList,
+  PartyPopper,
   Video,
   ShieldCheck,
   UserPlus,
@@ -81,6 +82,8 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'video.reviewed': Video,
   'video.cancelled': Video,
   'transcript.added': FileText,
+  'onboarding.started': PartyPopper,
+  'onboarding.completed': PartyPopper,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

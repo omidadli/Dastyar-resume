@@ -120,7 +120,7 @@ export default function EeoReport() {
                           </Chip>
                         ) : (
                           <span className="text-[12px] text-ink-3 hv-num">
-                            {faNumber(c.applied)} درخواست · {faNumber(c.hired)} استخدام
+                            {faNumber(c.applied)} درخواست، {faNumber(c.hired)} استخدام
                           </span>
                         )}
                       </div>

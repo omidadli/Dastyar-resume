@@ -19,6 +19,7 @@ import { ctxOf } from '../auth';
 import { blockedByBlind } from '../blind';
 import { h, str } from './util';
 import { markOutcome } from '../referrals';
+import { createPlan } from '../onboarding';
 import { isEmailConfigured, sendMail, friendlySmtpError } from '../mailer';
 import { formatJalaliDate, toPersianDigits } from '../../src/utils/jalali';
 import { tehranJalaliOf } from '../tehran-time';
@@ -201,6 +202,19 @@ export function offerPublicRoutes() {
       }
       // A referral is paid for a hire; accepting the offer is that moment.
       markOutcome(row.orgId, row.resumeId, 'hired', null);
+      // ...and the handover starts here: no one should remember to create it later.
+      try {
+        if (rec && !db.onboardingFor(row.orgId, row.resumeId)) {
+          createPlan(row.orgId, { id: 'system', name: row.createdByName || 'سامانه' }, {
+            resumeId: row.resumeId,
+            startDateJalali: row.terms.startDate,
+            ownerName: row.createdByName,
+            note: `به‌طور خودکار از پذیرش پیشنهاد شغلی «${row.terms.title || row.jobTitle}» ساخته شد.`,
+          });
+        }
+      } catch {
+        // The acceptance already stands; HR can create the plan by hand.
+      }
       db.logActivity(row.orgId, null, 'offer.accepted', `«${row.candidateName}» پیشنهاد شغلی «${row.terms.title || row.jobTitle}» را پذیرفت`, {
         jobId: row.jobId,
         resumeId: row.resumeId,

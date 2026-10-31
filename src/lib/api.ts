@@ -65,6 +65,7 @@ import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveyS
 import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
 import type { PublicVideoInvite, VideoInvite, VideoOverview, VideoSettings } from '../types/video';
 import type { Transcript, TranscriptStatusPayload } from '../types/transcript';
+import type { OnboardingOverview, OnboardingPlan } from '../types/onboarding';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -632,6 +633,27 @@ export const api = {
       submit: (token: string, answers: Record<string, string | number>) =>
         post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
     },
+  },
+  onboarding: {
+    overview: () => get<OnboardingOverview>('/api/onboarding'),
+    hired: () =>
+      get<{ items: { id: string; candidateName: string; candidateEmail: string | null; jobTitle: string | null; departmentName: string | null; hiredAtISO: string }[] }>(
+        '/api/onboarding/hired'
+      ),
+    get: (id: string) => get<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}`),
+    create: (b: { resumeId: string; startDateJalali?: string; startDateISO?: string; ownerName?: string; note?: string }) =>
+      post<{ plan: OnboardingPlan }>('/api/onboarding', b),
+    update: (id: string, b: { startDateJalali?: string; ownerName?: string; note?: string }) =>
+      patch<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}`, b),
+    addTask: (id: string, label: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/tasks`, { label }),
+    toggleTask: (id: string, taskId: string) =>
+      post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}/toggle`, {}),
+    removeTask: (id: string, taskId: string) =>
+      del<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}`),
+    welcome: (id: string) => post<{ plan: OnboardingPlan; emailed: boolean }>(`/api/onboarding/${encodeURIComponent(id)}/welcome`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/cancel`, {}),
+    remove: (id: string) => del<void>(`/api/onboarding/${encodeURIComponent(id)}`),
+    exportUrl: '/api/onboarding/export',
   },
   transcripts: {
     status: () => get<TranscriptStatusPayload>('/api/transcripts/status'),

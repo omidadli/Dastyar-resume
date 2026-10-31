@@ -40,6 +40,7 @@ import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
 import { videoPublicRoutes, videoRoutes } from './server/routes/video';
 import { transcriptPublicRoutes, transcriptRoutes } from './server/routes/transcripts';
+import { onboardingRoutes } from './server/routes/onboarding';
 import { apiV1Routes } from './server/routes/api-v1';
 import { forwardActivity } from './server/chat-webhook';
 import { deliverActivity } from './server/webhooks';
@@ -148,6 +149,7 @@ async function startServer() {
   app.use('/api', assessmentRoutes()); // «آزمون و ارزیابی»: catalogue, send, result
   app.use('/api', videoRoutes()); // «مصاحبهٔ ویدئویی»: questions, invite, watch, rate
   app.use('/api', transcriptRoutes()); // «رونویسی گفتار»: audio, subtitle, manual text
+  app.use('/api', onboardingRoutes()); // «تحویل پس از استخدام»: checklist, start date, welcome mail
   app.use('/api', privacyRoutes()); // candidate data export + erasure (DSAR)
   app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
   app.use('/api', referralRoutes()); // «معرفی همکار»: program, links, reward approval

@@ -34,6 +34,7 @@ import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/schedu
 import { commentRoutes } from './server/routes/comments';
 import { developerRoutes } from './server/routes/developer';
 import { privacyRoutes } from './server/routes/privacy';
+import { referralRoutes } from './server/routes/referrals';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
 import { apiV1Routes } from './server/routes/api-v1';
@@ -139,6 +140,7 @@ async function startServer() {
   app.use('/api', assessmentRoutes()); // «آزمون و ارزیابی»: catalogue, send, result
   app.use('/api', privacyRoutes()); // candidate data export + erasure (DSAR)
   app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
+  app.use('/api', referralRoutes()); // «معرفی همکار»: program, links, reward approval
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------

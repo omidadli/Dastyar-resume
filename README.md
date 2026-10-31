@@ -85,6 +85,7 @@ NODE_ENV=production npm start
 - **ایمیل سازمان (SMTP):** راهنما: [`docs/CONNECT-EMAIL.md`](docs/CONNECT-EMAIL.md).
 - **همهٔ کلیدها یک‌جا:** نقشهٔ کلیدها، ترتیب اولویت و قاعدهٔ «تنظیم نشده»: [`docs/CREDENTIALS-HUB.md`](docs/CREDENTIALS-HUB.md).
 - **دیده‌شدن آگهی در گوگل:** نشانه‌گذاری `JobPosting`، مهلت درخواست، نقشهٔ سایت و جمع‌کننده‌های ایرانی: [`docs/JOB-POSTING.md`](docs/JOB-POSTING.md).
+- **معرفی همکار:** لینک اختصاصی هر عضو، ثبت خودکار معرفی در قیف، پاداش با دو تأیید انسانی و شرط دورهٔ آزمایشی: [`docs/REFERRALS.md`](docs/REFERRALS.md).
 - **Google Calendar:** راهنما: [`docs/CONNECT-GOOGLE-CALENDAR.md`](docs/CONNECT-GOOGLE-CALENDAR.md).
 - **چه کلیدی از کجا و کجای سایت؟** پرامپت آماده برای گرفتن راهنمای گام‌به‌گام: [`docs/PROMPT-API-KEYS.md`](docs/PROMPT-API-KEYS.md).
 - **پرامپت‌های آماده برای Manus** (ساخت حساب Apify، OAuth گوگل، SMTP، کلید AI و آزمون نهایی): [`docs/PROMPT-MANUS.md`](docs/PROMPT-MANUS.md).
@@ -173,6 +174,7 @@ npm run build && npm run test:admin   # آزمون سرتاسری نسخه produ
 npm run test:integrations     # جست‌وجوی لینکدین با سرویس ساختگی، ارسال واقعی ایمیل روی SMTP آزمایشی، جلسهٔ مصاحبه و ICS
 npm run test:credentials      # مرکز کلیدها: صندوق/خط مشترک سامانه، اولویت حساب فضای کاری و صداقت «تنظیم نشده» (۲۷ بررسی)
 npm run test:jobposting       # schema.org JobPosting در پورتال شغلی: نشانه‌گذاری سرور، مهلت درخواست، نقشهٔ سایت (۴۶ بررسی)
+npm run test:referrals        # معرفی همکار: کد اختصاصی، ثبت در قیف، پاداش در انتظار/تأیید/پرداخت (۴۵ بررسی)
 npm run build && npm run test:backup  # پشتیبان کامل و بازیابی سرتاسری (دیسک → ذخیره‌ساز راه دور)
 npm run build && npm run test:cloudflare   # Worker، مسیریابی لبه و R2 در محیط واقعی workerd (بدون Docker)
 npm run test:offers           # پیشنهاد شغلی، امضا، گردش تأیید و سقف ارسال (۷۵ بررسی)

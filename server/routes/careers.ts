@@ -22,6 +22,7 @@ import type { CareerSettings, PublicCareersPage, PublicJobDetail, PublicJobSumma
 import type { FeedbackRecommendation, InterviewFeedback, ScorecardSummary } from '../../src/types/pipeline';
 import type { Job, ResumeRecord } from '../../src/types/screening';
 import { systemSettings } from '../platform';
+import { markOfferReached, markOutcome, memberByCode, recordReferral } from '../referrals';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const RESERVED_SLUGS = new Set([
@@ -466,6 +467,10 @@ export function careerPublicRoutes() {
         });
       }
 
+      // A code that really belongs to a member is a referral; a random string
+      // the candidate typed is just what they typed (still kept as `heardFrom`).
+      const referrer = ref ? memberByCode(org.id, ref) : null;
+
       noteAttempt(ip);
       let record: ResumeRecord;
       try {
@@ -477,14 +482,14 @@ export function careerPublicRoutes() {
           unjudgeableReason: null,
           fileBase64,
           source: {
-            kind: ref ? 'referral' : 'careers',
+            kind: referrer ? 'referral' : 'careers',
             profileUrl: '',
             headline: message || 'درخواست از پورتال شغلی',
             company: null,
             location: city,
             openToWork: true,
             searchId: null,
-            referrer: ref || null,
+            referrer: referrer?.name || null,
             heardFrom: heardFrom || null,
           },
           errorMessage: 'رزومه دریافت شد؛ بررسی خودکار در حال انجام است.',
@@ -541,6 +546,25 @@ export function careerPublicRoutes() {
         }
       }
 
+      // A real member code of an enabled program becomes a tracked referral;
+      // anything else is ignored (the answer to «چطور آشنا شدید؟» still stands).
+      if (ref) {
+        const tracked = recordReferral({
+          orgId: org.id,
+          jobId: job.id,
+          jobTitle: job.roleTitle,
+          resumeId: record.id,
+          candidateName: name,
+          code: ref,
+          heardFrom: heardFrom || null,
+        });
+        if (tracked) {
+          db.logActivity(org.id, null, 'sourcing.imported', `«${name}» با معرفی «${tracked.referrerName}» درخواست داد`, {
+            jobId: job.id,
+            resumeId: record.id,
+          });
+        }
+      }
       db.logActivity(org.id, null, 'sourcing.imported', `درخواست تازه از پورتال شغلی: «${name}» برای «${job.roleTitle}»`, {
         jobId: job.id,
         resumeId: record.id,
@@ -656,6 +680,10 @@ export function careerRoutes() {
       const stage = stages.find((s) => s.id === str(req.body?.stageId, 40));
       if (!stage) return res.status(400).json({ error: 'این ستون در تختهٔ این فرصت شغلی وجود ندارد.' });
       db.setStage(rec, stage.id);
+      // The referral follows the funnel, including its money.
+      if (stage.kind === 'hired') markOutcome(org.id, rec.id, 'hired', { id: user.id, name: user.name });
+      else if (stage.kind === 'rejected') markOutcome(org.id, rec.id, 'rejected', { id: user.id, name: user.name });
+      else if (stage.kind === 'offer') markOfferReached(org.id, rec.id);
       if (stage.kind === 'rejected' && rec.decisionStatus === 'none') {
         db.setDecision(rec, 'rejected', 'از تختهٔ جذب به ستون کنار گذاشته‌شده منتقل شد', { id: user.id, name: user.name });
       }

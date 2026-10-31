@@ -17,6 +17,7 @@ import * as db from '../db';
 import { ctxOf } from '../auth';
 import { blockedByBlind } from '../blind';
 import { h, str } from './util';
+import { markOutcome } from '../referrals';
 import { isEmailConfigured, sendMail, friendlySmtpError } from '../mailer';
 import { formatJalaliDate, toPersianDigits } from '../../src/utils/jalali';
 import { tehranJalaliOf } from '../tehran-time';
@@ -197,6 +198,8 @@ export function offerPublicRoutes() {
         if (hired) db.setStage(rec, hired.id);
         db.setDecision(rec, 'approved', `پیشنهاد شغلی را پذیرفت (${done.respondedAtJalali})`, { id: 'candidate', name: row.candidateName });
       }
+      // A referral is paid for a hire; accepting the offer is that moment.
+      markOutcome(row.orgId, row.resumeId, 'hired', null);
       db.logActivity(row.orgId, null, 'offer.accepted', `«${row.candidateName}» پیشنهاد شغلی «${row.terms.title || row.jobTitle}» را پذیرفت`, {
         jobId: row.jobId,
         resumeId: row.resumeId,

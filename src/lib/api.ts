@@ -49,6 +49,7 @@ import type {
 } from '../types/automation';
 import type { ApiKeyPublic, CreatedApiKey, DeveloperOverview, WebhookDeliveryPublic, WebhookEndpointPublic, WebhookTestResult } from '../types/developer';
 import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '../types/retention';
+import type { ReferralProgramInput, ReferralsPayload } from '../types/referrals';
 import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
 import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
 import type {
@@ -604,6 +605,14 @@ export const api = {
       submit: (token: string, answers: Record<string, string | number>) =>
         post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
     },
+  },
+  referrals: {
+    get: () => get<ReferralsPayload>('/api/referrals'),
+    saveProgram: (b: ReferralProgramInput) => put<ReferralsPayload>('/api/referrals/program', b),
+    approve: (id: string, note = '') => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/approve`, { note }),
+    pay: (id: string) => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/pay`, {}),
+    confirmProbation: (id: string) => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/confirm`, {}),
+    voidReward: (id: string, note = '') => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/void`, { note }),
   },
   developer: {
     overview: () => get<DeveloperOverview>('/api/developer/overview'),

@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowLeft, ArrowRight, BriefcaseBusiness, CheckCircle2, 
 import { HovidaLogo } from '../components/brand/Logo';
 import { Button, Callout, Chip, Field, Select, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
-import { Link, navigate } from '../lib/router';
+import { Link, navigate, useLocation } from '../lib/router';
 import { useTitle } from '../lib/useTitle';
 import { useAsync } from '../lib/useAsync';
 import type { CareerApplicationInput, PublicJobDetail } from '../types/careers';
@@ -29,6 +29,9 @@ const MAX_MB = 8;
  */
 export default function Careers({ slug, jobId }: { slug: string; jobId?: string }) {
   const pageQ = useAsync(() => api.careers.page(slug), [slug]);
+  const { search } = useLocation();
+  // A colleague's referral code must survive the step from the list to the job.
+  const ref = new URLSearchParams(search).get('ref') || '';
   useTitle(jobId ? 'درخواست همکاری' : pageQ.data?.org.name || 'فرصت‌های شغلی');
 
   if (pageQ.error) {
@@ -79,7 +82,7 @@ export default function Careers({ slug, jobId }: { slug: string; jobId?: string 
           {jobs.map((j) => (
             <li key={j.id}>
               <Link
-                to={`/careers/${slug}/jobs/${j.id}`}
+                to={`/careers/${slug}/jobs/${j.id}${ref ? `?ref=${encodeURIComponent(ref)}` : ''}`}
                 className="hv-card p-4 sm:p-5 flex items-start gap-4 hover:border-brand/40 transition-colors group"
               >
                 <span className="w-10 h-10 rounded-[12px] bg-brand-tint text-brand-strong flex items-center justify-center shrink-0">

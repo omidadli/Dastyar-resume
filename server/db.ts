@@ -66,6 +66,7 @@ import type { InterviewFeedback, PipelineBoard, PipelineStage } from '../src/typ
 import { DEFAULT_STAGES } from '../src/types/pipeline';
 import { normalizeAutomationSettings } from './automation-settings';
 import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../src/types/reports';
+import type { ReferralProgram, ReferralRewardStatus, ReferralRow } from '../src/types/referrals';
 import { byKind as costsByKind, DEFAULT_ASSUMPTION, normalizeAssumption, sumDirect } from './costs';
 import { buildTeamReport } from './team-report';
 import {
@@ -177,6 +178,9 @@ export interface StoreSnapshot {
   costs?: CostRow[];
   /** The workspace's own hourly-rate assumption for internal recruiting time. */
   costAssumptions?: Record<string, CostAssumption>;
+  /** «معرفی همکار» — program settings and every referral the portal produced. */
+  referralPrograms?: Record<string, ReferralProgram>;
+  referrals?: ReferralRow[];
 }
 
 /** Encrypted connection material for one workspace. */
@@ -342,6 +346,8 @@ const webhookDeliveries = new Map<string, WebhookDeliveryRow>();
 const retentionPolicies = new Map<string, RetentionPolicy>();
 const costRows = new Map<string, CostRow>();
 const costAssumptions = new Map<string, CostAssumption>();
+const referralPrograms = new Map<string, ReferralProgram>();
+const referrals = new Map<string, ReferralRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -395,6 +401,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   for (const [k, v] of Object.entries(snap.retention || {})) retentionPolicies.set(k, v);
   snap.costs?.forEach((x) => costRows.set(x.id, x));
   for (const [k, v] of Object.entries(snap.costAssumptions || {})) costAssumptions.set(k, normalizeAssumption(v));
+  for (const [k, v] of Object.entries(snap.referralPrograms || {})) referralPrograms.set(k, normalizeReferralProgram(v));
+  snap.referrals?.forEach((x) => referrals.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -431,6 +439,8 @@ function clearMemory() {
   retentionPolicies.clear();
   costRows.clear();
   costAssumptions.clear();
+  referralPrograms.clear();
+  referrals.clear();
   activity = [];
   platformBlob = null;
   auditLog = [];
@@ -555,6 +565,8 @@ function snapshot(): StoreSnapshot {
     retention: Object.fromEntries(retentionPolicies),
     costs: Array.from(costRows.values()),
     costAssumptions: Object.fromEntries(costAssumptions),
+    referralPrograms: Object.fromEntries(referralPrograms),
+    referrals: Array.from(referrals.values()),
   };
 }
 
@@ -1897,6 +1909,63 @@ export function connectionAdoption(): {
     if (secrets.sso?.enabled) sso += 1;
   }
   return { orgs: orgs.size, email, calendar, sms, chat, sso };
+}
+
+// ------------------------------------------------------- «معرفی همکار» ----
+
+const DEFAULT_REFERRAL_PROGRAM: ReferralProgram = {
+  enabled: false,
+  rewardAmount: 0,
+  trigger: 'hire',
+  terms: '',
+  membersOnly: true,
+};
+
+export function normalizeReferralProgram(raw: unknown): ReferralProgram {
+  const r = raw && typeof raw === 'object' ? (raw as any) : {};
+  const amount = Number(r.rewardAmount);
+  return {
+    enabled: Boolean(r.enabled),
+    // A negative or absurd reward is not a setting, it is a typo.
+    rewardAmount: Number.isFinite(amount) ? Math.max(0, Math.min(1_000_000_000, Math.round(amount))) : 0,
+    trigger: r.trigger === 'offer' || r.trigger === 'probation' ? r.trigger : 'hire',
+    terms: typeof r.terms === 'string' ? r.terms.slice(0, 1200) : '',
+    membersOnly: r.membersOnly === undefined ? true : Boolean(r.membersOnly),
+  };
+}
+
+export function getReferralProgram(orgId: string): ReferralProgram {
+  return referralPrograms.get(orgId) || { ...DEFAULT_REFERRAL_PROGRAM };
+}
+
+export function saveReferralProgram(orgId: string, program: ReferralProgram): ReferralProgram {
+  const next = normalizeReferralProgram(program);
+  referralPrograms.set(orgId, next);
+  scheduleSave();
+  return next;
+}
+
+/** Newest first. */
+export function listReferrals(orgId: string): ReferralRow[] {
+  return Array.from(referrals.values())
+    .filter((r) => r.orgId === orgId)
+    .sort((a, b) => b.submittedAtISO.localeCompare(a.submittedAtISO));
+}
+
+export function getReferral(orgId: string, id: string): ReferralRow | null {
+  const row = referrals.get(id);
+  return row && row.orgId === orgId ? row : null;
+}
+
+export function findReferralByResume(orgId: string, resumeId: string): ReferralRow | null {
+  for (const r of referrals.values()) if (r.orgId === orgId && r.resumeId === resumeId) return r;
+  return null;
+}
+
+export function saveReferral(row: ReferralRow): ReferralRow {
+  referrals.set(row.id, row);
+  scheduleSave();
+  return row;
 }
 
 // ------------------------------------------------------ «اتوماسیون جذب» ----

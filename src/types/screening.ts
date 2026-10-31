@@ -193,6 +193,16 @@ export interface JobStats {
   avgScore: number;
 }
 
+/** Who may open an opening: everybody in the workspace, or a named list. */
+export type JobAccessMode = 'everyone' | 'restricted';
+
+/** What the «دسترسی» dialog needs: the rule, the chosen people and the team. */
+export interface JobAccessPayload {
+  accessMode: JobAccessMode;
+  allowedUserIds: string[];
+  members: { id: string; name: string; email: string; role: 'owner' | 'admin' | 'member'; isCreator: boolean }[];
+}
+
 export interface Job {
   id: string;
   orgId: string | null;
@@ -220,6 +230,15 @@ export interface Job {
   applyByISO?: string | null;
   /** The same deadline as the recruiter typed it (۱۴۰۴/۰۸/۱۲), for display. */
   applyByJalali?: string | null;
+  /**
+   * «دسترسی به این آگهی» — `everyone` (default) is how every other hiring tool
+   * starts. `restricted` hides the opening, its candidates and their files from
+   * members who are not on `allowedUserIds`; admins and the creator always see
+   * it. Confidential searches (a CFO, a founder's replacement) are the reason.
+   */
+  accessMode?: JobAccessMode;
+  /** Only meaningful with `accessMode: 'restricted'`. Members, never outside users. */
+  allowedUserIds?: string[];
   /** The board's columns for this opening (defaults applied when absent). */
   stages?: PipelineStage[];
   stats: JobStats;
@@ -379,6 +398,8 @@ export type ResumeSort = 'match' | 'newest' | 'oldest' | 'experience' | 'name' |
 
 export interface ResumeQuery {
   jobId?: string;
+  /** Narrowing for job-level access: only résumés of these openings. */
+  jobIds?: string[];
   match?: MatchFilter;
   decision?: DecisionFilter;
   q?: string;

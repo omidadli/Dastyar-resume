@@ -4,6 +4,8 @@ import type {
   DraftMessage,
   EmploymentType,
   Job,
+  JobAccessMode,
+  JobAccessPayload,
   JobStats,
   JobSummary,
   JobUnderstanding,
@@ -337,7 +339,10 @@ export const api = {
       post<{ understanding: JobUnderstanding; source: CriteriaSource }>('/api/jobs/template', b),
     create: (b: JobInput & { understanding: JobUnderstanding; answers: ScreeningAnswers; criteriaSource: CriteriaSource }) =>
       post<{ job: Job }>('/api/jobs', b),
-    get: (id: string, opts?: RequestOptions) => get<{ job: Job }>(`/api/jobs/${id}`, opts),
+    get: (id: string, opts?: RequestOptions) => get<{ job: Job; access?: JobAccessPayload }>(`/api/jobs/${id}`, opts),
+    /** «دسترسی به این آگهی» — admins only. */
+    setAccess: (id: string, b: { accessMode: JobAccessMode; allowedUserIds: string[] }) =>
+      put<{ job: Job; access: JobAccessPayload }>(`/api/jobs/${id}/access`, b),
     /** «کیت مصاحبه» — composed from the job's criteria, plus this candidate's résumé. */
     interviewKit: (id: string, resumeId?: string) =>
       get<{ kit: InterviewKit }>(`/api/jobs/${id}/interview-kit${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),

@@ -7,6 +7,7 @@
  */
 import express from 'express';
 import * as db from '../db';
+import { blockedByResume } from '../job-access';
 import { ctxOf } from '../auth';
 import { blindOn, knownNames, maskText } from '../blind';
 import { h, str } from './util';
@@ -35,6 +36,7 @@ export function commentRoutes() {
       const { org } = ctxOf(req);
       const rec = db.getResume(org.id, req.params.id);
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       const items = db.listComments(org.id, rec.id).map(db.withoutOrg);
       // A teammate may have written the name into a note; blind mode covers that too.
       const maskedItems = blindOn(org) ? items.map((c) => ({ ...c, body: maskText(c.body, knownNames([rec])) })) : items;
@@ -48,6 +50,7 @@ export function commentRoutes() {
       const { org, user } = ctxOf(req);
       const rec = db.getResume(org.id, req.params.id);
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       const body = typeof req.body?.body === 'string' ? req.body.body.trim().slice(0, MAX_BODY) : '';
       if (body.length < 2) return res.status(400).json({ error: 'متن یادداشت را بنویسید.' });
 

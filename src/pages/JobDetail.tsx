@@ -11,6 +11,7 @@ import {
   FileStack,
   Globe,
   ListChecks,
+  Lock,
   MoreHorizontal,
   Pause,
   Pencil,
@@ -34,6 +35,7 @@ import { InterviewList } from '../components/candidates/InterviewModal';
 import { AnalysisProgress } from '../components/jobs/AnalysisProgress';
 import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
+import { JobAccessModal } from '../components/jobs/JobAccessModal';
 import {
   Button,
   ButtonLink,
@@ -62,7 +64,7 @@ import {
 } from '../components/ui';
 import { RejectModal } from '../components/candidates/CandidateModals';
 import { api } from '../lib/api';
-import { useAuth } from '../lib/auth';
+import { useAuth, useCan } from '../lib/auth';
 import { useAnalysis } from '../lib/analysis';
 import { clearCompare, forgetCompareJob, removeFromCompare, toggleCompare } from '../lib/compare';
 import { emitChange, useOnChange } from '../lib/events';
@@ -72,7 +74,7 @@ import { candidateName, faDate, faNumber, toPersianDigits } from '../lib/format'
 import { navigate, setQuery, useLocation } from '../lib/router';
 import { useAsync, useDebounced, useMediaQuery } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import type { DecisionFilter, DecisionStatus, Job, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
+import type { DecisionFilter, DecisionStatus, Job, JobAccessPayload, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
 type JobTab = 'candidates' | 'board' | 'interviews' | 'criteria';
 
@@ -152,6 +154,7 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
 export default function JobDetail({ id }: { id: string }) {
   const { query } = useLocation();
   const { user } = useAuth();
+  const canManageAccess = useCan('admin');
   const analysis = useAnalysis();
   const run = analysis.runFor(id);
   const isWide = useMediaQuery('(min-width: 1280px)');
@@ -339,6 +342,7 @@ export default function JobDetail({ id }: { id: string }) {
   const boardQ = useAsync(() => api.jobs.board(id), [id, boardVersion, tab === 'board']);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [editOpen, setEditOpen] = useState(false);
+  const [accessOpen, setAccessOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
   const running = run?.status === 'running';
@@ -406,6 +410,19 @@ export default function JobDetail({ id }: { id: string }) {
   // keeps the page; a 4xx — deleted, no access — replaces it.
   if (jobQ.error && (!job || (jobQ.errorStatus !== null && jobQ.errorStatus >= 400 && jobQ.errorStatus < 500))) {
     // Deleted or never existed: «try again» cannot help — offer the way back instead.
+    if (jobQ.errorStatus === 403) {
+      return (
+        <div className="hv-card mt-6">
+          <EmptyState
+            icon={Lock}
+            titleAs="h1"
+            title="این فرصت شغلی برای شما به اشتراک گذاشته نشده است"
+            description="مدیر فضای کاری دسترسی این آگهی را به افراد مشخصی محدود کرده است. اگر برای کار روی این استخدام لازم است، از او بخواهید نام شما را اضافه کند."
+            action={<ButtonLink to="/app/jobs">بازگشت به فرصت‌های شغلی</ButtonLink>}
+          />
+        </div>
+      );
+    }
     if (jobQ.errorStatus === 404) {
       return (
         <div className="hv-card mt-6">
@@ -515,6 +532,11 @@ export default function JobDetail({ id }: { id: string }) {
                 منتشرشده
               </Chip>
             )}
+            {job.accessMode === 'restricted' && (
+              <Chip tone="warning" icon={Lock} title="این آگهی فقط برای افراد انتخاب‌شده و مدیران دیده می‌شود">
+                دسترسی محدود
+              </Chip>
+            )}
             {job.criteriaSource === 'template' && (
               <Chip tone="outline" icon={FileStack} title="معیارهای این فرصت از الگوی آماده دپارتمان ساخته شده است">
                 الگوی آماده
@@ -550,6 +572,7 @@ export default function JobDetail({ id }: { id: string }) {
               width={220}
               items={[
                 { label: 'ویرایش اطلاعات', icon: Pencil, onClick: () => setEditOpen(true) },
+                ...(canManageAccess ? [{ label: 'دسترسی به این آگهی', icon: Lock, onClick: () => setAccessOpen(true) }] : []),
                 {
                   label: job.isPublic ? 'برداشتن از پورتال شغلی' : 'انتشار در پورتال شغلی',
                   icon: Globe,
@@ -899,6 +922,16 @@ export default function JobDetail({ id }: { id: string }) {
       </Modal>
 
       <EditJobModal job={job} open={editOpen} onClose={() => setEditOpen(false)} onSaved={(j) => jobQ.setData({ job: j })} />
+      <JobAccessModal
+        jobId={job.id}
+        jobTitle={job.roleTitle}
+        open={accessOpen}
+        onClose={() => setAccessOpen(false)}
+        access={jobQ.data?.access ?? null}
+        onSaved={(acc: JobAccessPayload) =>
+          jobQ.setData((d) => (d ? { ...d, access: acc, job: { ...d.job, accessMode: acc.accessMode, allowedUserIds: acc.allowedUserIds } } : d))
+        }
+      />
       <ConfirmDialog
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}

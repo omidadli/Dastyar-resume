@@ -14,6 +14,7 @@
 import crypto from 'crypto';
 import express from 'express';
 import * as db from '../db';
+import { blockedByJobId, blockedByResume, visibleJobIds } from '../job-access';
 import { ctxOf } from '../auth';
 import { blockedByBlind } from '../blind';
 import { h, str } from './util';
@@ -262,10 +263,15 @@ export function offerRoutes() {
   r.get(
     '/offers',
     h(async (req, res) => {
-      const { org } = ctxOf(req);
+      const { org, user } = ctxOf(req);
       const jobId = str(req.query.jobId, 80) || undefined;
       const resumeId = str(req.query.resumeId, 80) || undefined;
-      const items = db.listOffers(org.id, { jobId, resumeId }).map((o) => viewOf(req, o));
+      // «دسترسی آگهی»: an offer for a confidential opening is not in the list.
+      const allowed = visibleJobIds(org.id, user);
+      const items = db
+        .listOffers(org.id, { jobId, resumeId })
+        .filter((o) => !allowed || allowed.includes(o.jobId))
+        .map((o) => viewOf(req, o));
       res.json({ items, counts: db.offerCounts(org.id) });
     })
   );
@@ -277,6 +283,7 @@ export function offerRoutes() {
       if (req.params.id === 'public') return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
       const row = db.getOffer(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       res.json({ offer: viewOf(req, row) });
     })
   );
@@ -288,6 +295,7 @@ export function offerRoutes() {
       const { org, user } = ctxOf(req);
       const rec = db.getResume(org.id, str(req.body?.resumeId, 80));
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       if (blockedByBlind(org, res)) return;
       const job = db.getJob(org.id, rec.jobId);
       if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
@@ -346,6 +354,7 @@ export function offerRoutes() {
       const { org } = ctxOf(req);
       const row = db.getOffer(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       if (row.status !== 'draft') return res.status(409).json({ error: 'پیشنهاد فرستاده‌شده قابل ویرایش نیست؛ برای تغییر، پیشنهاد تازه بسازید.' });
       const next: db.OfferRow = {
         ...row,
@@ -364,6 +373,7 @@ export function offerRoutes() {
       const { org, user } = ctxOf(req);
       const row = db.getOffer(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       if (row.status === 'sent') return res.status(409).json({ error: 'این پیشنهاد پیش‌تر فرستاده شده است؛ می‌توانید نشانی را دوباره کپی کنید.' });
       if (row.status !== 'draft') return res.status(409).json({ error: `این پیشنهاد در وضعیت «${OFFER_STATUS_LABEL[row.status]}» است.` });
       const waiting = pendingApproval(row);
@@ -456,6 +466,7 @@ export function offerRoutes() {
       const { org, user } = ctxOf(req);
       const row = db.getOffer(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       const decision: 'approved' | 'rejected' | null =
         req.body?.decision === 'rejected' ? 'rejected' : req.body?.decision === 'approved' ? 'approved' : null;
       if (!decision) return res.status(400).json({ error: 'تصمیم باید «approved» یا «rejected» باشد.', code: 'BAD_DECISION' });
@@ -503,6 +514,7 @@ export function offerRoutes() {
       const { org, user } = ctxOf(req);
       const row = db.getOffer(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       if (row.status !== 'draft' && row.status !== 'sent') {
         return res.status(409).json({ error: `پیشنهادی که «${OFFER_STATUS_LABEL[row.status]}» است لغو نمی‌شود.` });
       }
@@ -523,6 +535,7 @@ export function offerRoutes() {
       const { org } = ctxOf(req);
       const row = db.getOffer(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       res.json({
         offer: viewOf(req, row),
         salaryLabel: row.terms.salaryAmount === null ? 'توافقی' : `${toPersianDigits(row.terms.salaryAmount.toLocaleString('en-US'))} تومان ${row.terms.salaryPeriod === 'annual' ? 'سالانه' : 'ماهانه'}`,

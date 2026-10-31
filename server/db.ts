@@ -1332,6 +1332,8 @@ export function updateJob(
       | 'applyByISO'
       | 'applyByJalali'
       | 'stages'
+      | 'accessMode'
+      | 'allowedUserIds'
     >
   >
 ): Job | null {
@@ -1349,6 +1351,10 @@ export function updateJob(
   }
   if (patch.applyByISO !== undefined) j.applyByISO = patch.applyByISO;
   if (patch.applyByJalali !== undefined) j.applyByJalali = patch.applyByJalali;
+  // «دسترسی به این آگهی»: stored on the job itself so it survives restarts and
+  // travels with backups like every other field.
+  if (patch.accessMode !== undefined) j.accessMode = patch.accessMode === 'restricted' ? 'restricted' : 'everyone';
+  if (patch.allowedUserIds !== undefined) j.allowedUserIds = Array.from(new Set(patch.allowedUserIds)).slice(0, 200);
   if (patch.stages !== undefined) {
     const next = sanitizeStages(patch.stages);
     if (next.length !== stagesOf(j).length) {
@@ -2588,6 +2594,8 @@ export function queryResumes(orgId: string, q: ResumeQuery): ResumePage {
 
   let pool = orgResumes(orgId).filter((r) => {
     if (q.jobId && r.jobId !== q.jobId) return false;
+    // «دسترسی به هر آگهی»: a member's list only ever sees the openings they hold.
+    if (q.jobIds && !q.jobIds.includes(r.jobId)) return false;
     if (q.departmentId && q.departmentId !== 'all' && r.departmentId !== q.departmentId) return false;
     if (q.minScore && r.score < q.minScore) return false;
     if (q.minYears && (r.facts?.yearsExperience ?? -1) < q.minYears) return false;

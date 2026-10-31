@@ -5,19 +5,30 @@ import type { ReportRange } from '../../src/types/app';
 import { int, oneOf, str } from './util';
 import { blindOn, knownNames, maskActivity, maskText, redactList } from '../blind';
 import { readAssumptionInput, readCostInput } from '../costs';
+import { visibleJobIds } from '../job-access';
 
 export function insightRoutes(): express.Router {
   const r = express.Router();
 
   r.get('/dashboard', (req, res) => {
-    const { org } = ctxOf(req);
+    const { org, user } = ctxOf(req);
     const data = db.dashboard(org.id);
-    if (!blindOn(org)) return res.json(data);
+    // «دسترسی آگهی»: the queue and the feed on the home page follow the same
+    // rule as the openings themselves.
+    const allowed = visibleJobIds(org.id, user);
+    const visible = allowed
+      ? {
+          ...data,
+          pending: data.pending.filter((p: any) => !p.jobId || allowed.includes(p.jobId)),
+          activity: data.activity.filter((a: any) => !a.jobId || allowed.includes(a.jobId)),
+        }
+      : data;
+    if (!blindOn(org)) return res.json(visible);
     // Blind mode covers the dashboard too: the «منتظر تصمیم» queue and the feed.
     res.json({
-      ...data,
-      pending: redactList(data.pending),
-      activity: maskActivity(data.activity, knownNames(db.listOrgResumes(org.id))),
+      ...visible,
+      pending: redactList(visible.pending),
+      activity: maskActivity(visible.activity, knownNames(db.listOrgResumes(org.id))),
     });
   });
 
@@ -110,9 +121,17 @@ export function insightRoutes(): express.Router {
   });
 
   r.get('/search', (req, res) => {
-    const { org } = ctxOf(req);
+    const { org, user } = ctxOf(req);
     const q = str(req.query.q, 100);
-    const found = db.search(org.id, q);
+    const raw = db.search(org.id, q);
+    // A confidential opening must not surface through the search box either.
+    const allowed = visibleJobIds(org.id, user);
+    const found = allowed
+      ? {
+          jobs: raw.jobs.filter((j) => allowed.includes(j.id)),
+          candidates: raw.candidates.filter((c) => allowed.includes(c.jobId)),
+        }
+      : raw;
     if (!blindOn(org)) return res.json(found);
     // Searching by a name in blind mode would confirm a guess: the person is
     // not searchable by identity, only by role, skill or score.
@@ -122,7 +141,8 @@ export function insightRoutes(): express.Router {
   r.get('/activity', (req, res) => {
     const { org, user } = ctxOf(req);
     const limit = Math.min(100, Math.max(1, int(req.query.limit, 30)));
-    const items = db.listActivity(org.id, limit);
+    const allowed = visibleJobIds(org.id, user);
+    const items = db.listActivity(org.id, limit).filter((a) => !a.jobId || !allowed || allowed.includes(a.jobId));
     res.json({
       items: blindOn(org) ? maskActivity(items, knownNames(db.listOrgResumes(org.id))) : items,
       unread: db.unreadCount(user),

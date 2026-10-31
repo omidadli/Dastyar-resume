@@ -14,6 +14,7 @@
 import crypto from 'crypto';
 import express from 'express';
 import * as db from '../db';
+import { blockedByJobId, blockedByResume, visibleJobIds } from '../job-access';
 import { ctxOf } from '../auth';
 import { blockedByBlind } from '../blind';
 import { h, int, str } from './util';
@@ -160,9 +161,11 @@ export function schedulingRoutes() {
   r.get(
     '/scheduling',
     h(async (req, res) => {
-      const { org } = ctxOf(req);
+      const { org, user } = ctxOf(req);
+      const allowed = visibleJobIds(org.id, user);
       const items = db
         .listSchedulingLinks(org.id, { jobId: str(req.query.jobId, 80) || undefined, resumeId: str(req.query.resumeId, 80) || undefined })
+        .filter((l) => !allowed || allowed.includes(l.jobId))
         .map((l) => viewOf(req, l));
       res.json({ items });
     })
@@ -174,6 +177,7 @@ export function schedulingRoutes() {
       const { org } = ctxOf(req);
       const row = db.getSchedulingLink(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'لینک زمان‌بندی یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       res.json({ link: viewOf(req, row) });
     })
   );
@@ -184,6 +188,7 @@ export function schedulingRoutes() {
       const { org, user } = ctxOf(req);
       const rec = db.getResume(org.id, str(req.body?.resumeId, 80));
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       if (blockedByBlind(org, res)) return;
       const job = db.getJob(org.id, rec.jobId);
       if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
@@ -251,6 +256,7 @@ export function schedulingRoutes() {
       const { org, user } = ctxOf(req);
       const row = db.getSchedulingLink(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'لینک زمان‌بندی یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       if (row.status !== 'open') return res.status(409).json({ error: 'این لینک دیگر باز نیست.' });
       const to = (row.candidateEmail || '').toLowerCase().trim();
       if (!EMAIL_RE.test(to)) return res.status(400).json({ error: 'برای این کارجو ایمیل معتبری ثبت نشده است.' });
@@ -289,6 +295,7 @@ export function schedulingRoutes() {
       const { org, user } = ctxOf(req);
       const row = db.getSchedulingLink(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'لینک زمان‌بندی یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
       if (row.status === 'booked') return res.status(409).json({ error: 'کارجو زمان را انتخاب کرده است؛ برای تغییر، مصاحبه را لغو کنید.' });
       const next: db.SchedulingLinkRow = { ...row, status: 'cancelled' };
       db.saveSchedulingLink(next);

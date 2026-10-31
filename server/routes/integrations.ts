@@ -13,6 +13,7 @@ import express from 'express';
 import * as db from '../db';
 import { actorOf, ctxOf, requireRole } from '../auth';
 import { blindOn, blockedByBlind, knownNames, maskText } from '../blind';
+import { visibleJobIds } from '../job-access';
 import { h, str } from './util';
 import { evaluateResume } from '../ai/screening';
 import { EmailNotConfiguredError, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings, sendMail, verifyEmail } from '../mailer';
@@ -575,10 +576,14 @@ export function integrationRoutes(): express.Router {
   // ------------------------------------------------------------- interviews ----
 
   r.get('/interviews', (req, res) => {
-    const { org } = ctxOf(req);
+    const { org, user } = ctxOf(req);
     const jobId = str(req.query.jobId, 80) || undefined;
     const resumeId = str(req.query.resumeId, 80) || undefined;
-    const items = db.listInterviews(org.id, { jobId, resumeId }).map(publicInterview);
+    const allowed = visibleJobIds(org.id, user);
+    const items = db
+      .listInterviews(org.id, { jobId, resumeId })
+      .filter((i) => !allowed || (i.jobId ? allowed.includes(i.jobId) : true))
+      .map(publicInterview);
     if (!blindOn(org)) return res.json({ items });
     const names = knownNames(db.listOrgResumes(org.id));
     res.json({ items: items.map((i) => ({ ...i, candidateName: maskText(i.candidateName, names) })) });

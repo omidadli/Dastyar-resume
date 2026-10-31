@@ -108,6 +108,7 @@ export type ActivityType =
   | 'candidate.revealed'
   | 'job.created'
   | 'job.status'
+  | 'job.access'
   | 'job.deleted'
   | 'analysis.completed'
   | 'decision'

@@ -23,6 +23,7 @@ import type { FeedbackRecommendation, InterviewFeedback, ScorecardSummary } from
 import type { Job, ResumeRecord } from '../../src/types/screening';
 import { systemSettings } from '../platform';
 import { markOfferReached, markOutcome, memberByCode, recordReferral } from '../referrals';
+import { blockedByJob, blockedByResume, visibleJobs } from '../job-access';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const RESERVED_SLUGS = new Set([
@@ -590,8 +591,8 @@ export function careerRoutes() {
   r.get(
     '/careers/settings',
     h(async (req, res) => {
-      const { org } = ctxOf(req);
-      const jobs = db.listJobs(org.id);
+      const { org, user } = ctxOf(req);
+      const jobs = visibleJobs(org.id, user);
       const settings: CareerSettings = {
         slug: org.careerSlug,
         about: org.careerAbout,
@@ -637,6 +638,7 @@ export function careerRoutes() {
       const { org, user } = ctxOf(req);
       const job = db.getJob(org.id, req.params.id);
       if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+      if (blockedByJob(req, res, job)) return;
       if (user.role === 'member' && job.createdBy !== user.id) {
         return res.status(403).json({ error: 'انتشار آگهی کار مدیر فضای کاری یا سازندهٔ آن است.' });
       }
@@ -661,9 +663,10 @@ export function careerRoutes() {
     '/jobs/:id/board',
     h(async (req, res) => {
       const { org } = ctxOf(req);
-      const board = db.jobBoard(org.id, req.params.id);
-      if (!board) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
-      res.json(board);
+      const job = db.getJob(org.id, req.params.id);
+      if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+      if (blockedByJob(req, res, job)) return;
+      res.json(db.jobBoard(org.id, req.params.id));
     })
   );
 
@@ -674,6 +677,7 @@ export function careerRoutes() {
       const { org, user } = ctxOf(req);
       const rec = db.getResume(org.id, req.params.id);
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       const job = db.getJob(org.id, rec.jobId);
       if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
       const stages = db.stagesOf(job);
@@ -722,6 +726,7 @@ export function careerRoutes() {
       const { org } = ctxOf(req);
       const rec = db.getResume(org.id, req.params.id);
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       const items = db.listFeedback(org.id, { resumeId: rec.id }).map(db.withoutOrg);
       res.json({ summary: summarize(items), mine: items.find((f) => f.reviewerId === ctxOf(req).user.id) || null });
     })
@@ -733,6 +738,7 @@ export function careerRoutes() {
       const { org, user } = ctxOf(req);
       const rec = db.getResume(org.id, req.params.id);
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       const job = db.getJob(org.id, rec.jobId);
       if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
 

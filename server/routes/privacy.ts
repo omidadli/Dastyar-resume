@@ -9,6 +9,7 @@
  */
 import express from 'express';
 import * as db from '../db';
+import { blockedByResume } from '../job-access';
 import { actorOf, ctxOf, requireRole } from '../auth';
 import { h, str } from './util';
 import { formatJalaliDate } from '../../src/utils/jalali';
@@ -28,6 +29,7 @@ export function privacyRoutes(): express.Router {
       const { org } = ctxOf(req);
       const rec = db.getResume(org.id, str(req.params.id, 80));
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       const job = db.getJob(org.id, rec.jobId);
       const stamp = new Date();
 
@@ -69,6 +71,7 @@ export function privacyRoutes(): express.Router {
       const { org } = ctxOf(req);
       const rec = db.getResume(org.id, str(req.params.id, 80));
       if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+      if (blockedByResume(req, res, rec)) return;
       if (str(req.body?.confirm, 20) !== ERASE_CONFIRM) {
         return res.status(400).json({
           error: 'برای پاک‌سازی کامل، تأیید صریح لازم است؛ این کار برگشت‌پذیر نیست.',

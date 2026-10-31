@@ -163,6 +163,11 @@ npm run build && npm run test:admin   # آزمون سرتاسری نسخه produ
 npm run test:integrations     # جست‌وجوی لینکدین با سرویس ساختگی، ارسال واقعی ایمیل روی SMTP آزمایشی، جلسهٔ مصاحبه و ICS
 npm run build && npm run test:backup  # پشتیبان کامل و بازیابی سرتاسری (دیسک → ذخیره‌ساز راه دور)
 npm run build && npm run test:cloudflare   # Worker، مسیریابی لبه و R2 در محیط واقعی workerd (بدون Docker)
+npm run test:offers           # پیشنهاد شغلی، امضا، گردش تأیید و سقف ارسال (۷۵ بررسی)
+npm run test:assessment       # بانک آزمون، امتیازدهی، صفحهٔ عمومی و قرارداد ارائه‌دهنده (۷۰ بررسی)
+npm run test:sso              # ورود سازمانی با یک ارائه‌دهندهٔ OIDC درون‌فرایندی (۵۳ بررسی)
+npm run test:team             # گزارش عملکرد تیم و هزینهٔ هر استخدام
+npm run test:collab test:blind test:retention test:survey test:2fa test:kit test:developer test:scheduling
 # با یک سرور در حال اجرا روی 3111:
 DATA_DIR=/tmp/hv PORT=3111 NODE_ENV=production node dist/server.cjs &
 npm run test:api              # آزمون سرتاسری API: احراز هویت، جداسازی سازمان‌ها، فایل‌ها، تحلیل

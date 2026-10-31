@@ -174,6 +174,11 @@ async function startServer() {
         index: false,
         setHeaders: (res, filePath) => {
           if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+          // A cached service worker is an app that never updates: always revalidate.
+          else if (/[\\/]sw\.js$/.test(filePath)) {
+            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+            res.setHeader('Service-Worker-Allowed', '/');
+          }
           else if (/[\\/]assets[\\/]/.test(filePath)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           else res.setHeader('Cache-Control', 'public, max-age=86400');
         },

@@ -38,6 +38,8 @@ import { CompareTray, useCompareTrayVisible } from './CompareTray';
 import { SkipToMain } from './SkipToMain';
 import { toPersianDigits } from '../../lib/format';
 import { useMediaQuery } from '../../lib/useAsync';
+import { useInstallApp } from '../../lib/pwa';
+import { InstallHelpDialog, installMenuItem } from './InstallApp';
 
 const ROLE_LABEL = { owner: 'مالک فضای کاری', admin: 'مدیر', member: 'عضو تیم' } as const;
 
@@ -80,9 +82,13 @@ function AiStatusChip() {
 
 function UserCard() {
   const { user, org, signOut, support } = useAuth();
+  const install = useInstallApp();
+  const [helpOpen, setHelpOpen] = useState(false);
   if (!user || !org) return null;
   const isPlatformAdmin = Boolean(user.platformAdmin) && !support;
+  const installItem = installMenuItem(install, () => setHelpOpen(true));
   return (
+    <>
     <Menu
       align="start"
       side="top"
@@ -97,6 +103,7 @@ function UserCard() {
         { label: 'حساب کاربری', icon: UserRound, onClick: () => navigate('/app/settings/account') },
         { label: 'تنظیمات سازمان', icon: Settings, onClick: () => navigate('/app/settings/org') },
         ...(isPlatformAdmin ? [{ label: 'پنل مدیریت سامانه', icon: ShieldCheck, onClick: () => navigate('/admin') }] : []),
+        ...(installItem ? [installItem] : []),
         'divider',
         { label: 'خروج از حساب', icon: LogOut, tone: 'danger', onClick: () => void signOut() },
       ]}
@@ -116,6 +123,8 @@ function UserCard() {
         </button>
       )}
     />
+    <InstallHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+    </>
   );
 }
 
@@ -277,6 +286,9 @@ function MobileNav({ onMore, moreOpen }: { onMore: () => void; moreOpen: boolean
 
 function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { signOut, user, org, support } = useAuth();
+  const install = useInstallApp();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const installItem = installMenuItem(install, () => setHelpOpen(true));
   useLockScroll(open);
   useEscapeLayer(open, onClose);
   useRestoreFocus(open);
@@ -319,6 +331,18 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               {it.label}
             </button>
           ))}
+          {installItem && (
+            <button
+              onClick={() => {
+                onClose();
+                installItem.onClick();
+              }}
+              className="flex items-center gap-3 h-12 px-3 rounded-[12px] text-[15px] font-semibold text-ink-2 hover:bg-line-2"
+            >
+              <installItem.icon className="w-5 h-5 text-ink-3" strokeWidth={1.8} />
+              {installItem.label}
+            </button>
+          )}
           <button
             onClick={() => {
               onClose();
@@ -331,6 +355,7 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           </button>
         </div>
       </div>
+      <InstallHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

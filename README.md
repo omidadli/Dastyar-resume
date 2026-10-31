@@ -90,6 +90,7 @@ NODE_ENV=production npm start
 - **پورتال دوزبانه:** فارسی و انگلیسی، نسخهٔ انگلیسی هر آگهی به قلم و تأیید منابع انسانی، `hreflang` و `JobPosting.inLanguage`: [`docs/PORTAL-LANGUAGES.md`](docs/PORTAL-LANGUAGES.md).
 - **برابری فرصت‌ها:** پرسش‌های داوطلبانه و بی‌نام، پنهان از تصمیم‌گیرنده و گزارش تجمیعی با پنهان‌سازی گروه‌های کوچک: [`docs/EEO.md`](docs/EEO.md).
 - **مصاحبهٔ ویدئویی:** چند پرسش کوتاه، ضبط با گوشی کارجو بدون نصب چیزی، سقف تعداد ضبط، پخش خصوصی با لینک امضاشده و امتیاز انسانی (بدون ارزیابی چهره): [`docs/VIDEO-INTERVIEWS.md`](docs/VIDEO-INTERVIEWS.md).
+- **نصب روی دستگاه:** وب‌اپ نصب‌شدنی با آیکن، تمام‌صفحه، میان‌برها و صفحهٔ آفلاین فارسی — بدون کش‌کردن دادهٔ کارجویان: [`docs/INSTALL-APP.md`](docs/INSTALL-APP.md).
 - **رونویسی گفتار:** تماس تلفنی، یادداشت صوتی یا پاسخ ویدئویی به متن قابل جست‌وجو تبدیل می‌شود — با کلید Gemini خودکار، و همیشه با متن دستی یا فایل زیرنویس: [`docs/TRANSCRIPTS.md`](docs/TRANSCRIPTS.md).
 - **همگام‌سازی اعضا با SCIM 2.0:** Okta/Entra/Google Workspace، ساخت و غیرفعال‌سازی خودکار، حذف = غیرفعال‌سازی و نقشِ مدیر فقط با توکن مالک: [`docs/SCIM.md`](docs/SCIM.md).
 - **Google Calendar:** راهنما: [`docs/CONNECT-GOOGLE-CALENDAR.md`](docs/CONNECT-GOOGLE-CALENDAR.md).
@@ -187,6 +188,7 @@ npm run test:eeo               # برابری فرصت‌ها: پرسش داوط
 npm run test:scim              # SCIM 2.0: توکن، ساخت عضو، فیلتر، غیرفعال‌سازی بدون حذف، حفاظت از مالک (۴۴ بررسی)
 npm run test:video             # مصاحبهٔ ویدئویی: پرسش‌ها، سقف ضبط، لینک پخش امضاشده، امتیاز، حالت بی‌طرف (۵۸ بررسی)
 npm run test:transcript        # رونویسی گفتار: متن دستی، زیرنویس SRT/VTT، فایل صوتی بی‌کلید، پخش امضاشده (۴۸ بررسی)
+npm run test:pwa               # نصب روی دستگاه: مانیفست، آیکن‌های واقعی، هدرهای سرویس‌ورکر، صفحهٔ آفلاین (۳۳ بررسی)
 npm run build && npm run test:backup  # پشتیبان کامل و بازیابی سرتاسری (دیسک → ذخیره‌ساز راه دور)
 npm run build && npm run test:cloudflare   # Worker، مسیریابی لبه و R2 در محیط واقعی workerd (بدون Docker)
 npm run test:offers           # پیشنهاد شغلی، امضا، گردش تأیید و سقف ارسال (۷۵ بررسی)

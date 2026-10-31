@@ -64,6 +64,7 @@ import type { ReferralProgramInput, ReferralsPayload } from '../types/referrals'
 import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
 import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
 import type { PublicVideoInvite, VideoInvite, VideoOverview, VideoSettings } from '../types/video';
+import type { Transcript, TranscriptStatusPayload } from '../types/transcript';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -631,6 +632,23 @@ export const api = {
       submit: (token: string, answers: Record<string, string | number>) =>
         post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
     },
+  },
+  transcripts: {
+    status: () => get<TranscriptStatusPayload>('/api/transcripts/status'),
+    list: (q: { resumeId?: string; videoInviteId?: string }) => get<{ items: Transcript[] }>(`/api/transcripts${qs(q)}`),
+    get: (id: string) => get<{ transcript: Transcript }>(`/api/transcripts/${encodeURIComponent(id)}`),
+    audio: (b: { resumeId: string; fileName: string; mimeType: string; dataBase64: string; durationSec?: number }) =>
+      post<{ transcript: Transcript; note: string | null }>('/api/transcripts/audio', b, { timeoutMs: 180_000 }),
+    text: (b: { resumeId: string; text: string; title?: string }) => post<{ transcript: Transcript }>('/api/transcripts/text', b),
+    subtitle: (b: { resumeId: string; content: string; fileName?: string }) => post<{ transcript: Transcript }>('/api/transcripts/subtitle', b),
+    video: (inviteId: string, questionId: string) =>
+      post<{ transcript: Transcript; note: string | null }>(
+        `/api/transcripts/video/${encodeURIComponent(inviteId)}/${encodeURIComponent(questionId)}`,
+        {},
+        { timeoutMs: 180_000 }
+      ),
+    update: (id: string, b: { text?: string; title?: string }) => patch<{ transcript: Transcript }>(`/api/transcripts/${encodeURIComponent(id)}`, b),
+    remove: (id: string) => del<void>(`/api/transcripts/${encodeURIComponent(id)}`),
   },
   video: {
     overview: (filter: { jobId?: string; resumeId?: string } = {}) => get<VideoOverview>(`/api/video${qs(filter)}`),

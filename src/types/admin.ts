@@ -93,7 +93,7 @@ export interface AiCallLog {
   attachments: number;
 }
 
-export type AiPurpose = 'evaluate' | 'deep' | 'understand' | 'calibrate' | 'message' | 'test' | 'lab' | 'other';
+export type AiPurpose = 'evaluate' | 'deep' | 'understand' | 'calibrate' | 'message' | 'test' | 'lab' | 'transcribe' | 'other';
 
 // ----------------------------------------------------- outside connections ----
 /**

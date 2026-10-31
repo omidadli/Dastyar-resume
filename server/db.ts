@@ -58,6 +58,7 @@ import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
 import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
 import type { VideoAnswer, VideoInvite, VideoQuestion, VideoSettings } from '../src/types/video';
+import type { Transcript } from '../src/types/transcript';
 import type { CandidateComment } from '../src/types/pipeline';
 import type { ApiKeyPublic, ApiScope, WebhookDeliveryPublic, WebhookEndpointPublic } from '../src/types/developer';
 import type { RetentionPolicy } from '../src/types/retention';
@@ -169,6 +170,8 @@ export interface StoreSnapshot {
   videoInvites?: VideoInviteRow[];
   /** Per-job video questions, keyed `<orgId>:<jobId>`. */
   videoSettings?: Record<string, VideoSettings>;
+  /** «رونویسی گفتار» — transcripts of calls, voice notes and video answers. */
+  transcripts?: TranscriptRow[];
   /** Team comments (@mentions) written on a candidate. */
   comments?: CommentRow[];
   /** API keys — only a SHA-256 hash of the key is ever stored. */
@@ -294,6 +297,9 @@ export type SchedulingLinkRow = SchedulingLink & { orgId: string; token: string 
 export type CommentRow = CandidateComment & { orgId: string };
 /** A cost row as stored: the workspace-facing record plus its tenant. */
 export type CostRow = CostEntry & { orgId: string };
+/** A «رونویسی گفتار» row: the text plus where the file lives. */
+export type TranscriptRow = Omit<Transcript, 'audioUrl'> & { orgId: string; filePath: string | null };
+
 /**
  * A «مصاحبهٔ ویدئویی» invitation. The token opens the candidate's page; the
  * recorded files live in object storage under `videos/<org>/<invite>/`.
@@ -357,6 +363,7 @@ const surveys = new Map<string, SurveyInviteRow>();
 const assessments = new Map<string, AssessmentInviteRow>();
 const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
+const transcripts = new Map<string, TranscriptRow>();
 const smsLog = new Map<string, SmsLogRow>();
 const apiKeys = new Map<string, ApiKeyRow>();
 const webhooks = new Map<string, WebhookEndpointRow>();
@@ -414,6 +421,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
   snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
+  snap.transcripts?.forEach((x) => transcripts.set(x.id, x));
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   snap.apiKeys?.forEach((x) => apiKeys.set(x.id, x));
   snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
@@ -454,6 +462,7 @@ function clearMemory() {
   assessments.clear();
   videoInvites.clear();
   videoSettings.clear();
+  transcripts.clear();
   smsLog.clear();
   apiKeys.clear();
   webhooks.clear();
@@ -582,6 +591,7 @@ function snapshot(): StoreSnapshot {
     assessments: Array.from(assessments.values()),
     videoInvites: Array.from(videoInvites.values()),
     videoSettings: Object.fromEntries(videoSettings),
+    transcripts: Array.from(transcripts.values()),
     smsLog: Array.from(smsLog.values()),
     apiKeys: Array.from(apiKeys.values()),
     webhooks: Array.from(webhooks.values()),
@@ -1076,6 +1086,7 @@ export function deleteOrg(id: string) {
   for (const [k, v] of assessments) if (v.orgId === id) assessments.delete(k);
   for (const [k, v] of videoInvites) if (v.orgId === id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${id}/${k}/`); }
   for (const k of Array.from(videoSettings.keys())) if (k.startsWith(`${id}:`)) videoSettings.delete(k);
+  for (const [k, v] of transcripts) if (v.orgId === id) { transcripts.delete(k); deletePrefixQuietly(`transcripts/${id}/${v.resumeId}/`); }
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
@@ -2214,6 +2225,39 @@ export function saveAssessment(row: AssessmentInviteRow): AssessmentInviteRow {
   return row;
 }
 
+// ------------------------------------------------------------ transcripts ----
+
+export function listTranscripts(orgId: string, filter: { resumeId?: string; videoInviteId?: string } = {}): TranscriptRow[] {
+  return Array.from(transcripts.values())
+    .filter((t) => t.orgId === orgId)
+    .filter((t) => (filter.resumeId ? t.resumeId === filter.resumeId : true))
+    .filter((t) => (filter.videoInviteId ? t.videoInviteId === filter.videoInviteId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function findTranscriptById(id: string): TranscriptRow | null {
+  return transcripts.get(id) || null;
+}
+
+export function getTranscript(orgId: string, id: string): TranscriptRow | null {
+  const row = transcripts.get(id);
+  return row && row.orgId === orgId ? row : null;
+}
+
+export function saveTranscript(row: TranscriptRow): TranscriptRow {
+  transcripts.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deleteTranscript(orgId: string, id: string): boolean {
+  const row = getTranscript(orgId, id);
+  if (!row) return false;
+  transcripts.delete(id);
+  scheduleSave();
+  return true;
+}
+
 // -------------------------------------------------------- video interviews ----
 
 export function videoKeyOf(orgId: string, jobId: string): string {
@@ -2415,6 +2459,7 @@ export interface ErasedCounts {
   automations: number;
   assessments: number;
   videos: number;
+  transcripts: number;
 }
 
 /**
@@ -2425,7 +2470,7 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
   for (const [k, v] of offers) if (v.orgId === orgId && v.resumeId === resumeId) { offers.delete(k); counts.offers++; }
@@ -2435,6 +2480,12 @@ export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | 
   for (const [k, v] of schedulingLinks) if (v.orgId === orgId && v.resumeId === resumeId) { schedulingLinks.delete(k); counts.links++; }
   for (const [k, v] of surveys) if (v.orgId === orgId && v.resumeId === resumeId) { surveys.delete(k); counts.surveys++; }
   for (const [k, v] of assessments) if (v.orgId === orgId && v.resumeId === resumeId) { assessments.delete(k); counts.assessments++; }
+  for (const [k, v] of transcripts)
+    if (v.orgId === orgId && v.resumeId === resumeId) {
+      transcripts.delete(k);
+      deletePrefixQuietly(`transcripts/${orgId}/${resumeId}/`);
+      counts.transcripts++;
+    }
   for (const [k, v] of videoInvites)
     if (v.orgId === orgId && v.resumeId === resumeId) {
       videoInvites.delete(k);
@@ -2660,6 +2711,7 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of assessments) if (v.orgId === job.orgId && v.jobId === job.id) assessments.delete(k);
   for (const [k, v] of videoInvites) if (v.orgId === job.orgId && v.jobId === job.id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${job.orgId}/${k}/`); }
   videoSettings.delete(`${job.orgId}:${job.id}`);
+  for (const [k, v] of transcripts) if (v.orgId === job.orgId && v.jobId === job.id) { transcripts.delete(k); deletePrefixQuietly(`transcripts/${job.orgId}/${v.resumeId}/`); }
   for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
 }
 
@@ -2704,6 +2756,17 @@ function jalaliOfISO(iso: string | null | undefined) {
 
 export function queryResumes(orgId: string, q: ResumeQuery): ResumePage {
   const pageSize = Math.min(100, Math.max(1, q.pageSize || 10));
+  // «رونویسی گفتار» is part of the candidate's record: a phrase HR heard on a
+  // call must find the person, not only a phrase from the PDF.
+  const transcriptHay = new Map<string, string[]>();
+  if (q.q) {
+    for (const t of transcripts.values()) {
+      if (t.orgId !== orgId || !t.text) continue;
+      const list = transcriptHay.get(t.resumeId) || [];
+      list.push(t.text);
+      transcriptHay.set(t.resumeId, list);
+    }
+  }
   const decidedList = q.decision === 'approved' || q.decision === 'rejected' || q.decision === 'review';
   const from = parseJalaliDateString(q.fromJalali || null);
   const to = parseJalaliDateString(q.toJalali || null);
@@ -2715,7 +2778,7 @@ export function queryResumes(orgId: string, q: ResumeQuery): ResumePage {
     if (q.departmentId && q.departmentId !== 'all' && r.departmentId !== q.departmentId) return false;
     if (q.minScore && r.score < q.minScore) return false;
     if (q.minYears && (r.facts?.yearsExperience ?? -1) < q.minYears) return false;
-    if (q.q && !matchesSearch(searchHaystack(r), q.q)) return false;
+    if (q.q && !matchesSearch([...searchHaystack(r), ...(transcriptHay.get(r.id) || [])], q.q)) return false;
     if (from || to) {
       const day = jalaliOfISO(decidedList ? r.decidedAtISO || r.createdAtISO : r.createdAtISO);
       if (!day) return false;
@@ -3612,6 +3675,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
         )
       : undefined,
     videoSettings: raw.videoSettings && typeof raw.videoSettings === 'object' && !Array.isArray(raw.videoSettings) ? raw.videoSettings : undefined,
+    transcripts: Array.isArray(raw.transcripts)
+      ? raw.transcripts.filter((t: any) => t && isStr(t.id) && isStr(t.orgId) && isStr(t.resumeId) && typeof t.text === 'string')
+      : undefined,
     assessments: Array.isArray(raw.assessments)
       ? raw.assessments.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.token) && isStr(a.resumeId) && isStr(a.templateId))
       : undefined,

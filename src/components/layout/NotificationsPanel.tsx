@@ -11,6 +11,7 @@ import {
   MessageSquareText,
   Eye,
   FileSearch2,
+  FileText,
   KanbanSquare,
   Link2,
   MailCheck,
@@ -79,6 +80,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'video.submitted': Video,
   'video.reviewed': Video,
   'video.cancelled': Video,
+  'transcript.added': FileText,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

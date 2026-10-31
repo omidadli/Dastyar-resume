@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   CheckCircle2,
   Clock3,
+  FileText,
   Copy,
   Link2,
   Lock,
@@ -590,12 +591,15 @@ function ReviewModal({
   onSaved: (invite: VideoInvite) => void;
 }) {
   const [urls, setUrls] = useState<Record<string, string>>({});
+  const [transcripts, setTranscripts] = useState<Record<string, { text: string; note: string | null }>>({});
+  const [trBusy, setTrBusy] = useState<string | null>(null);
   const [rating, setRating] = useState<number | null>(null);
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     setUrls({});
+    setTranscripts({});
     setRating(invite?.rating ?? null);
     setNote(invite?.note || '');
     if (!invite) return;
@@ -612,6 +616,25 @@ function ReviewModal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invite?.id]);
+
+  const transcribe = async (questionId: string) => {
+    if (!invite) return;
+    setTrBusy(questionId);
+    try {
+      const r = await api.transcripts.video(invite.id, questionId);
+      setTranscripts((t) => ({
+        ...t,
+        [questionId]: {
+          text: r.transcript.status === 'ready' ? r.transcript.text : '',
+          note: r.note || (r.transcript.status === 'ready' ? null : 'متن این پاسخ ثبت نشده است.'),
+        },
+      }));
+    } catch (err: any) {
+      toast(err?.message || 'رونویسی ممکن نشد.', 'error', undefined, 8000);
+    } finally {
+      setTrBusy(null);
+    }
+  };
 
   const save = async () => {
     if (!invite) return;
@@ -658,6 +681,21 @@ function ReviewModal({
                   <video key={urls[a.questionId]} src={urls[a.questionId]} controls playsInline className="w-full h-full" />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center text-white/60 text-[12.5px]">در حال آماده‌سازی ویدئو…</div>
+                )}
+              </div>
+              <div className="mt-2">
+                {transcripts[a.questionId] ? (
+                  <div className="rounded-[10px] border border-line-2 bg-canvas px-3 py-2.5">
+                    {transcripts[a.questionId].text ? (
+                      <p className="text-[12.5px] text-ink-2 leading-relaxed whitespace-pre-wrap max-h-[160px] overflow-y-auto">{transcripts[a.questionId].text}</p>
+                    ) : (
+                      <p className="text-[12px] text-ink-3 leading-relaxed">{transcripts[a.questionId].note}</p>
+                    )}
+                  </div>
+                ) : (
+                  <Button size="sm" variant="ghost" icon={FileText} loading={trBusy === a.questionId} onClick={() => void transcribe(a.questionId)}>
+                    رونویسی این پاسخ
+                  </Button>
                 )}
               </div>
             </div>

@@ -162,6 +162,7 @@ export type ActivityType =
   | 'video.submitted'
   | 'video.reviewed'
   | 'video.cancelled'
+  | 'transcript.added'
   | 'settings.changed';
 
 export interface ActivityItem {

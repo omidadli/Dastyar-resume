@@ -257,6 +257,27 @@ export function verifyVideoSignature(inviteId: string, questionId: string, exp: 
   return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
 
+/**
+ * «رونویسی گفتار» — playback of the original recording. Same shape as the
+ * video link: signed, short-lived, and about one file only.
+ */
+function transcriptSignature(transcriptId: string, exp: number): string {
+  return crypto.createHmac('sha256', appSecret()).update(`transcript.${transcriptId}.${exp}`).digest('base64url');
+}
+
+export function signedTranscriptUrl(transcriptId: string): { url: string; expiresAt: number } {
+  const exp = Date.now() + VIDEO_URL_TTL_MS;
+  const sig = transcriptSignature(transcriptId, exp);
+  return { url: `/api/transcripts/watch/${encodeURIComponent(transcriptId)}?exp=${exp}&sig=${sig}`, expiresAt: exp };
+}
+
+export function verifyTranscriptSignature(transcriptId: string, exp: number, sig: string): boolean {
+  if (!Number.isFinite(exp) || exp < Date.now() || exp > Date.now() + VIDEO_URL_TTL_MS + 60_000) return false;
+  const expected = Buffer.from(transcriptSignature(transcriptId, exp));
+  const given = Buffer.from(String(sig || ''));
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+}
+
 /** Full-backup downloads (/admin): a short-lived link bound to the admin who asked for it. */
 const BACKUP_URL_TTL_MS = 10 * 60_000;
 

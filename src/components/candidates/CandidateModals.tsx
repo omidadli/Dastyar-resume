@@ -158,7 +158,7 @@ export function MessageModal({
           <Button variant="secondary" icon={copied ? Check : Copy} onClick={copy} disabled={loading}>
             کپی متن
           </Button>
-          {mailSettings?.configured && email ? (
+          {mailSettings?.active && email ? (
             <Button icon={MailCheck} onClick={sendFromOrg} loading={sendingMail} disabled={loading}>
               ارسال با ایمیل سازمان
             </Button>
@@ -192,16 +192,16 @@ export function MessageModal({
           {channel(mailLink(email, subject, body), 'ایمیل', Mail)}
         </div>
 
-        {mailSettings?.configured && email ? (
+        {mailSettings?.active && email ? (
           <Callout tone="brand" icon={MailCheck}>
-            این پیام با حساب «{mailSettings.fromAddress}» از همین صفحه برای {email} ارسال می‌شود؛ نسخهٔ ارسال‌شده در تاریخچهٔ کاندیدا می‌ماند.
+            این پیام با حساب «{mailSettings.effectiveFromAddress || mailSettings.fromAddress}» از همین صفحه برای {email} ارسال می‌شود؛ نسخهٔ ارسال‌شده در تاریخچهٔ کاندیدا می‌ماند.
           </Callout>
         ) : (
           <Callout tone="info" icon={Mail}>
-            {!mailSettings?.configured
-              ? 'برای ارسال مستقیم از داخل هویدا، مدیر فضای کاری باید ایمیل سازمان را در «تنظیمات ← اتصال‌ها» وصل کند.'
+            {!mailSettings?.active
+              ? 'برای ارسال مستقیم از داخل هویدا، صندوق ایمیل سازمان باید متصل باشد («تنظیمات ← اتصال‌ها» یا صندوق مشترک سامانه در پنل مدیریت).'
               : 'ایمیلی برای این کاندیدا ثبت نشده است؛ می‌توانید متن را کپی کنید یا از کانال دیگری بفرستید.'}
-            {!mailSettings?.configured && (
+            {!mailSettings?.active && (
               <span className="block mt-1.5">
                 <ButtonLink to="/app/settings/integrations" variant="secondary" size="sm">
                   تنظیم ایمیل سازمان

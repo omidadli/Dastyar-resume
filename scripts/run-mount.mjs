@@ -162,7 +162,7 @@ const hasAction = (needle) => Array.from(window.document.querySelectorAll('butto
 assert(await waitFor(() => hasAction('انتخاب زمان مصاحبه'), 8000), 'the candidate panel offers the self-scheduling link');
 assert(hasAction('پیشنهاد شغلی'), 'the candidate panel offers the offer letter');
 assert(
-  await waitFor(() => text().includes('ارسال با ایمیل سازمان') || text().includes('ایمیل سازمان را در «تنظیمات'), 12000),
+  await waitFor(() => text().includes('ارسال با ایمیل سازمان') || text().includes('صندوق ایمیل سازمان باید متصل باشد'), 12000),
   'the message modal offers organizational e-mail or explains how to connect it'
 );
 
@@ -288,6 +288,7 @@ if (adminSignup?.token && adminSignup?.user?.platformAdmin) {
   navigate('/admin/connections');
   mount(root3);
   assert(await waitFor(() => text().includes('نقشهٔ کلیدها'), 12000), 'the admin page lists every key and what it powers');
+  assert(text().includes('کلید هوش مصنوعی') && text().includes('سرویس جست‌وجوی LinkedIn'), 'the map names the AI key and the sourcing provider');
   assert(text().includes('صندوق ایمیل مشترک سامانه'), 'the shared mailbox card is on the admin page');
   assert(text().includes('خط پیامک مشترک سامانه'), 'the shared SMS line card is on the admin page');
   assert(text().includes('همه را بررسی کن'), 'the health check is offered');

@@ -46,7 +46,7 @@ export function SmsModal({
     setLast(null);
     api.integrations
       .status()
-      .then((s) => setConfigured(Boolean(s.sms?.configured)))
+      .then((s) => setConfigured(Boolean(s.sms?.active ?? s.sms?.configured)))
       .catch(() => setConfigured(null));
   }, [record?.id]);
 

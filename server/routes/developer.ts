@@ -12,6 +12,7 @@ import { h, str } from './util';
 import { API_SCOPES, ApiKeyError, createApiKey, publicKey, revokeApiKey } from '../api-keys';
 import { WEBHOOK_EVENTS, WebhookError, prepareEndpoint, publicEndpoint, testEndpoint } from '../webhooks';
 import { CHAT_EVENT_LABEL } from '../../src/types/integrations';
+import { SCIM_BASE, issueScimToken, publicScimToken, revokeScimToken } from '../scim';
 import type { DeveloperOverview } from '../../src/types/developer';
 
 function baseUrlOf(req: express.Request): string {
@@ -43,6 +44,7 @@ export function developerRoutes(): express.Router {
         deliveries: db.listWebhookDeliveries(org.id, 20).map(db.withoutOrg),
         events: WEBHOOK_EVENTS.map((id) => ({ id, label: CHAT_EVENT_LABEL[id] || id })),
         scopes: API_SCOPES,
+        scim: { ...publicScimToken(org), baseUrl: `${(process.env.PUBLIC_URL || '').trim().replace(/\/$/, '') || `${req.protocol}://${req.get('host')}`}${SCIM_BASE}` },
       };
       res.json(payload);
     })
@@ -60,6 +62,33 @@ export function developerRoutes(): express.Router {
       } catch (err) {
         fail(res, err);
       }
+    })
+  );
+
+  /**
+   * «SCIM» — the token an identity provider authenticates with. Only a hash is
+   * stored; the token itself is shown once, like an API key.
+   */
+  r.post(
+    '/developer/scim',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const { token, record } = issueScimToken(org.id, { name: actorOf(req).name, role: ctxOf(req).user.role });
+      db.logActivity(org.id, actorOf(req), 'settings.changed', 'توکن SCIM را برای همگام‌سازی اعضا صادر کرد');
+      const fresh = db.getOrg(org.id)!;
+      res.status(201).json({ token, scim: publicScimToken(fresh), tokenId: record.id });
+    })
+  );
+
+  r.delete(
+    '/developer/scim',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      revokeScimToken(org.id);
+      db.logActivity(org.id, actorOf(req), 'settings.changed', 'توکن SCIM را باطل کرد');
+      res.json({ scim: publicScimToken(db.getOrg(org.id)!) });
     })
   );
 

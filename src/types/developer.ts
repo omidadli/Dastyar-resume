@@ -83,4 +83,18 @@ export interface DeveloperOverview {
   /** The events a webhook may subscribe to, with Persian labels. */
   events: { id: string; label: string }[];
   scopes: { id: ApiScope; label: string; hint: string }[];
+  /** «SCIM» — the endpoint an identity provider calls, and whether a token exists. */
+  scim: ScimStatus;
+}
+
+export interface ScimStatus {
+  configured: boolean;
+  tokenId: string | null;
+  createdAtISO: string | null;
+  createdByName: string | null;
+  /** True when an owner issued it, i.e. SCIM may promote someone to admin. */
+  canManageAdmins: boolean;
+  lastUsedISO: string | null;
+  /** `https://<host>/scim/v2` — what Okta/Entra is configured with. */
+  baseUrl: string;
 }

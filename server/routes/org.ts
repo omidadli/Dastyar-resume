@@ -7,6 +7,7 @@ import { aiStatus, testConnection } from '../ai/provider';
 import { isEnvAdmin } from '../platform';
 import { h, oneOf, str } from './util';
 import { RetentionError, policyOf, preview, savePolicy, sweep } from '../retention';
+import { randomPassword } from '../scim';
 
 function members(orgId: string, meId: string): TeamMember[] {
   return db.listMembers(orgId).map((u) => ({ ...db.publicUser(u), isYou: u.id === meId }));
@@ -209,6 +210,43 @@ export function orgRoutes(): express.Router {
     db.logActivity(org.id, actorOf(req), 'member.removed', `«${target.name}» را از تیم حذف کرد`);
     res.json({ members: members(org.id, user.id) });
   });
+
+  /**
+   * «تعیین رمز» — an admin gives a member a new password. Needed for accounts
+   * that arrive through SCIM/SSO and never had one, and for the ordinary case of
+   * a colleague who forgot theirs. Every use ends that person's sessions and is
+   * written to the activity log; the password itself is never stored in clear.
+   */
+  r.post(
+    '/org/members/:id/password',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const target = db.getUser(req.params.id);
+      if (!target || target.orgId !== org.id) return res.status(404).json({ error: 'عضو یافت نشد.' });
+      // Privilege ladder: only the owner may touch another admin or the owner —
+      // and nobody changes the owner's password from inside the workspace but the owner.
+      if (target.role === 'owner' && target.id !== user.id) {
+        return res.status(403).json({ error: 'رمز مالک فضای کاری را فقط خودش می‌تواند تغییر دهد.', code: 'OWNER_PASSWORD' });
+      }
+      if (target.role === 'admin' && user.role !== 'owner' && target.id !== user.id) {
+        return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند رمز یک مدیر دیگر را تعیین کند.', code: 'ADMIN_PASSWORD' });
+      }
+      const given = typeof req.body?.password === 'string' ? req.body.password : '';
+      const generated = !given;
+      const password = given || randomPassword();
+      const problem = passwordProblem(password);
+      if (problem) return res.status(400).json({ error: problem, field: 'password' });
+      db.updateUser(target.id, { passwordHash: await hashPassword(password) });
+      db.deleteSessionsOfUser(target.id);
+      db.logActivity(org.id, actorOf(req), 'member.updated', `رمز «${target.name}» را بازنشانی کرد`);
+      res.json({
+        // Returned only when we generated it: the admin has to hand it over once.
+        password: generated ? password : undefined,
+        members: members(org.id, user.id),
+      });
+    })
+  );
 
   /**
    * «قفل‌شده‌ام»: a member who lost both phone and recovery codes asks an admin.

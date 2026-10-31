@@ -928,6 +928,14 @@ export function findOrgByCareerSlug(slug: string): OrgRecord | null {
   return null;
 }
 
+/** Workspace that owns a SCIM provisioning token, by its public id. */
+export function findOrgByScimId(id: string): OrgRecord | null {
+  const wanted = String(id || '').trim();
+  if (!wanted) return null;
+  for (const o of orgs.values()) if (o.scim?.id === wanted) return o;
+  return null;
+}
+
 /** True when another workspace already uses this slug. */
 export function careerSlugTaken(slug: string, exceptOrgId: string): boolean {
   const wanted = String(slug || '').trim().toLowerCase();
@@ -1006,7 +1014,7 @@ export function updateOrg(
   patch: Partial<
     Pick<
       OrgRecord,
-      'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'careerLanguages' | 'careerDefaultLang' | 'blindScreening' | 'offerApproval' | 'eeo'
+      'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'careerLanguages' | 'careerDefaultLang' | 'blindScreening' | 'offerApproval' | 'eeo' | 'scim'
     >
   >
 ): OrgRecord | null {
@@ -1022,6 +1030,7 @@ export function updateOrg(
   if (typeof patch.blindScreening === 'boolean') org.blindScreening = patch.blindScreening;
   if (patch.offerApproval && typeof patch.offerApproval === 'object') org.offerApproval = patch.offerApproval;
   if (patch.eeo && typeof patch.eeo === 'object') org.eeo = patch.eeo;
+  if (patch.scim !== undefined) org.scim = patch.scim;
   scheduleSave();
   return org;
 }

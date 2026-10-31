@@ -35,6 +35,7 @@ import { commentRoutes } from './server/routes/comments';
 import { developerRoutes } from './server/routes/developer';
 import { privacyRoutes } from './server/routes/privacy';
 import { referralRoutes } from './server/routes/referrals';
+import { scimRoutes } from './server/routes/scim';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
 import { apiV1Routes } from './server/routes/api-v1';
@@ -79,7 +80,9 @@ async function startServer() {
   });
 
   // 70mb fits the largest allowed resume (50mb, /admin › تنظیمات سامانه) as base64.
-  app.use(express.json({ limit: '70mb' }));
+  // SCIM clients send `application/scim+json`, which express.json ignores unless
+  // it is listed — an IdP would otherwise see an empty body and a 400.
+  app.use(express.json({ limit: '70mb', type: ['application/json', 'application/scim+json'] }));
   // A rejected body (too large / malformed) must come back as JSON.
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!err) return next();
@@ -120,6 +123,7 @@ async function startServer() {
   app.use('/api', surveyPublicRoutes()); // public «تجربهٔ کارجو» survey page
   app.use('/api', assessmentPublicRoutes()); // public «آزمون و ارزیابی» page
   app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
+  app.use('/scim/v2', scimRoutes()); // «SCIM 2.0» — authenticated by the workspace's SCIM token
 
   // ---------------- Authenticated API ----------------
   app.use('/api', requireAuth);

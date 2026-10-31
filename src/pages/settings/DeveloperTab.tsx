@@ -13,6 +13,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { Button, Callout, Card, CardHeader, Chip, ConfirmDialog, TextInput, toast } from '../../components/ui';
+import { ScimCard } from '../../components/settings/ScimCard';
 import { api } from '../../lib/api';
 import { useCan } from '../../lib/auth';
 import { copyText } from '../../lib/clipboard';
@@ -440,6 +441,7 @@ export function DeveloperTab() {
         <KeysCard overview={data} onChanged={reload} />
       </div>
       <div className="flex flex-col gap-5">
+        <ScimCard scim={data.scim} />
         <WebhooksCard overview={data} onChanged={reload} />
         <DeliveriesCard overview={data} />
       </div>

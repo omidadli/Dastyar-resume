@@ -39,6 +39,19 @@ export interface OrgPublic {
    * contacting a candidate waits for an explicit, logged reveal.
    */
   blindScreening?: boolean;
+  /**
+   * «SCIM» — provisioning token for Okta/Entra/Google Workspace. Only the hash of
+   * the secret is stored; the token is shown once when it is issued.
+   */
+  scim?: {
+    id: string;
+    tokenHash: string;
+    createdAtISO: string;
+    createdByName: string;
+    /** True when the issuer was the workspace owner — SCIM may then grant admin. */
+    canManageAdmins: boolean;
+    lastUsedISO: string | null;
+  } | null;
   /** «برابری فرصت‌ها»: voluntary candidate self-identification, aggregate-only. */
   eeo?: { enabled: boolean; threshold: number };
   /** «گردش تأیید پیشنهاد»: who must sign off before an offer goes to the candidate. */

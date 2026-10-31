@@ -234,6 +234,9 @@ function TeamTab() {
   const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
   const [removing, setRemoving] = useState<TeamMember | null>(null);
   const [resetting, setResetting] = useState<TeamMember | null>(null);
+  const [passwordFor, setPasswordFor] = useState<TeamMember | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [passwordBusy, setPasswordBusy] = useState(false);
 
   const add = async () => {
     setSaving(true);
@@ -272,6 +275,28 @@ function TeamTab() {
       toast(e?.message || 'بازنشانی ممکن نشد.', 'error');
     }
   };
+  const setPassword = async () => {
+    if (!passwordFor) return;
+    setPasswordBusy(true);
+    try {
+      const res = await api.org.setMemberPassword(passwordFor.id, newPassword.trim() || undefined);
+      q.setData((d) => (d ? { ...d, members: res.members } : d));
+      if (res.password) {
+        // Generated on the server: show it once, with a copy button.
+        const ok = await copyText(res.password);
+        toast(`رمز موقت «${passwordFor.name}»: ${res.password}${ok ? ' (کپی شد)' : ''}`, 'success', undefined, 15000);
+      } else {
+        toast(`رمز «${passwordFor.name}» تعیین شد و نشست‌های قبلی‌اش پایان یافت.`, 'success');
+      }
+      setPasswordFor(null);
+      setNewPassword('');
+    } catch (e: any) {
+      toast(e?.message || 'تعیین رمز ممکن نشد.', 'error');
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
+
   const remove = async () => {
     if (!removing) return;
     try {
@@ -359,6 +384,7 @@ function TeamTab() {
                   ) : (
                     <span className="text-[12.5px] font-bold text-ink-2 bg-line-2 rounded-full px-3 py-1">{ROLE_LABEL[m.role]}</span>
                   )}
+                  <IconButton icon={KeyRound} label="تعیین رمز عبور" size="sm" onClick={() => { setPasswordFor(m); setNewPassword(''); }} />
                   {m.twoFactorEnabled && (
                     <IconButton icon={ShieldCheck} label="بازنشانی ورود دومرحله‌ای" size="sm" onClick={() => setResetting(m)} />
                   )}
@@ -409,6 +435,36 @@ function TeamTab() {
             <IconButton icon={Wand2} label="ساخت رمز تازه" onClick={() => setForm({ ...form, password: randomPassword() })} className="border border-line mb-[2px]" />
           </div>
           {error && !error.field && <Callout tone="danger">{error.message}</Callout>}
+        </div>
+      </Modal>
+      <Modal
+        open={Boolean(passwordFor)}
+        onClose={() => setPasswordFor(null)}
+        icon={<KeyRound className="w-5 h-5 text-brand-strong" />}
+        title={`تعیین رمز برای ${passwordFor?.name || ''}`}
+        description="همهٔ نشست‌های فعلی این عضو بسته می‌شود و با رمز تازه وارد می‌شود. این کار در فعالیت‌های تیم ثبت می‌شود."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setPasswordFor(null)}>
+              انصراف
+            </Button>
+            <Button onClick={() => void setPassword()} loading={passwordBusy}>
+              {newPassword.trim() ? 'تعیین رمز' : 'ساخت رمز تصادفی'}
+            </Button>
+          </>
+        }
+      >
+        <div className="flex items-end gap-2">
+          <TextInput
+            label="رمز تازه"
+            optional
+            latin
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+            wrapperClassName="flex-1"
+            hint="خالی بگذارید تا هویدا یک رمز قوی بسازد و همین حالا نشان دهد."
+          />
+          <IconButton icon={Wand2} label="ساخت رمز تازه" onClick={() => setNewPassword(randomPassword())} className="border border-line mb-[2px]" />
         </div>
       </Modal>
       <ConfirmDialog

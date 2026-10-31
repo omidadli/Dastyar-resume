@@ -50,7 +50,15 @@ import type {
   AutomationRunResult,
   AutomationSettings,
 } from '../types/automation';
-import type { ApiKeyPublic, CreatedApiKey, DeveloperOverview, WebhookDeliveryPublic, WebhookEndpointPublic, WebhookTestResult } from '../types/developer';
+import type {
+  ApiKeyPublic,
+  CreatedApiKey,
+  DeveloperOverview,
+  ScimStatus,
+  WebhookDeliveryPublic,
+  WebhookEndpointPublic,
+  WebhookTestResult,
+} from '../types/developer';
 import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '../types/retention';
 import type { ReferralProgramInput, ReferralsPayload } from '../types/referrals';
 import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
@@ -320,6 +328,9 @@ export const api = {
     removeMember: (id: string) => del<{ members: TeamMember[] }>(`/api/org/members/${id}`),
     /** «قفل‌شده‌ام»: an admin clears a member's second factor after a lost phone. */
     resetMemberTwoFactor: (id: string) => post<{ members: TeamMember[] }>(`/api/org/members/${id}/2fa-reset`, {}),
+    /** «تعیین رمز» — the password is returned only when the server generated it. */
+    setMemberPassword: (id: string, password?: string) =>
+      post<{ password?: string; members: TeamMember[] }>(`/api/org/members/${id}/password`, password ? { password } : {}),
     retention: () =>
       get<{ policy: RetentionPolicy; preview: { days: number; action: RetentionPolicy['action']; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } }>(
         '/api/org/retention'
@@ -630,6 +641,9 @@ export const api = {
   },
   developer: {
     overview: () => get<DeveloperOverview>('/api/developer/overview'),
+    /** «SCIM» — issue/revoke the provisioning token (shown once on issue). */
+    issueScimToken: () => post<{ token: string; scim: ScimStatus; tokenId: string }>('/api/developer/scim', {}),
+    revokeScimToken: () => del<{ scim: ScimStatus }>('/api/developer/scim'),
     createKey: (b: { name: string; scopes: string[] }) => post<CreatedApiKey>('/api/developer/keys', b),
     revokeKey: (id: string) => del<{ keys: ApiKeyPublic[] }>(`/api/developer/keys/${encodeURIComponent(id)}`),
     addWebhook: (b: { name: string; url: string; events: string[] }) =>

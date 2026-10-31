@@ -392,6 +392,20 @@ POST /api/v1/assessments/:id/result    (scope: write)  body: { score?, dimension
 
 ---
 
+## ۵هـ) گردش تأیید پیشنهاد شغلی (داخل برنامه)
+
+```http
+GET   /api/org          → { org, members }                     (org.offerApproval)
+PATCH /api/org          body: { offerApproval: { enabled, steps: [{ id, label, approverId }] } }
+POST  /api/offers/:id/approval   body: { decision: "approved" | "rejected", note? }
+```
+
+تا وقتی یک مرحله «در انتظار» است، `POST /api/offers/:id/send` با
+`409 { code: "OFFER_APPROVAL_PENDING" }` و نام همان تأییدکننده برمی‌گردد. زنجیره هنگام
+ساخت پیشنهاد روی آن کپی می‌شود. جزئیات و قاعده‌ها در [`OFFER-APPROVAL.md`](OFFER-APPROVAL.md).
+
+---
+
 ## ۶) آنچه در این API نیست (و چرا)
 
 | نیست | دلیل |

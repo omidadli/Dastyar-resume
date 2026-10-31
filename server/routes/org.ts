@@ -27,11 +27,50 @@ export function orgRoutes(): express.Router {
     const blind = typeof req.body?.blindScreening === 'boolean' ? req.body.blindScreening : undefined;
     // Read it before updateOrg mutates the very same record.
     const was = Boolean(org.blindScreening);
+    const wasApproval = Boolean(org.offerApproval?.enabled);
+
+    // «گردش تأیید پیشنهاد»: only real members may approve, and an enabled chain
+    // without an approver is refused — a silent no-op here would look like a
+    // control that does not exist.
+    let offerApproval: any = undefined;
+    if (req.body?.offerApproval !== undefined) {
+      const membersList = db.listMembers(org.id);
+      const memberIds = new Set(membersList.map((m) => m.id));
+      const rawSteps = Array.isArray(req.body.offerApproval?.steps) ? req.body.offerApproval.steps : [];
+      const steps = rawSteps
+        .slice(0, 5)
+        .map((raw: any, i: number) => ({
+          id: str(raw?.id, 40) || `apv-${i + 1}`,
+          label: str(raw?.label, 60) || '',
+          approverId: str(raw?.approverId, 80) || '',
+        }))
+        .filter((x: { approverId: string }) => memberIds.has(x.approverId));
+      const enabled = Boolean(req.body.offerApproval?.enabled);
+      if (enabled && !steps.length) {
+        return res.status(400).json({ error: 'برای روشن‌کردن گردش تأیید، دست‌کم یک تأییدکننده از اعضای تیم انتخاب کنید.', code: 'APPROVAL_STEPS_REQUIRED' });
+      }
+      if (new Set(steps.map((s: { approverId: string }) => s.approverId)).size !== steps.length) {
+        return res.status(400).json({ error: 'یک نفر نمی‌تواند در دو مرحلهٔ پیاپی تأیید کند؛ ترتیب را یک‌نفره بچینید.', code: 'APPROVAL_DUPLICATE' });
+      }
+      offerApproval = { enabled, steps };
+    }
+
     const updated = db.updateOrg(org.id, {
       ...(name ? { name } : {}),
       ...(typeof req.body?.messageSignature === 'string' ? { messageSignature: str(req.body.messageSignature, 400) } : {}),
       ...(blind === undefined ? {} : { blindScreening: blind }),
+      ...(offerApproval === undefined ? {} : { offerApproval }),
     });
+    if (offerApproval !== undefined && offerApproval.enabled !== wasApproval) {
+      db.logActivity(
+        org.id,
+        actorOf(req),
+        'settings.changed',
+        offerApproval.enabled
+          ? `«گردش تأیید پیشنهاد» را روشن کرد (${offerApproval.steps.length.toLocaleString('fa-IR')} مرحله)`
+          : '«گردش تأیید پیشنهاد» را خاموش کرد'
+      );
+    }
     if (blind !== undefined && blind !== was) {
       db.logActivity(
         org.id,

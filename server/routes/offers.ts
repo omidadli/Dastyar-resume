@@ -21,7 +21,7 @@ import { isEmailConfigured, sendMail, friendlySmtpError } from '../mailer';
 import { formatJalaliDate, toPersianDigits } from '../../src/utils/jalali';
 import { tehranJalaliOf } from '../tehran-time';
 import { withinEmailLimit, noteEmailSend } from '../email-rate';
-import type { JobOffer, OfferStatus, OfferTerms, PublicOffer } from '../../src/types/offers';
+import type { JobOffer, OfferApprovalStep, OfferStatus, OfferTerms, PublicOffer } from '../../src/types/offers';
 import { OFFER_STATUS_LABEL } from '../../src/types/offers';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
@@ -34,6 +34,39 @@ function originOf(req: express.Request): string {
 
 function publicUrl(req: express.Request, token: string): string {
   return `${originOf(req)}/offer/${token}`;
+}
+
+/** Older offers predate the chain; they simply have none. */
+function approvalsOf(row: db.OfferRow): OfferApprovalStep[] {
+  return Array.isArray(row.approvals) ? row.approvals : [];
+}
+
+/** The one step that is waiting — the chain is strictly in order. */
+function pendingApproval(row: db.OfferRow): OfferApprovalStep | null {
+  return approvalsOf(row).find((a) => a.status === 'pending') || null;
+}
+
+/** The chain is copied onto the offer when it is written, not looked up later. */
+function buildApprovalChain(org: db.OrgRecord, nowISO: string): OfferApprovalStep[] {
+  const cfg = org.offerApproval;
+  if (!cfg?.enabled || !Array.isArray(cfg.steps) || !cfg.steps.length) return [];
+  const byId = new Map(db.listMembers(org.id).map((u) => [u.id, u]));
+  const out: OfferApprovalStep[] = [];
+  cfg.steps.slice(0, 5).forEach((step, i) => {
+    const member = byId.get(step.approverId);
+    if (!member) return;
+    out.push({
+      id: step.id || `apv_${i + 1}`,
+      label: (step.label || '').trim() || member.name,
+      approverId: member.id,
+      approverName: member.name,
+      status: 'pending',
+      decidedAtISO: null,
+      decidedAtJalali: null,
+      note: null,
+    });
+  });
+  return out;
 }
 
 function withoutToken(row: db.OfferRow): JobOffer {
@@ -295,6 +328,7 @@ export function offerRoutes() {
         respondedAtJalali: null,
         signatureName: null,
         signatureNote: null,
+        approvals: buildApprovalChain(org, stamp.toISOString()),
         updatedAtISO: stamp.toISOString(),
       };
       db.saveOffer(row);
@@ -329,6 +363,13 @@ export function offerRoutes() {
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
       if (row.status === 'sent') return res.status(409).json({ error: 'این پیشنهاد پیش‌تر فرستاده شده است؛ می‌توانید نشانی را دوباره کپی کنید.' });
       if (row.status !== 'draft') return res.status(409).json({ error: `این پیشنهاد در وضعیت «${OFFER_STATUS_LABEL[row.status]}» است.` });
+      const waiting = pendingApproval(row);
+      if (waiting) {
+        return res.status(409).json({
+          error: `این پیشنهاد هنوز منتظر تأیید «${waiting.approverName}» (${waiting.label}) است؛ تا تأیید نشود به کارجو نمی‌رود.`,
+          code: 'OFFER_APPROVAL_PENDING',
+        });
+      }
       const to = (row.candidateEmail || '').toLowerCase().trim();
       if (!EMAIL_RE.test(to)) return res.status(400).json({ error: 'برای این کارجو ایمیل معتبری ثبت نشده است؛ ابتدا آن را در پروفایل کامل کنید.' });
       if (!isEmailConfigured(db.getOrgSecrets(org.id))) {
@@ -398,6 +439,58 @@ export function offerRoutes() {
         resumeId: row.resumeId,
       });
       res.json({ offer: viewOf(req, sent) });
+    })
+  );
+
+  /**
+   * One step of the approval chain. Only the person whose turn it is — or an
+   * admin/owner — can decide, and both actions are written to the history with
+   * the note. A rejection ends the offer; HR builds a new one if it is worth it.
+   */
+  r.post(
+    '/offers/:id/approval',
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const row = db.getOffer(org.id, str(req.params.id, 80));
+      if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      const decision: 'approved' | 'rejected' | null =
+        req.body?.decision === 'rejected' ? 'rejected' : req.body?.decision === 'approved' ? 'approved' : null;
+      if (!decision) return res.status(400).json({ error: 'تصمیم باید «approved» یا «rejected» باشد.', code: 'BAD_DECISION' });
+      if (row.status !== 'draft') {
+        return res.status(409).json({ error: `پیشنهاد در وضعیت «${OFFER_STATUS_LABEL[row.status]}» است و تأیید جدید نمی‌پذیرد.`, code: 'NOT_DRAFT' });
+      }
+      const step = pendingApproval(row);
+      if (!step) return res.status(409).json({ error: 'همهٔ مراحل تأیید تمام شده‌اند.', code: 'APPROVAL_DONE' });
+      const isApprover = user.id === step.approverId;
+      const isAdmin = user.role === 'admin' || user.role === 'owner';
+      if (!isApprover && !isAdmin) {
+        return res.status(403).json({ error: `این مرحله در اختیار «${step.approverName}» است.`, code: 'NOT_YOUR_TURN' });
+      }
+      const note = typeof req.body?.note === 'string' ? req.body.note.trim().slice(0, 400) : '';
+      const stamp = new Date();
+      const stampISO = stamp.toISOString();
+      const approvals = approvalsOf(row).map((a) =>
+        a.id === step.id
+          ? { ...a, status: decision, decidedAtISO: stampISO, decidedAtJalali: formatJalaliDate(tehranJalaliOf(stamp), true), note: note || null }
+          : a
+      );
+      const next: db.OfferRow = {
+        ...row,
+        approvals,
+        status: decision === 'rejected' ? ('cancelled' as OfferStatus) : row.status,
+        updatedAtISO: stampISO,
+      };
+      db.saveOffer(next);
+      db.logActivity(
+        org.id,
+        user,
+        decision === 'rejected' ? 'offer.cancelled' : 'settings.changed',
+        decision === 'rejected'
+          ? `تأیید «${step.label}» پیشنهاد «${row.terms.title || row.jobTitle}» برای «${row.candidateName}» را رد کرد${note ? ` — ${note}` : ''}`
+          : `تأیید «${step.label}» پیشنهاد «${row.terms.title || row.jobTitle}» برای «${row.candidateName}» را داد${isApprover ? '' : ` (به‌جای «${step.approverName}»)`}${note ? ` — ${note}` : ''}`,
+        { jobId: row.jobId, resumeId: row.resumeId }
+      );
+      res.json({ offer: viewOf(req, next), pending: pendingApproval(next)?.approverName || null });
     })
   );
 

@@ -124,6 +124,11 @@ assert(text().includes('پورتال شغلی'), 'the connections tab offers the
 assert(text().includes('ورود سازمانی (SSO)'), 'the connections tab offers SSO for the team');
 assert(text().includes('دامنه‌های ایمیل مجاز') && text().includes('بررسی اتصال'), 'the SSO card asks for the company domains and can test the provider');
 
+// 8a. Settings › organization: the offer approval chain is configurable.
+navigate('/app/settings/org');
+assert(await waitFor(() => text().includes('غربالگری بی‌طرف')), 'the organization tab renders its cards');
+assert(text().includes('گردش تأیید پیشنهاد'), 'the organization tab offers the offer approval chain');
+
 // 8b. Settings › account: the 2FA card is there, and the demo is honest about it.
 navigate('/app/settings/account');
 assert(await waitFor(() => text().includes('ورود دومرحله‌ای')), 'the account tab offers two-factor login');

@@ -18,6 +18,43 @@ export const OFFER_STATUS_LABEL: Record<OfferStatus, string> = {
   cancelled: 'لغو‌شده',
 };
 
+/**
+ * «گردش تأیید پیشنهاد» — an optional chain of approvers. While any step is
+ * pending, the offer cannot leave the workspace; a rejection ends it. The chain
+ * is copied onto the offer when it is created, so changing the settings later
+ * never rewrites the history of an offer already in motion.
+ */
+export type OfferApprovalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface OfferApprovalStep {
+  id: string;
+  /** «مدیر فنی»، «مالی»، «مدیرعامل» — the label the workspace chose. */
+  label: string;
+  approverId: string;
+  approverName: string;
+  status: OfferApprovalStatus;
+  decidedAtISO: string | null;
+  decidedAtJalali: string | null;
+  note: string | null;
+}
+
+export interface OfferApprovalConfigStep {
+  id: string;
+  label: string;
+  approverId: string;
+}
+
+export interface OfferApprovalConfig {
+  enabled: boolean;
+  steps: OfferApprovalConfigStep[];
+}
+
+export const OFFER_APPROVAL_LABEL: Record<OfferApprovalStatus, string> = {
+  pending: 'در انتظار',
+  approved: 'تأیید‌شده',
+  rejected: 'رد‌شده',
+};
+
 export type SalaryPeriod = 'monthly' | 'annual';
 
 export const SALARY_PERIOD_LABEL: Record<SalaryPeriod, string> = {
@@ -65,6 +102,8 @@ export interface JobOffer {
   /** Typed full name from the candidate — the signature. */
   signatureName: string | null;
   signatureNote: string | null;
+  /** The approval chain that was live when this offer was written (empty = none). */
+  approvals: OfferApprovalStep[];
   /** Absolute link the workspace can also copy and send by hand. */
   url?: string;
 }

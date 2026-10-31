@@ -1,3 +1,4 @@
+import type { OfferApprovalConfig } from './offers';
 // ================================================================
 // HOVIDA — workspace (multi-tenant SaaS) types shared by client & server.
 // ================================================================
@@ -31,6 +32,8 @@ export interface OrgPublic {
    * contacting a candidate waits for an explicit, logged reveal.
    */
   blindScreening?: boolean;
+  /** «گردش تأیید پیشنهاد»: who must sign off before an offer goes to the candidate. */
+  offerApproval?: OfferApprovalConfig;
   createdAtISO: string;
   /** Suspended by a platform admin — members cannot sign in. */
   suspended?: boolean;

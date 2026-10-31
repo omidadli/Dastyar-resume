@@ -38,7 +38,7 @@ import type {
 } from '../types/app';
 import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PublicCareersPage, PublicJobDetail } from '../types/careers';
 import type { CandidateComment, InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
-import type { JobOffer, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
+import type { JobOffer, OfferApprovalConfig, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
   AutomationOverview,
@@ -300,7 +300,8 @@ export const api = {
   },
   org: {
     get: () => get<{ org: OrgPublic; members: TeamMember[] }>('/api/org'),
-    update: (b: { name?: string; messageSignature?: string; blindScreening?: boolean }) => patch<{ org: OrgPublic }>('/api/org', b),
+    update: (b: { name?: string; messageSignature?: string; blindScreening?: boolean; offerApproval?: OfferApprovalConfig }) =>
+      patch<{ org: OrgPublic }>('/api/org', b),
     setDepartments: (departments: Array<Partial<Department> & { name: string; hint: string }>) =>
       put<{ org: OrgPublic }>('/api/org/departments', { departments }),
     addMember: (b: { name: string; email: string; title: string; role: Role; password: string }) =>
@@ -401,6 +402,9 @@ export const api = {
     update: (id: string, b: { terms?: Partial<OfferTerms>; message?: string }) => patch<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}`, b),
     send: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
     cancel: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/cancel`, {}),
+    /** One step of «گردش تأیید پیشنهاد». */
+    approve: (id: string, decision: 'approved' | 'rejected', note?: string) =>
+      post<{ offer: JobOffer; pending: string | null }>(`/api/offers/${encodeURIComponent(id)}/approval`, { decision, note }),
     /** Public page — the candidate's side, no session. */
     public: {
       get: (token: string) => get<{ offer: PublicOffer }>(`/api/offers/public/${encodeURIComponent(token)}`),

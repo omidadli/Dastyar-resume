@@ -247,11 +247,94 @@ async function main() {
     assert(list.json.counts.accepted === 1 && list.json.counts.declined === 1, 'the counts add up', JSON.stringify(list.json.counts));
     assert((await call('GET', '/api/offers', B)).json.items.length === 0, 'offers are tenant-isolated');
 
+    // ---------------------------------------------------- approval chain --
+    // Two approvers: a member (سارا) and the owner (A).
+    await call('POST', '/api/org/members', A, { name: 'نگار', email: 'negar@example.com', password: 'Password12345', role: 'member' });
+    const members = (await call('GET', '/api/org', A)).json.members as any[];
+    const negar = members.find((m) => m.email === 'negar@example.com');
+    const owner = members.find((m) => m.role === 'owner');
+    const N = (await call('POST', '/api/auth/login', null, { email: 'negar@example.com', password: 'Password12345' })).json.token as string;
+
+    assert((await call('PATCH', '/api/org', N, { offerApproval: { enabled: true, steps: [] } })).status === 403, 'only an admin can configure the approval chain');
+    const noSteps = await call('PATCH', '/api/org', A, { offerApproval: { enabled: true, steps: [] } });
+    assert(noSteps.status === 400 && noSteps.json.code === 'APPROVAL_STEPS_REQUIRED', 'an enabled chain without an approver is refused', String(noSteps.status));
+    const duplicated = await call('PATCH', '/api/org', A, {
+      offerApproval: { enabled: true, steps: [{ id: 's1', label: 'مدیر فنی', approverId: negar.id }, { id: 's2', label: 'مالی', approverId: negar.id }] },
+    });
+    assert(duplicated.status === 400 && duplicated.json.code === 'APPROVAL_DUPLICATE', 'the same person twice in a row is refused');
+
+    const configured = await call('PATCH', '/api/org', A, {
+      offerApproval: {
+        enabled: true,
+        steps: [
+          { id: 's1', label: 'مدیر فنی', approverId: negar.id },
+          { id: 's2', label: 'مدیرعامل', approverId: owner.id },
+        ],
+      },
+    });
+    assert(configured.status === 200 && configured.json.org.offerApproval.enabled, 'the chain is saved on the workspace');
+    assert(configured.json.org.offerApproval.steps.length === 2, 'both steps are kept in order');
+
+    await call('POST', '/api/org/members', A, { name: 'کاوه', email: 'kave@example.com', password: 'Password12345', role: 'member' });
+    const csv2 = [
+      'First Name,Last Name,Headline,Location,Current Company,Profile URL,Open to work,Skills,Email',
+      'کاوه,نوری,"کارشناس شبکه",تهران,گاما,https://www.linkedin.com/in/kave,Yes,"شبکه",kave@example.ir',
+    ].join('\r\n');
+    const imported2 = await call('POST', '/api/sourcing/csv', A, { csv: csv2, departmentId: dept.id, jobId: job.id, openToWorkOnly: true });
+    const rec2 = (await call('POST', `/api/sourcing/searches/${imported2.json.search.id}/import`, A, { profileId: imported2.json.search.results[0].id, jobId: job.id })).json.record;
+
+    const gated = await call('POST', '/api/offers', A, { resumeId: rec2.id, terms: { title: 'کارشناس شبکه', startDate: '۱۴۰۶/۰۱/۱۵' } });
+    assert(gated.status === 201, 'an offer can be written while the chain is on');
+    assert(gated.json.offer.approvals.length === 2, 'the chain is copied onto the offer', String(gated.json.offer.approvals?.length));
+    assert(gated.json.offer.approvals.every((a: any) => a.status === 'pending'), 'every step starts as «در انتظار»');
+
+    const blocked = await call('POST', `/api/offers/${gated.json.offer.id}/send`, A, {});
+    assert(blocked.status === 409 && blocked.json.code === 'OFFER_APPROVAL_PENDING', 'sending is blocked while a step is pending', String(blocked.status));
+    assert(blocked.json.error.includes('نگار'), 'the message names who is holding it up', blocked.json.error);
+    assert((await call('GET', '/api/offers/public/' + String(gated.json.offer.url).split('/offer/')[1])).status === 404, 'the candidate still cannot open it');
+
+    assert((await call('POST', `/api/offers/${gated.json.offer.id}/approval`, N, { decision: 'approved' })).status === 200, 'the first approver can approve');
+    assert((await call('POST', `/api/offers/${gated.json.offer.id}/approval`, N, { decision: 'approved' })).status === 403, 'the second step is not hers');
+    const stillBlocked = await call('POST', `/api/offers/${gated.json.offer.id}/send`, A, {});
+    assert(stillBlocked.status === 409 && stillBlocked.json.code === 'OFFER_APPROVAL_PENDING', 'one approval is not enough');
+    assert(stillBlocked.json.error.includes(owner.name), 'the next approver is named');
+
+    const second = await call('POST', `/api/offers/${gated.json.offer.id}/approval`, A, { decision: 'approved', note: 'در سقف بودجه' });
+    assert(second.status === 200 && second.json.pending === null, 'the owner approves the last step');
+    assert(second.json.offer.approvals.every((a: any) => a.status === 'approved'), 'the whole chain is approved');
+    assert(second.json.offer.approvals[1].note === 'در سقف بودجه', 'the note is kept on the step');
+    assert((await call('POST', `/api/offers/${gated.json.offer.id}/send`, A, {})).status === 200, 'the offer can be sent once everyone approved');
+
+    // A rejection ends the offer: nothing is e-mailed and the reason is kept.
+    const third = await call('POST', '/api/offers', A, { resumeId: records[1].id, terms: { title: 'کارشناس شبکه', startDate: '۱۴۰۶/۰۲/۰۱' } });
+    assert(third.status === 201, 'a third offer is written');
+    const rejected = await call('POST', `/api/offers/${third.json.offer.id}/approval`, N, { decision: 'rejected', note: 'حقوق بالاتر از سقف' });
+    assert(rejected.status === 200 && rejected.json.offer.status === 'cancelled', 'a rejection cancels the offer', rejected.json.offer.status);
+    assert((await call('POST', `/api/offers/${third.json.offer.id}/send`, A, {})).status === 409, 'a rejected offer cannot be sent');
+    assert(rejected.json.offer.approvals[0].note === 'حقوق بالاتر از سقف', 'the rejection reason is stored');
+
+    const feed = (await call('GET', '/api/activity', A)).json.items as any[];
+    assert(feed.some((a) => a.type === 'settings.changed' && a.text.includes('گردش تأیید')), 'turning the chain on is in the history');
+    assert(feed.some((a) => a.text.includes('در سقف بودجه')), 'the approval note is in the history');
+
+    const offAgain = await call('PATCH', '/api/org', A, { offerApproval: { enabled: false, steps: [{ id: 's1', label: 'مدیر فنی', approverId: negar.id }] } });
+    assert(offAgain.status === 200 && offAgain.json.org.offerApproval.enabled === false, 'the chain can be switched off');
+    const csv3 = [
+      'First Name,Last Name,Headline,Location,Current Company,Profile URL,Open to work,Skills,Email',
+      'هستی,صادقی,"کارشناس شبکه",تهران,دلتا,https://www.linkedin.com/in/hasti,Yes,"شبکه",hasti@example.ir',
+    ].join('\r\n');
+    const imported3 = await call('POST', '/api/sourcing/csv', A, { csv: csv3, departmentId: dept.id, jobId: job.id, openToWorkOnly: true });
+    const rec3 = (await call('POST', `/api/sourcing/searches/${imported3.json.search.id}/import`, A, { profileId: imported3.json.search.results[0].id, jobId: job.id })).json.record;
+    const free = await call('POST', '/api/offers', A, { resumeId: rec3.id, terms: { title: 'کارشناس شبکه', startDate: '۱۴۰۶/۰۳/۰۱' } });
+    assert(free.status === 201 && free.json.offer.approvals.length === 0, 'with the chain off, a new offer goes straight to draft', `${free.status}/${free.json.offer?.approvals?.length}`);
+    assert((await call('POST', `/api/offers/${free.json.offer.id}/send`, A, {})).status === 200, 'and it can be sent without any approval');
+
     // ------------------------------------------------------------ snapshot --
     child.kill('SIGTERM');
     await new Promise((r) => child.once('exit', r));
     const snap = JSON.parse(fs.readFileSync(path.join(DATA, 'hovida-store.json'), 'utf-8'));
-    assert((snap.offers || []).length === 3, 'every offer is stored', String((snap.offers || []).length));
+    assert((snap.offers || []).length >= 6, 'every offer is stored', String((snap.offers || []).length));
+    assert((snap.offers || []).some((o: any) => Array.isArray(o.approvals) && o.approvals.length === 2), 'the approval chain survives a restart');
     assert((snap.offers || []).every((o: any) => o.token), 'each stored offer keeps its link token (the e-mail must keep working after a restart)');
     assert((snap.offers || []).some((o: any) => o.signatureName === 'سارا محمدی'), 'the signature survives a restart');
     assert(!JSON.stringify(snap).includes('smtp-secret-123'), 'the SMTP password is never written in clear');

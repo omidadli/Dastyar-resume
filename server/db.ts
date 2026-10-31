@@ -752,6 +752,9 @@ function normalizeOrg(o: OrgRecord): OrgRecord {
     careerSlug: (o.careerSlug || `org-${o.id.slice(-6)}`).toLowerCase(),
     careerAbout: o.careerAbout ?? '',
     blindScreening: Boolean(o.blindScreening),
+    offerApproval: o.offerApproval && typeof o.offerApproval === 'object'
+      ? { enabled: Boolean(o.offerApproval.enabled), steps: Array.isArray(o.offerApproval.steps) ? o.offerApproval.steps : [] }
+      : { enabled: false, steps: [] },
   };
 }
 
@@ -985,7 +988,7 @@ function claimLegacyDataOnStartup() {
 
 export function updateOrg(
   id: string,
-  patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'blindScreening'>>
+  patch: Partial<Pick<OrgRecord, 'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'blindScreening' | 'offerApproval'>>
 ): OrgRecord | null {
   const org = orgs.get(id);
   if (!org) return null;
@@ -995,6 +998,7 @@ export function updateOrg(
   if (typeof patch.careerSlug === 'string') org.careerSlug = patch.careerSlug;
   if (typeof patch.careerAbout === 'string') org.careerAbout = patch.careerAbout.slice(0, 1200);
   if (typeof patch.blindScreening === 'boolean') org.blindScreening = patch.blindScreening;
+  if (patch.offerApproval && typeof patch.offerApproval === 'object') org.offerApproval = patch.offerApproval;
   scheduleSave();
   return org;
 }

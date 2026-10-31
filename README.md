@@ -86,6 +86,7 @@ NODE_ENV=production npm start
 - **API و وب‌هوک** (کلید API، هشت مسیر `/api/v1` شامل ثبت نتیجهٔ آزمون، وب‌هوک امضاشده با HMAC و نمونهٔ بررسی امضا) → [`docs/API.md`](docs/API.md).
 - **نگه‌داری داده و حذف دادهٔ شخصی (DSAR)** (سیاست روزشمار، ناشناس‌سازی، خروجی و پاک‌سازی) → [`docs/DATA-RETENTION.md`](docs/DATA-RETENTION.md).
 - **ورود دومرحله‌ای** (QR برنامهٔ احراز هویت، کدهای بازیابی، بازنشانی توسط مدیر) → [`docs/TWO-FACTOR.md`](docs/TWO-FACTOR.md).
+- **گردش تأیید پیشنهاد** (۱ تا ۳ مرحله، تأیید/رد با یادداشت، بستن ارسال تا تأیید آخر) → [`docs/OFFER-APPROVAL.md`](docs/OFFER-APPROVAL.md).
 - **آزمون و ارزیابی** (۵ آزمون / ۴۵ پرسش: قضاوت موقعیتی، نمونه‌کار، نمایهٔ پنج‌بُعدی رفتار؛ لینک عمومی یک‌بارمصرف، کلید امتیاز روشن، قرارداد ارائه‌دهندهٔ بیرونی) → [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
 - **ورود سازمانی (SSO)** (OIDC با Google Workspace، Microsoft 365، Okta یا Keycloak؛ دامنه‌های مجاز، ورود خودکار اعضا، «فقط SSO») → [`docs/SSO.md`](docs/SSO.md).
 - **غربالگری بی‌طرف** (پنهان‌سازی هویت سمت سرور، بستن تماس تا آشکارسازی، ثبت آشکارسازی) → [`docs/BLIND-SCREENING.md`](docs/BLIND-SCREENING.md).
@@ -218,6 +219,7 @@ docs/INTERVIEW-KIT.md     کیت مصاحبه: بانک پرسش و چیدمان
 docs/TEAM-AND-COST.md     عملکرد تیم و هزینهٔ هر استخدام (فرمول، API، محدودیت‌ها)
 docs/SSO.md               ورود سازمانی با OIDC: راه‌اندازی، قواعد امنیتی، خطاها
 docs/ASSESSMENT.md        آزمون و ارزیابی: بانک، امتیازدهی، قرارداد ارائه‌دهنده
+docs/OFFER-APPROVAL.md    گردش تأیید پیشنهاد: زنجیره، قواعد، خطاها
 ```
 
 سیستم طراحی (رنگ‌ها، تایپوگرافی، اجزا و قواعد دسترس‌پذیری) در [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) مستند شده است.

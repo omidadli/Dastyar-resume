@@ -24,7 +24,26 @@ import type { Job, ResumeRecord } from '../../src/types/screening';
 import { systemSettings } from '../platform';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
-const RESERVED_SLUGS = new Set(['api', 'app', 'admin', 'careers', 'login', 'signup', 'www', 'static', 'assets']);
+const RESERVED_SLUGS = new Set([
+  'api',
+  'app',
+  'admin',
+  'careers',
+  'login',
+  'signup',
+  'www',
+  'static',
+  'assets',
+  'robots.txt',
+  'sitemap.xml',
+  'job-posting.json',
+  'feed.xml',
+]);
+
+/** «مهلت درخواست» passed? An expired opening is never advertised as open. */
+function isExpired(job: Job): boolean {
+  return Boolean(job.applyByISO && new Date(job.applyByISO).getTime() < Date.now());
+}
 
 function publicSummary(job: Job): PublicJobSummary {
   return {
@@ -36,6 +55,8 @@ function publicSummary(job: Job): PublicJobSummary {
     seniority: job.understanding?.seniority || '',
     summary: String(job.understanding?.plainExplanation || '').slice(0, 220),
     publishedAtJalali: job.publishedAtISO ? formatJalaliDate(tehranJalaliOf(new Date(job.publishedAtISO)), true) : job.createdAtJalali,
+    applyByJalali: job.applyByJalali || null,
+    expired: isExpired(job),
   };
 }
 
@@ -59,11 +80,235 @@ function publicDetail(job: Job): PublicJobDetail {
   };
 }
 
-function originOf(req: express.Request): string {
+export function careerOriginOf(req: express.Request): string {
   const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'https';
   const host = (req.headers['x-forwarded-host'] as string) || req.headers.host || 'localhost';
   return `${proto}://${host}`;
 }
+
+// ------------------------------------------------- schema.org JobPosting -----
+//
+// «گوگل برای مشاغل» (Google for Jobs) reads JobPosting JSON-LD from the page —
+// not from a private API. Two consequences the product must honour:
+//   • the markup has to describe the *same* facts the page shows (title, place,
+//     deadline, employment type), otherwise Google flags a mismatch;
+//   • it disappears as soon as the opening does — never advertise a job the
+//     workspace cannot accept applications for.
+
+const EMPLOYMENT_SCHEMA: Record<string, string[]> = {
+  'full-time': ['FULL_TIME'],
+  'part-time': ['PART_TIME'],
+  contract: ['CONTRACTOR'],
+  remote: ['FULL_TIME'],
+  hybrid: ['FULL_TIME'],
+  internship: ['INTERN'],
+};
+
+/**
+ * Plain text → the small subset of HTML Google's guideline asks for: paragraphs
+ * and bullet lists. A run of «- item» lines becomes one <ul>, even when it sits
+ * under a heading inside the same block.
+ */
+function descriptionHtml(text: string): string {
+  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const blocks = String(text || '')
+    .split(/\n{2,}/)
+    .map((b) => b.trim())
+    .filter(Boolean)
+    .slice(0, 40);
+  const out: string[] = [];
+  for (const block of blocks) {
+    const lines = block.split(/\n/).map((l) => l.trim()).filter(Boolean);
+    let bullets: string[] = [];
+    let paragraph: string[] = [];
+    const flushBullets = () => {
+      if (bullets.length) out.push(`<ul>${bullets.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>`);
+      bullets = [];
+    };
+    const flushParagraph = () => {
+      if (paragraph.length) out.push(`<p>${paragraph.map(esc).join('<br>')}</p>`);
+      paragraph = [];
+    };
+    for (const line of lines) {
+      if (/^[-•*]\s+/.test(line)) {
+        flushParagraph();
+        bullets.push(line.replace(/^[-•*]\s+/, ''));
+      } else {
+        flushBullets();
+        paragraph.push(line);
+      }
+    }
+    flushBullets();
+    flushParagraph();
+  }
+  return out.join('');
+}
+
+/** One JobPosting object — exactly the fields Google reads, nothing invented. */
+export function jobPostingJson(job: Job, org: { name: string; careerSlug: string }, origin: string) {
+  const base = `${origin.replace(/\/$/, '')}/careers/${org.careerSlug}`;
+  const url = `${base}/jobs/${job.id}`;
+  const u = job.understanding;
+  const city = (job.location || '').trim();
+  const remote = job.employmentType === 'remote';
+  const detail: any = {
+    '@context': 'https://schema.org',
+    '@type': 'JobPosting',
+    title: job.roleTitle,
+    description: descriptionHtml(job.extraNotes || u?.plainExplanation || job.roleTitle),
+    datePosted: job.publishedAtISO || job.createdAtISO,
+    hiringOrganization: {
+      '@type': 'Organization',
+      name: org.name,
+      sameAs: base,
+    },
+    jobLocation: {
+      '@type': 'Place',
+      address: {
+        '@type': 'PostalAddress',
+        ...(city ? { addressLocality: city } : {}),
+        addressCountry: 'IR',
+      },
+    },
+    identifier: { '@type': 'PropertyValue', name: org.name, value: job.id },
+    url,
+    // HOVIDA's own form is the application path — no third-party redirect.
+    directApply: true,
+    industry: job.departmentName || undefined,
+    ...(job.employmentType ? { employmentType: EMPLOYMENT_SCHEMA[job.employmentType] || ['FULL_TIME'] } : {}),
+    ...(remote ? { jobLocationType: 'TELECOMMUTE' } : {}),
+    // Only a real deadline: an invented one would tell Google a live job is over.
+    ...(job.applyByISO && !isExpired(job) ? { validThrough: job.applyByISO } : {}),
+  };
+  if (!detail.industry) delete detail.industry;
+  return detail;
+}
+
+/**
+ * A listing page is not a job posting: Google expects one JobPosting per job
+ * *page*, so the portal index carries an ItemList that points at each opening.
+ */
+export function jobListLd(slug: string, origin: string): string {
+  const org = db.findOrgByCareerSlug(slug);
+  if (!org || org.suspended) return '';
+  const jobs = db
+    .listJobs(org.id)
+    .filter((j) => j.isPublic && j.status === 'open' && !isExpired(j))
+    .sort((a, b) => (b.publishedAtISO || '').localeCompare(a.publishedAtISO || ''));
+  if (!jobs.length) return '';
+  const base = (origin || 'https://hovida.local').replace(/\/$/, '');
+  const list = {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    name: `فرصت‌های شغلی ${org.name}`,
+    numberOfItems: jobs.length,
+    itemListElement: jobs.map((j, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: j.roleTitle,
+      url: `${base}/careers/${org.careerSlug}/jobs/${j.id}`,
+    })),
+  };
+  return `<script type="application/ld+json">${JSON.stringify(list)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')}</script>`;
+}
+
+/** The JSON-LD block(s) for one page; empty when the page has nothing to say. */
+export function jobPostingLd(slug: string, jobId: string | undefined, origin: string): string {
+  const org = db.findOrgByCareerSlug(slug);
+  if (!org || org.suspended) return '';
+  const jobs = jobId
+    ? [db.getJob(org.id, jobId)].filter((j): j is Job => Boolean(j && j.isPublic && j.status === 'open' && !isExpired(j)))
+    : db
+        .listJobs(org.id)
+        .filter((j) => j.isPublic && j.status === 'open' && !isExpired(j))
+        .sort((a, b) => (b.publishedAtISO || '').localeCompare(a.publishedAtISO || ''));
+  if (!jobs.length) return '';
+  const base = (origin || 'https://hovida.local').replace(/\/$/, '');
+  const items = jobs.map((j) => jobPostingJson(j, org, base));
+  // «</script>» inside a description would end the block early: escape < and >.
+  const json = JSON.stringify(items.length === 1 ? items[0] : items).replace(/</g, '\\u003c').replace(/>/g, '\\u003e');
+  return `<script type="application/ld+json">${json}</script>`;
+}
+
+/** The <head> a career page needs: its own title, description and the JSON-LD. */
+export function careersHeadHtml(slug: string, jobId: string | undefined, origin: string): string | null {
+  const org = db.findOrgByCareerSlug(slug);
+  if (!org || org.suspended) return null;
+  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  if (jobId) {
+    const job = db.getJob(org.id, jobId);
+    if (!job || !job.isPublic || job.status !== 'open') return null;
+    const expired = isExpired(job);
+    const title = `${job.roleTitle} — ${org.name}`;
+    const desc = String(job.understanding?.plainExplanation || job.extraNotes || '').slice(0, 180);
+    return [
+      `<title>${esc(title)}</title>`,
+      `<meta name="description" content="${esc(desc)}" />`,
+      `<meta property="og:title" content="${esc(title)}" />`,
+      `<meta property="og:description" content="${esc(desc)}" />`,
+      `<meta property="og:type" content="website" />`,
+      expired ? `<meta name="robots" content="noindex,follow" />` : jobPostingLd(slug, jobId, origin),
+    ].join('\n    ');
+  }
+  const jobs = db.listJobs(org.id).filter((j) => j.isPublic && j.status === 'open' && !isExpired(j));
+  const title = `فرصت‌های شغلی ${org.name}`;
+  const desc = (org.careerAbout || '').slice(0, 180) || `${jobs.length} فرصت شغلی باز در ${org.name} — درخواست آنلاین.`;
+  return [
+    `<title>${esc(title)}</title>`,
+    `<meta name="description" content="${esc(desc)}" />`,
+    `<meta property="og:title" content="${esc(title)}" />`,
+    `<meta property="og:description" content="${esc(desc)}" />`,
+    `<meta property="og:type" content="website" />`,
+    jobListLd(slug, origin),
+  ].join('\n    ');
+}
+
+/**
+ * The same facts as the JSON-LD, as plain JSON — for an aggregator, a job-board
+ * partner or the workspace's own website to poll. Public and read-only: it is
+ * mounted both under `/api/careers/...` and at the crawlable `/careers/...`.
+ */
+export const jobPostingFeed: express.RequestHandler = (req, res) => {
+  const org = db.findOrgByCareerSlug(req.params.slug);
+  if (!org || org.suspended) return res.status(404).json({ error: 'این صفحهٔ استخدام پیدا نشد.' });
+  const origin = careerOriginOf(req);
+  const jobs = db
+    .listJobs(org.id)
+    .filter((j) => j.isPublic && j.status === 'open' && !isExpired(j))
+    .sort((a, b) => (b.publishedAtISO || '').localeCompare(a.publishedAtISO || ''));
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.json({
+    org: { name: org.name, slug: org.careerSlug },
+    count: jobs.length,
+    items: jobs.map((j) => jobPostingJson(j, org, origin)),
+  });
+};
+
+/** A sitemap so a search engine finds every published opening by itself. */
+export const careersSitemap: express.RequestHandler = (req, res) => {
+  const org = db.findOrgByCareerSlug(req.params.slug);
+  if (!org || org.suspended) return res.status(404).type('text/plain').send('Not found');
+  const base = `${careerOriginOf(req)}/careers/${org.careerSlug}`;
+  const esc = (v: string) => v.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const jobs = db
+    .listJobs(org.id)
+    .filter((j) => j.isPublic && j.status === 'open' && !isExpired(j))
+    .sort((a, b) => (b.publishedAtISO || '').localeCompare(a.publishedAtISO || ''));
+  const urls = [
+    `<url><loc>${esc(base)}</loc><changefreq>daily</changefreq><priority>0.8</priority></url>`,
+    ...jobs.map(
+      (j) =>
+        `<url><loc>${esc(`${base}/jobs/${j.id}`)}</loc>${
+          j.publishedAtISO ? `<lastmod>${j.publishedAtISO.slice(0, 10)}</lastmod>` : ''
+        }<changefreq>weekly</changefreq><priority>0.9</priority></url>`
+    ),
+  ];
+  res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls.join('\n')}\n</urlset>`);
+};
 
 // --------------------------------------------------------------- public -----
 
@@ -135,7 +380,7 @@ export function careerPublicRoutes() {
       if (!org || org.suspended) return res.status(404).json({ error: 'این صفحهٔ استخدام پیدا نشد.' });
       const jobs = db
         .listJobs(org.id)
-        .filter((j) => j.isPublic && j.status === 'open')
+        .filter((j) => j.isPublic && j.status === 'open' && !isExpired(j))
         .sort((a, b) => (b.publishedAtISO || '').localeCompare(a.publishedAtISO || ''));
       const page: PublicCareersPage = {
         org: { name: org.name, about: org.careerAbout || '', slug: org.careerSlug },
@@ -145,6 +390,9 @@ export function careerPublicRoutes() {
     })
   );
 
+  r.get('/careers/:slug/job-posting.json', jobPostingFeed);
+  r.get('/careers/:slug/sitemap.xml', careersSitemap);
+
   r.get(
     '/careers/:slug/jobs/:jobId',
     h(async (req, res) => {
@@ -152,6 +400,8 @@ export function careerPublicRoutes() {
       if (!org || org.suspended) return res.status(404).json({ error: 'این صفحهٔ استخدام پیدا نشد.' });
       const job = db.getJob(org.id, req.params.jobId);
       if (!job || !job.isPublic || job.status !== 'open') return res.status(404).json({ error: 'این فرصت شغلی منتشر نشده است.' });
+      // An expired opening stays readable (a shared link must not dead-end) but
+      // says plainly that the deadline has passed — and the form is closed.
       res.json({ job: publicDetail(job), org: { name: org.name, about: org.careerAbout || '' } });
     })
   );
@@ -163,6 +413,13 @@ export function careerPublicRoutes() {
       if (!org || org.suspended) return res.status(404).json({ error: 'این صفحهٔ استخدام پیدا نشد.' });
       const job = db.getJob(org.id, req.params.jobId);
       if (!job || !job.isPublic || job.status !== 'open') return res.status(404).json({ error: 'این فرصت شغلی منتشر نشده است.' });
+      if (isExpired(job)) {
+        return res.status(410).json({
+          error: 'مهلت درخواست برای این فرصت شغلی به پایان رسیده است.',
+          code: 'APPLICATION_CLOSED',
+          applyByJalali: job.applyByJalali || null,
+        });
+      }
 
       // A filled honeypot means a bot: answer 200 and do nothing.
       if (str(req.body?.website, 40)) return res.json({ applicationId: '', message: 'درخواست شما ثبت شد.' });
@@ -314,7 +571,7 @@ export function careerRoutes() {
       const settings: CareerSettings = {
         slug: org.careerSlug,
         about: org.careerAbout,
-        url: `${originOf(req)}/careers/${org.careerSlug}`,
+        url: `${careerOriginOf(req)}/careers/${org.careerSlug}`,
         publishedJobs: jobs.filter((j) => j.isPublic && j.status === 'open').length,
         totalJobs: jobs.filter((j) => j.status === 'open').length,
       };
@@ -341,7 +598,7 @@ export function careerRoutes() {
         careers: {
           slug: updated.careerSlug,
           about: updated.careerAbout,
-          url: `${originOf(req)}/careers/${updated.careerSlug}`,
+          url: `${careerOriginOf(req)}/careers/${updated.careerSlug}`,
           publishedJobs: db.listJobs(org.id).filter((j) => j.isPublic && j.status === 'open').length,
           totalJobs: db.listJobs(org.id).filter((j) => j.status === 'open').length,
         } as CareerSettings,

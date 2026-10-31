@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, BriefcaseBusiness, CheckCircle2, FileUp, Loader2, MapPin, Send, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, BriefcaseBusiness, CheckCircle2, FileUp, Loader2, MapPin, Send, ShieldCheck, Sparkles } from 'lucide-react';
 import { HovidaLogo } from '../components/brand/Logo';
 import { Button, Callout, Chip, Field, Select, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
@@ -96,6 +96,7 @@ export default function Careers({ slug, jobId }: { slug: string; jobId?: string 
                     )}
                     {j.employmentType && <Chip tone="neutral">{TYPE_LABEL[j.employmentType]}</Chip>}
                     {j.seniority && <Chip tone="neutral">{j.seniority}</Chip>}
+                    {j.applyByJalali && <Chip tone="outline">{`مهلت: ${j.applyByJalali}`}</Chip>}
                   </div>
                   {j.summary && <p className="text-[13px] text-ink-3 mt-2.5 leading-relaxed line-clamp-2">{j.summary}</p>}
                 </div>
@@ -158,6 +159,7 @@ function JobPage({ slug, jobId, orgName }: { slug: string; jobId: string; orgNam
             )}
             {job.employmentType && <Chip tone="neutral">{TYPE_LABEL[job.employmentType]}</Chip>}
             {job.seniority && <Chip tone="neutral">{job.seniority}</Chip>}
+            {job.applyByJalali && !job.expired && <Chip tone="warning">{`مهلت درخواست: ${job.applyByJalali}`}</Chip>}
           </div>
 
           <section className="mt-6">
@@ -198,6 +200,22 @@ function JobPage({ slug, jobId, orgName }: { slug: string; jobId: string; orgNam
               <button type="button" onClick={() => setSent(null)} className="text-[12.5px] text-brand-strong mt-4 hover:underline">
                 ارسال درخواست دیگر
               </button>
+            </div>
+          ) : job.expired ? (
+            <div className="text-center py-4">
+              <span className="w-12 h-12 rounded-full bg-review-soft text-review-ink flex items-center justify-center mx-auto mb-3">
+                <AlertTriangle className="w-6 h-6" strokeWidth={2} />
+              </span>
+              <p className="text-[15px] font-bold text-ink">مهلت درخواست این فرصت تمام شده است</p>
+              <p className="text-[13px] text-ink-2 mt-2 leading-relaxed">
+                {job.applyByJalali
+                  ? `آخرین روز دریافت درخواست ${job.applyByJalali} بود.`
+                  : 'این فرصت دیگر درخواست نمی‌پذیرد.'}{' '}
+                اگر فرصت‌های دیگری داریم، از فهرست ببینید.
+              </p>
+              <Button variant="secondary" className="mt-4" onClick={() => navigate(`/careers/${slug}`)}>
+                همهٔ فرصت‌ها
+              </Button>
             </div>
           ) : (
             <ApplyForm slug={slug} job={job} onSent={(message) => setSent({ message })} />

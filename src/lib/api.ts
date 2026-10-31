@@ -340,7 +340,7 @@ export const api = {
     /** «کیت مصاحبه» — composed from the job's criteria, plus this candidate's résumé. */
     interviewKit: (id: string, resumeId?: string) =>
       get<{ kit: InterviewKit }>(`/api/jobs/${id}/interview-kit${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
-    update: (id: string, b: Partial<JobInput> & { status?: Job['status'] }) => patch<{ job: Job }>(`/api/jobs/${id}`, b),
+    update: (id: string, b: Partial<JobInput> & { status?: Job['status']; applyBy?: string }) => patch<{ job: Job }>(`/api/jobs/${id}`, b),
     remove: (id: string) => del<{ ok: boolean }>(`/api/jobs/${id}`),
     analysis: (id: string, state: 'start' | 'cancel', opts?: RequestOptions) =>
       post<{ job: Job }>(`/api/jobs/${id}/analysis`, { state }, opts),

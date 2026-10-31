@@ -1290,6 +1290,8 @@ export function createJob(
     analysisStatus: 'idle',
     isPublic: false,
     publishedAtISO: null,
+    applyByISO: null,
+    applyByJalali: null,
     stages: cloneStages(DEFAULT_STAGES),
     stats: emptyStats(),
     createdAtJalali: stamp.jalali,
@@ -1307,7 +1309,17 @@ export function updateJob(
   patch: Partial<
     Pick<
       Job,
-      'roleTitle' | 'extraNotes' | 'location' | 'employmentType' | 'status' | 'analysisStatus' | 'isPublic' | 'publishedAtISO' | 'stages'
+      | 'roleTitle'
+      | 'extraNotes'
+      | 'location'
+      | 'employmentType'
+      | 'status'
+      | 'analysisStatus'
+      | 'isPublic'
+      | 'publishedAtISO'
+      | 'applyByISO'
+      | 'applyByJalali'
+      | 'stages'
     >
   >
 ): Job | null {
@@ -1323,6 +1335,8 @@ export function updateJob(
     j.isPublic = Boolean(patch.isPublic) && j.status === 'open';
     if (j.isPublic && !j.publishedAtISO) j.publishedAtISO = new Date().toISOString();
   }
+  if (patch.applyByISO !== undefined) j.applyByISO = patch.applyByISO;
+  if (patch.applyByJalali !== undefined) j.applyByJalali = patch.applyByJalali;
   if (patch.stages !== undefined) {
     const next = sanitizeStages(patch.stages);
     if (next.length !== stagesOf(j).length) {

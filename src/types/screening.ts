@@ -212,6 +212,14 @@ export interface Job {
   /** Listed on the public career portal (`/careers/<slug>`). */
   isPublic?: boolean;
   publishedAtISO?: string | null;
+  /**
+   * «مهلت درخواست» — end of the stated Jalali day, in ISO. After it the opening
+   * is no longer advertised (and `JobPosting.validThrough` says the same thing),
+   * so a candidate never applies to a listing that quietly expired.
+   */
+  applyByISO?: string | null;
+  /** The same deadline as the recruiter typed it (۱۴۰۴/۰۸/۱۲), for display. */
+  applyByJalali?: string | null;
   /** The board's columns for this opening (defaults applied when absent). */
   stages?: PipelineStage[];
   stats: JobStats;

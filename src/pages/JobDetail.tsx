@@ -80,6 +80,9 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
   const [roleTitle, setRoleTitle] = useState(job.roleTitle);
   const [location, setLocation] = useState(job.location);
   const [extraNotes, setExtraNotes] = useState(job.extraNotes);
+  // «مهلت درخواست» — a Jalali date the public page and the schema.org markup
+  // both honour; empty means «تا اطلاع ثانوی».
+  const [applyBy, setApplyBy] = useState(job.applyByJalali || '');
   const [saving, setSaving] = useState(false);
   const jobRef = useRef(job);
   jobRef.current = job;
@@ -90,12 +93,18 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
       setRoleTitle(jobRef.current.roleTitle);
       setLocation(jobRef.current.location);
       setExtraNotes(jobRef.current.extraNotes);
+      setApplyBy(jobRef.current.applyByJalali || '');
     }
   }, [open]);
   const save = async () => {
     setSaving(true);
     try {
-      const { job: updated } = await api.jobs.update(job.id, { roleTitle: roleTitle.trim(), location: location.trim(), extraNotes });
+      const { job: updated } = await api.jobs.update(job.id, {
+        roleTitle: roleTitle.trim(),
+        location: location.trim(),
+        extraNotes,
+        applyBy: applyBy.trim(),
+      });
       onSaved(updated);
       emitChange('jobs', job.id);
       toast('اطلاعات فرصت شغلی به‌روز شد.');
@@ -127,6 +136,14 @@ function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean
         <TextInput label="عنوان" value={roleTitle} onChange={(e) => setRoleTitle(e.target.value)} />
         <TextInput label="محل کار" optional value={location} onChange={(e) => setLocation(e.target.value)} />
         <TextArea label="شرح شغل و نکات مهم" optional rows={5} value={extraNotes} onChange={(e) => setExtraNotes(e.target.value)} />
+        <TextInput
+          label="مهلت درخواست (شمسی)"
+          optional
+          placeholder="۱۴۰۴/۰۸/۱۲"
+          value={applyBy}
+          onChange={(e) => setApplyBy(e.target.value)}
+          hint="خالی بگذارید تا باز بماند. پس از این تاریخ، آگهی از پورتال شغلی و نتایج گوگل برداشته می‌شود و فرم بسته می‌شود."
+        />
       </div>
     </Modal>
   );

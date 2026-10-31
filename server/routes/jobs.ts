@@ -9,6 +9,7 @@ import { assessText } from '../../src/lib/officeText';
 import type { CandidateEvaluation, EmploymentType, EvaluationMeta, JobStatus, Recommendation, ScreeningAnswers } from '../../src/types/screening';
 import type { Department } from '../../src/types/app';
 import { matchesSearch } from '../../src/lib/normalizeFa';
+import { tehranIsoFromJalali } from '../tehran-time';
 import { h, oneOf, str } from './util';
 import { bankSummary, buildInterviewKit } from '../interview-kit';
 
@@ -150,7 +151,20 @@ export function jobRoutes(): express.Router {
       return res.status(400).json({ error: 'عنوان فرصت شغلی را وارد کنید.', field: 'roleTitle' });
     }
     const status = req.body?.status ? oneOf<JobStatus>(req.body.status, ['open', 'paused', 'closed'], job.status) : undefined;
+    // «مهلت درخواست»: the recruiter types a Jalali date; an empty value clears
+    // it. The deadline means the end of that Tehran day, not 00:00.
+    let deadline: { applyByISO: string | null; applyByJalali: string | null } | null = null;
+    if (req.body?.applyBy !== undefined) {
+      const raw = str(req.body.applyBy, 20).trim();
+      if (!raw) deadline = { applyByISO: null, applyByJalali: null };
+      else {
+        const iso = tehranIsoFromJalali(raw, '23:59');
+        if (!iso) return res.status(400).json({ error: 'مهلت درخواست باید یک تاریخ شمسی معتبر باشد (مثال: ۱۴۰۴/۰۸/۱۲).', field: 'applyBy' });
+        deadline = { applyByISO: iso, applyByJalali: raw.replace(/[^0-9/]/g, '') };
+      }
+    }
     const updated = db.updateJob(org.id, job.id, {
+      ...(deadline || {}),
       ...(typeof req.body?.roleTitle === 'string' ? { roleTitle: str(req.body.roleTitle, 120) } : {}),
       ...(typeof req.body?.extraNotes === 'string' ? { extraNotes: str(req.body.extraNotes, 3000) } : {}),
       ...(typeof req.body?.location === 'string' ? { location: str(req.body.location, 80) } : {}),

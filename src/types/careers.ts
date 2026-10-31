@@ -13,6 +13,10 @@ export interface PublicJobSummary {
   seniority: string;
   summary: string;
   publishedAtJalali: string;
+  /** «مهلت درخواست» as the recruiter typed it (۱۴۰۴/۰۸/۱۲), null = open-ended. */
+  applyByJalali: string | null;
+  /** True once that Tehran day is over: readable, but nothing can be submitted. */
+  expired: boolean;
 }
 
 export interface PublicOrg {

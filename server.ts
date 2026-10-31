@@ -3,6 +3,7 @@
  * Express API (multi-tenant workspaces) + Vite dev middleware / static SPA.
  */
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import * as db from './server/db';
@@ -20,7 +21,14 @@ import { insightRoutes } from './server/routes/insights';
 import { integrationPublicRoutes, integrationRoutes } from './server/routes/integrations';
 import { ssoPublicRoutes, ssoRoutes } from './server/routes/sso';
 import { automationRoutes } from './server/routes/automation';
-import { careerPublicRoutes, careerRoutes } from './server/routes/careers';
+import {
+  careerOriginOf,
+  careerPublicRoutes,
+  careerRoutes,
+  careersHeadHtml,
+  careersSitemap,
+  jobPostingFeed,
+} from './server/routes/careers';
 import { offerPublicRoutes, offerRoutes } from './server/routes/offers';
 import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/scheduling';
 import { commentRoutes } from './server/routes/comments';
@@ -163,9 +171,41 @@ async function startServer() {
     // deploy) must fail as a 404 — never come back as the HTML shell, which
     // the browser would try to run as JavaScript.
     app.use('/assets', (_req, res) => res.status(404).type('text/plain').send('Not found'));
-    app.get('*', (_req, res) => {
+    // The SPA shell, with the career-page <head> swapped in when the address is
+    // a public job page. Google for Jobs reads JobPosting JSON-LD from the HTML —
+    // a client-rendered tag alone is not enough for a crawler that does not wait.
+    // The machine-readable career addresses live at the site root as well as
+    // under /api, because a crawler or an aggregator is given a clean URL.
+    app.get('/careers/:slug/job-posting.json', jobPostingFeed);
+    app.get('/careers/:slug/sitemap.xml', careersSitemap);
+    const shellPath = path.join(distPath, 'index.html');
+    let shellCache: string | null = null;
+    const readShell = () => {
+      if (shellCache === null) shellCache = fs.readFileSync(shellPath, 'utf-8');
+      return shellCache;
+    };
+    app.get('*', (req, res) => {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      res.sendFile(path.join(distPath, 'index.html'));
+      const m = /^\/careers\/([^/]+)(?:\/jobs\/([^/]+))?\/?$/.exec(req.path);
+      if (m) {
+        try {
+          const extra = careersHeadHtml(
+            decodeURIComponent(m[1]),
+            m[2] ? decodeURIComponent(m[2]) : undefined,
+            careerOriginOf(req)
+          );
+          if (extra) {
+            const html = readShell().replace(
+              /<!--careers-head:start-->[\s\S]*?<!--careers-head:end-->/,
+              () => `<!--careers-head:start-->\n    ${extra}\n    <!--careers-head:end-->`
+            );
+            return res.type('html').send(html);
+          }
+        } catch {
+          // A malformed slug is just an app page; never a 500 for a crawler.
+        }
+      }
+      res.sendFile(shellPath);
     });
   }
 

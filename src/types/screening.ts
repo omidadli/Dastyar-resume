@@ -4,6 +4,7 @@
 // ================================================================
 
 import type { PipelineStage } from './pipeline';
+import type { EeoAnswer } from './eeo';
 
 export type Recommendation = 'INTERVIEW' | 'REVIEW' | 'REJECT';
 /**
@@ -351,6 +352,13 @@ export interface ResumeRecord {
 
   /** Which column of the pipeline board this candidate sits in. */
   stageId?: string | null;
+
+  /**
+   * «برابری فرصت‌ها» — the candidate's own, voluntary answer. It is **never**
+   * sent to a member: it is stripped from every candidate payload and appears
+   * only as a suppressed aggregate in the EEO report. Screening never reads it.
+   */
+  eeo?: EeoAnswer | null;
 
   messageStatus: 'none' | 'sent';
   lastMessagedAtJalali: string | null;

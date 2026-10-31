@@ -5,12 +5,13 @@ const TABS = [
   { id: 'screening', label: 'غربالگری', to: '/app/reports' },
   { id: 'team', label: 'عملکرد تیم', to: '/app/reports/team' },
   { id: 'cost', label: 'هزینهٔ استخدام', to: '/app/reports/cost' },
+  { id: 'eeo', label: 'برابری فرصت‌ها', to: '/app/reports/eeo' },
 ] as const;
 
 export type ReportTabId = (typeof TABS)[number]['id'];
 
 /**
- * The three reports answer three different questions, so they are three pages —
+ * The reports answer different questions, so they are different pages —
  * but they share the range, and switching between them must not reset it.
  */
 export function ReportTabs({ active }: { active: ReportTabId }) {

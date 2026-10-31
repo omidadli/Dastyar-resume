@@ -68,6 +68,19 @@ const FA: Dict = {
   errGeneric: 'ارسال درخواست ممکن نشد؛ کمی بعد دوباره تلاش کنید.',
   footer: 'این صفحه با HOVIDA ساخته شده است؛ درخواست شما فقط به واحد منابع انسانی {org} می‌رسد.',
   originalNotice: 'این آگهی به فارسی نوشته شده است؛ متن اصلی کارفرما را می‌بینید.',
+  eeoTitle: 'برابری فرصت‌ها (داوطلبانه و بی‌نام)',
+  eeoNote: 'پاسخ‌های شما فقط برای بررسی منصفانه بودن فرایند استفاده می‌شود، در پروندهٔ بررسی‌شدهٔ شما کنار نامتان دیده نمی‌شود و هیچ تأثیری بر تصمیم ندارد. هر سه پرسش را می‌توانید بی‌پاسخ بگذارید.',
+  eeoGender: 'جنسیت',
+  eeoAge: 'گروه سنی',
+  eeoDisability: 'معلولیت یا بیماری مزمن',
+  eeoWoman: 'زن',
+  eeoMan: 'مرد',
+  eeoOther: 'دیگر / ترجیح می‌دهم توضیح ندهم',
+  eeoDecline: 'ترجیح می‌دهم نگویم',
+  eeoYes: 'بله',
+  eeoNo: 'خیر',
+  eeoAgeUnder25: 'زیر ۲۵ سال',
+  eeoAge55: '۵۵ سال و بیشتر',
 };
 
 const EN: Dict = {
@@ -126,6 +139,19 @@ const EN: Dict = {
   errGeneric: 'The application could not be sent; please try again shortly.',
   footer: 'This page is built with HOVIDA; your application goes only to the HR team of {org}.',
   originalNotice: 'This posting was written in Persian; the employer’s original text is shown.',
+  eeoTitle: 'Equal opportunity (voluntary and anonymous)',
+  eeoNote: 'Your answers are used only to check whether the process is fair. They are never shown next to your name to a reviewer and never affect a decision. All three questions are optional.',
+  eeoGender: 'Gender',
+  eeoAge: 'Age group',
+  eeoDisability: 'Disability or chronic illness',
+  eeoWoman: 'Woman',
+  eeoMan: 'Man',
+  eeoOther: 'Other / prefer to self-describe',
+  eeoDecline: 'Prefer not to say',
+  eeoYes: 'Yes',
+  eeoNo: 'No',
+  eeoAgeUnder25: 'Under 25',
+  eeoAge55: '55 and over',
 };
 
 const DICTS: Record<PortalLang, Dict> = { fa: FA, en: EN };

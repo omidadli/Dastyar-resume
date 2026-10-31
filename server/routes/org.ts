@@ -55,8 +55,16 @@ export function orgRoutes(): express.Router {
       offerApproval = { enabled, steps };
     }
 
+    // «برابری فرصت‌ها»: a switch and a suppression threshold, nothing more.
+    let eeo: { enabled: boolean; threshold: number } | undefined;
+    if (req.body?.eeo !== undefined) {
+      const threshold = Math.min(50, Math.max(2, Math.round(Number(req.body.eeo?.threshold) || 5)));
+      eeo = { enabled: Boolean(req.body.eeo?.enabled), threshold };
+    }
+
     const updated = db.updateOrg(org.id, {
       ...(name ? { name } : {}),
+      ...(eeo ? { eeo } : {}),
       ...(typeof req.body?.messageSignature === 'string' ? { messageSignature: str(req.body.messageSignature, 400) } : {}),
       ...(blind === undefined ? {} : { blindScreening: blind }),
       ...(offerApproval === undefined ? {} : { offerApproval }),

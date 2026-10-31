@@ -24,6 +24,7 @@ import type { Job, ResumeRecord } from '../../src/types/screening';
 import { systemSettings } from '../platform';
 import { markOfferReached, markOutcome, memberByCode, recordReferral } from '../referrals';
 import { blockedByJob, blockedByResume, visibleJobs } from '../job-access';
+import { eeoConfigOf, readEeoInput } from '../eeo';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const RESERVED_SLUGS = new Set([
@@ -416,7 +417,8 @@ export function careerPublicRoutes() {
       const page: PublicCareersPage = {
         org: { name: org.name, about: org.careerAbout || '', slug: org.careerSlug },
         jobs: jobs.map(publicSummary),
-        portal: portalOf(org),
+        // The optional self-identification block only appears when HR turned it on.
+        portal: { ...portalOf(org), eeoEnabled: eeoConfigOf(org).enabled },
       };
       res.json(page);
     })
@@ -528,6 +530,11 @@ export function careerPublicRoutes() {
       } catch {
         return res.status(409).json({ error: 'این فرصت شغلی در همین لحظه بسته شد؛ صفحه را تازه کنید.' });
       }
+
+      // «برابری فرصت‌ها» — voluntary, aggregate-only, and only while enabled.
+      // It is stored apart from the screening outcome and never returned to a
+      // member; `withoutEeo` strips it from every candidate payload.
+      if (eeoConfigOf(org).enabled) record.eeo = readEeoInput(req.body?.eeo);
 
       // Statement from the form — authoritative for how to reach the person.
       record.candidateName = name;

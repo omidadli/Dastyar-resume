@@ -39,6 +39,8 @@ export interface OrgPublic {
    * contacting a candidate waits for an explicit, logged reveal.
    */
   blindScreening?: boolean;
+  /** «برابری فرصت‌ها»: voluntary candidate self-identification, aggregate-only. */
+  eeo?: { enabled: boolean; threshold: number };
   /** «گردش تأیید پیشنهاد»: who must sign off before an offer goes to the candidate. */
   offerApproval?: OfferApprovalConfig;
   createdAtISO: string;

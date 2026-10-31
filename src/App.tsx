@@ -59,6 +59,7 @@ const Talent = lazyPage(() => import('./pages/Talent'));
 const Reports = lazyPage(() => import('./pages/Reports'));
 const TeamReport = lazyPage(() => import('./pages/TeamReport'));
 const CostReport = lazyPage(() => import('./pages/CostReport'));
+const EeoReport = lazyPage(() => import('./pages/EeoReport'));
 const Sourcing = lazyPage(() => import('./pages/Sourcing'));
 const Automation = lazyPage(() => import('./pages/Automation'));
 const Careers = lazyPage(() => import('./pages/Careers'));
@@ -132,6 +133,7 @@ function appPage(pathname: string): React.ReactNode {
   // The three reports share a range; the specific paths come before the overview.
   if (pathname === '/app/reports/team') return <TeamReport />;
   if (pathname === '/app/reports/cost') return <CostReport />;
+  if (pathname === '/app/reports/eeo') return <EeoReport />;
   if (pathname === '/app/reports') return <Reports />;
   if (pathname === '/app/settings') return <Settings tab="org" />;
   m = matchPath('/app/settings/:tab', pathname);

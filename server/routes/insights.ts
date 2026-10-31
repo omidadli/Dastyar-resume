@@ -6,6 +6,7 @@ import { int, oneOf, str } from './util';
 import { blindOn, knownNames, maskActivity, maskText, redactList } from '../blind';
 import { readAssumptionInput, readCostInput } from '../costs';
 import { visibleJobIds } from '../job-access';
+import { eeoConfigOf, eeoReport } from '../eeo';
 
 export function insightRoutes(): express.Router {
   const r = express.Router();
@@ -46,6 +47,16 @@ export function insightRoutes(): express.Router {
   r.get('/reports/team', (req, res) => {
     const range = oneOf<ReportRange>(req.query.range, ['30', '90', '365', 'all'], '90');
     res.json(db.teamReport(ctxOf(req).org.id, range));
+  });
+
+  /**
+   * «برابری فرصت‌ها» — aggregate only, admin only. A member sees neither the
+   * report nor the self-identification behind it.
+   */
+  r.get('/reports/eeo', requireRole('admin'), (req, res) => {
+    const { org } = ctxOf(req);
+    const range = oneOf<ReportRange>(req.query.range, ['30', '90', '365', 'all'], '90');
+    res.json(eeoReport(org.id, eeoConfigOf(org), range));
   });
 
   /**

@@ -19,6 +19,7 @@ import type {
 } from '../types/screening';
 import type { InterviewKit } from '../types/interview-kit';
 import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
+import type { EeoReport } from '../types/eeo';
 import type { SsoCheck, SsoLookup, SsoSaveInput, SsoStatus } from '../types/sso';
 import type {
   ActivityFeed,
@@ -303,7 +304,13 @@ export const api = {
   },
   org: {
     get: () => get<{ org: OrgPublic; members: TeamMember[] }>('/api/org'),
-    update: (b: { name?: string; messageSignature?: string; blindScreening?: boolean; offerApproval?: OfferApprovalConfig }) =>
+    update: (b: {
+      name?: string;
+      messageSignature?: string;
+      blindScreening?: boolean;
+      offerApproval?: OfferApprovalConfig;
+      eeo?: { enabled: boolean; threshold: number };
+    }) =>
       patch<{ org: OrgPublic }>('/api/org', b),
     setDepartments: (departments: Array<Partial<Department> & { name: string; hint: string }>) =>
       put<{ org: OrgPublic }>('/api/org/departments', { departments }),
@@ -654,6 +661,8 @@ export const api = {
   insights: {
     dashboard: () => get<DashboardData>('/api/dashboard'),
     reports: (range: ReportRange) => get<ReportsData>(`/api/reports?range=${range}`),
+    /** «برابری فرصت‌ها» — aggregate only, admin only. */
+    eeoReport: (range: ReportRange) => get<EeoReport>(`/api/reports/eeo?range=${range}`),
     teamReport: (range: ReportRange) => get<TeamReport>(`/api/reports/team?range=${range}`),
     costReport: (range: ReportRange) => get<CostReport>(`/api/reports/cost?range=${range}`),
     addCost: (b: { kind: CostKind; amount: number; atISO?: string | null; jobId?: string | null; note?: string }) =>

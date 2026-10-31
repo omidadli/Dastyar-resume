@@ -78,7 +78,18 @@ export default function Careers({ slug, jobId }: { slug: string; jobId?: string 
   }
 
   const { org, jobs } = pageQ.data;
-  if (jobId) return <JobPage slug={slug} jobId={jobId} orgName={org.name} lang={lang} languages={shell.languages} ref_={ref} />;
+  if (jobId)
+    return (
+      <JobPage
+        slug={slug}
+        jobId={jobId}
+        orgName={org.name}
+        lang={lang}
+        languages={shell.languages}
+        ref_={ref}
+        eeoEnabled={Boolean(pageQ.data.portal.eeoEnabled)}
+      />
+    );
 
   const linkFor = (id: string) => {
     const qs = new URLSearchParams();
@@ -147,6 +158,7 @@ function JobPage({
   lang,
   languages,
   ref_,
+  eeoEnabled,
 }: {
   slug: string;
   jobId: string;
@@ -154,6 +166,7 @@ function JobPage({
   lang: PortalLang;
   languages: PortalLang[];
   ref_: string;
+  eeoEnabled: boolean;
 }) {
   const jobQ = useAsync(() => api.careers.job(slug, jobId), [slug, jobId]);
   const job = jobQ.data?.job;
@@ -263,7 +276,7 @@ function JobPage({
               </Button>
             </div>
           ) : (
-            <ApplyForm slug={slug} job={job} lang={lang} refCode={ref_} onSent={(message) => setSent({ message })} />
+            <ApplyForm slug={slug} job={job} lang={lang} refCode={ref_} eeoEnabled={eeoEnabled} onSent={(message) => setSent({ message })} />
           )}
         </div>
       </div>
@@ -276,12 +289,14 @@ function ApplyForm({
   job,
   lang,
   refCode,
+  eeoEnabled,
   onSent,
 }: {
   slug: string;
   job: PublicJobDetail;
   lang: PortalLang;
   refCode: string;
+  eeoEnabled: boolean;
   onSent: (message: string) => void;
 }) {
   const [name, setName] = useState('');
@@ -297,6 +312,10 @@ function ApplyForm({
   const [error, setError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [heardFrom, setHeardFrom] = useState('');
+  // «برابری فرصت‌ها» — voluntary, skippable, and never read by a reviewer.
+  const [eeoGender, setEeoGender] = useState('');
+  const [eeoAge, setEeoAge] = useState('');
+  const [eeoDisability, setEeoDisability] = useState('');
   // A colleague's referral link lands here as ?ref=… — recorded on the application.
   const ref = refCode;
 
@@ -336,6 +355,10 @@ function ApplyForm({
         answers,
         heardFrom: heardFrom || undefined,
         ref: ref || undefined,
+        eeo:
+          eeoEnabled && (eeoGender || eeoAge || eeoDisability)
+            ? { gender: eeoGender || undefined, ageBand: eeoAge || undefined, disability: eeoDisability || undefined }
+            : undefined,
       };
       const res = await api.careers.apply(slug, job.id, body);
       onSent(res.message);
@@ -432,6 +455,57 @@ function ApplyForm({
         ) : (
           <TextInput key={q.id} label={q.label} value={answers[q.id] || ''} onChange={(e) => setAnswers((a) => ({ ...a, [q.id]: e.target.value }))} optional />
         )
+      )}
+
+      {eeoEnabled && (
+        <details className="rounded-[12px] border border-line-2 px-3.5 py-3 bg-canvas">
+          <summary className="text-[12.5px] font-semibold text-ink-2 cursor-pointer select-none">
+            {t(lang, 'eeoTitle')}
+          </summary>
+          <p className="text-[11.5px] text-ink-3 mt-2 leading-relaxed">{t(lang, 'eeoNote')}</p>
+          <div className="mt-3 space-y-3">
+            <Select
+              label={t(lang, 'eeoGender')}
+              value={eeoGender}
+              onChange={(e) => setEeoGender(e.target.value)}
+              options={[
+                { value: 'woman', label: t(lang, 'eeoWoman') },
+                { value: 'man', label: t(lang, 'eeoMan') },
+                { value: 'other', label: t(lang, 'eeoOther') },
+                { value: 'undisclosed', label: t(lang, 'eeoDecline') },
+              ]}
+              placeholder={t(lang, 'eeoDecline')}
+              optional
+            />
+            <Select
+              label={t(lang, 'eeoAge')}
+              value={eeoAge}
+              onChange={(e) => setEeoAge(e.target.value)}
+              options={[
+                { value: 'under25', label: t(lang, 'eeoAgeUnder25') },
+                { value: '25-34', label: '25–34' },
+                { value: '35-44', label: '35–44' },
+                { value: '45-54', label: '45–54' },
+                { value: '55plus', label: t(lang, 'eeoAge55') },
+                { value: 'undisclosed', label: t(lang, 'eeoDecline') },
+              ]}
+              placeholder={t(lang, 'eeoDecline')}
+              optional
+            />
+            <Select
+              label={t(lang, 'eeoDisability')}
+              value={eeoDisability}
+              onChange={(e) => setEeoDisability(e.target.value)}
+              options={[
+                { value: 'yes', label: t(lang, 'eeoYes') },
+                { value: 'no', label: t(lang, 'eeoNo') },
+                { value: 'undisclosed', label: t(lang, 'eeoDecline') },
+              ]}
+              placeholder={t(lang, 'eeoDecline')}
+              optional
+            />
+          </div>
+        </details>
       )}
 
       <label className="flex items-start gap-2 text-[12.5px] text-ink-2 leading-relaxed cursor-pointer">

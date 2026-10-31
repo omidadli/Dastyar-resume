@@ -39,6 +39,8 @@ export interface PublicOrg {
 export interface PublicPortalLanguages {
   languages: PortalLang[];
   defaultLang: PortalLang;
+  /** True when the workspace collects voluntary self-identification. */
+  eeoEnabled: boolean;
 }
 
 export interface PublicCareersPage {
@@ -73,6 +75,8 @@ export interface CareerApplicationInput {
   ref?: string;
   /** «چطور با ما آشنا شدید؟» — the candidate's own answer. */
   heardFrom?: string;
+  /** Voluntary self-identification; ignored unless the workspace enabled it. */
+  eeo?: { gender?: string; ageBand?: string; disability?: string };
 }
 
 export interface CareerApplicationResult {

@@ -3,6 +3,7 @@ import * as db from '../db';
 import { actorOf, ctxOf, signedFileUrl, verifyFileSignature } from '../auth';
 import { blindOn, blockedByBlind, redactList, redactRecord } from '../blind';
 import { blockedByResume, canSeeResume, visibleJobIds } from '../job-access';
+import { withoutEeo } from '../eeo';
 import { draftMessage, evaluateResume, KIND_TITLES } from '../ai/screening';
 import type { AiFile } from '../ai/provider';
 import { ingestDocument } from '../ingest';
@@ -154,7 +155,9 @@ export function resumeRoutes(): express.Router {
     const rec = db.getResume(org.id, req.params.id);
     if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
     if (blockedByResume(req, res, rec)) return;
-    res.json({ record: blindOn(org) ? redactRecord(rec) : rec, job: db.getJob(org.id, rec.jobId) });
+    // The candidate's EEO self-identification is not part of their résumé view.
+    const visible = blindOn(org) ? redactRecord(rec) : withoutEeo(rec);
+    res.json({ record: visible, job: db.getJob(org.id, rec.jobId) });
   });
 
   /**
@@ -172,7 +175,7 @@ export function resumeRoutes(): express.Router {
       jobId: rec.jobId,
       resumeId: rec.id,
     });
-    res.json({ record: rec });
+    res.json({ record: withoutEeo(rec) });
   });
 
   r.patch('/resumes/:id', (req, res) => {
@@ -264,7 +267,7 @@ export function resumeRoutes(): express.Router {
       if (mode === 'deep' && evaluation.engine === 'ai') {
         db.logActivity(org.id, actorOf(req), 'deep.review', `بازبینی دقیق رزومه «${displayName(rec)}» را انجام داد`, { jobId: rec.jobId, resumeId: rec.id });
       }
-      res.json({ record: rec, engine: evaluation.engine, mode });
+      res.json({ record: withoutEeo(rec), engine: evaluation.engine, mode });
     });
 
   r.post('/resumes/:id/rerun', rerun('standard'));

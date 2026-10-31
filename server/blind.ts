@@ -110,6 +110,8 @@ export function redactRecord<T extends Partial<ResumeRecord> & { id: string }>(r
   const ext = fileExtOf(rec.fileName || '');
   return {
     ...rec,
+    // «برابری فرصت‌ها» is never part of a view of a person, blind or not.
+    eeo: undefined,
     candidateName: label,
     fileName: `${label}.${ext}`,
     filePath: null,

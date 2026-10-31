@@ -36,6 +36,7 @@ import type { RetentionAction } from '../types/retention';
 import { IntegrationsTab } from './settings/IntegrationsTab';
 import { OfferApprovalCard } from '../components/settings/OfferApprovalCard';
 import { ReferralCard } from '../components/settings/ReferralCard';
+import { EeoCard } from '../components/settings/EeoCard';
 import { DeveloperTab } from './settings/DeveloperTab';
 
 type SettingsTab = 'org' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'developer' | 'account';
@@ -1225,6 +1226,7 @@ export default function Settings({ tab }: { tab: string }) {
           <OrgTab />
           <BlindCard />
           <OfferApprovalCard />
+          <EeoCard />
           <ReferralCard />
           <RetentionCard />
         </>

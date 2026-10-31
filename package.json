@@ -21,6 +21,7 @@
     "test:referrals": "npm run build && tsx scripts/referrals-api.test.ts",
     "test:job-access": "npm run build && tsx scripts/job-access.test.ts",
     "test:portal-langs": "npm run build && tsx scripts/portal-langs.test.ts",
+    "test:eeo": "npm run build && tsx scripts/eeo-api.test.ts",
     "build:cloudflare": "npm run build && node scripts/cloudflare/prepare-assets.mjs",
     "test:backup": "tsx scripts/backup.test.ts",
     "test:cloudflare": "tsx scripts/cloudflare.test.ts",

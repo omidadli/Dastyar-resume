@@ -1006,7 +1006,7 @@ export function updateOrg(
   patch: Partial<
     Pick<
       OrgRecord,
-      'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'careerLanguages' | 'careerDefaultLang' | 'blindScreening' | 'offerApproval'
+      'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'careerLanguages' | 'careerDefaultLang' | 'blindScreening' | 'offerApproval' | 'eeo'
     >
   >
 ): OrgRecord | null {
@@ -1021,6 +1021,7 @@ export function updateOrg(
   if (patch.careerDefaultLang === 'fa' || patch.careerDefaultLang === 'en') org.careerDefaultLang = patch.careerDefaultLang;
   if (typeof patch.blindScreening === 'boolean') org.blindScreening = patch.blindScreening;
   if (patch.offerApproval && typeof patch.offerApproval === 'object') org.offerApproval = patch.offerApproval;
+  if (patch.eeo && typeof patch.eeo === 'object') org.eeo = patch.eeo;
   scheduleSave();
   return org;
 }
@@ -1497,7 +1498,9 @@ function refreshDuplicateScope(orgId: string | null, departmentId: string) {
 }
 
 export function toListItem(r: ResumeRecord): ResumeListItem {
-  const { extractedText: _t, ...rest } = r;
+  // `eeo` never leaves the server through a candidate payload: diversity data is
+  // for the aggregate report, not for the person reading the résumé.
+  const { extractedText: _t, eeo: _e, ...rest } = r;
   return rest;
 }
 

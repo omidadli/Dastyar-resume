@@ -86,6 +86,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'onboarding.started': PartyPopper,
   'onboarding.completed': PartyPopper,
   'summary.created': NotebookPen,
+  'status.link': Link2,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

@@ -67,6 +67,7 @@ import type { PublicVideoInvite, VideoInvite, VideoOverview, VideoSettings } fro
 import type { Transcript, TranscriptStatusPayload } from '../types/transcript';
 import type { OnboardingOverview, OnboardingPlan } from '../types/onboarding';
 import type { MeetingSummary } from '../types/summary';
+import type { PublicStatus, StatusLink } from '../types/status';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -634,6 +635,13 @@ export const api = {
       submit: (token: string, answers: Record<string, string | number>) =>
         post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
     },
+  },
+  status: {
+    links: (resumeId: string) => get<{ items: StatusLink[] }>(`/api/resumes/${encodeURIComponent(resumeId)}/status-links`),
+    create: (resumeId: string) => post<{ link: StatusLink }>(`/api/resumes/${encodeURIComponent(resumeId)}/status-link`, {}),
+    revoke: (id: string) => del<{ link: StatusLink }>(`/api/status-links/${encodeURIComponent(id)}`),
+    /** Public: no session, no headers — the token is the whole key. */
+    public: (token: string) => get<{ status: PublicStatus }>(`/api/status/${encodeURIComponent(token)}`, { anonymous: true }),
   },
   onboarding: {
     overview: () => get<OnboardingOverview>('/api/onboarding'),

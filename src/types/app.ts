@@ -166,6 +166,7 @@ export type ActivityType =
   | 'onboarding.started'
   | 'onboarding.completed'
   | 'summary.created'
+  | 'status.link'
   | 'settings.changed';
 
 export interface ActivityItem {

@@ -81,6 +81,7 @@ import { SchedulingModal } from './SchedulingModal';
 import { CommentsSection } from './Comments';
 import { SurveyModal } from './SurveyModal';
 import { AssessmentModal } from './AssessmentModal';
+import { StatusLinkModal } from './StatusLinkModal';
 import { VideoModal } from './VideoModal';
 import { TranscriptModal } from './TranscriptModal';
 import { InterviewModal } from './InterviewModal';
@@ -306,6 +307,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [surveyOpen, setSurveyOpen] = useState(false);
   const [assessmentOpen, setAssessmentOpen] = useState(false);
+  const [statusLinkOpen, setStatusLinkOpen] = useState(false);
   const [videoOpen, setVideoOpen] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   /** «آشکارسازی هویت» — blind mode is on and this copy hides the person. */
@@ -902,6 +904,9 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)} disabled={hidden}>
                     نظرسنجی تجربه
                   </Button>
+                  <Button size="sm" variant="ghost" icon={Link2} onClick={() => setStatusLinkOpen(true)} disabled={hidden}>
+                    پیگیری درخواست
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -1043,6 +1048,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
       {talentOpen && <TalentModal record={record} onClose={() => setTalentOpen(false)} onSaved={onChange} />}
       <SurveyModal record={surveyOpen ? record : null} jobTitle={jobTitle} onClose={() => setSurveyOpen(false)} />
       <AssessmentModal record={assessmentOpen ? record : null} jobTitle={jobTitle} onClose={() => setAssessmentOpen(false)} />
+      <StatusLinkModal record={statusLinkOpen ? record : null} onClose={() => setStatusLinkOpen(false)} />
       <VideoModal record={videoOpen ? record : null} jobTitle={jobTitle} onClose={() => setVideoOpen(false)} />
       <TranscriptModal record={transcriptOpen ? record : null} onClose={() => setTranscriptOpen(false)} />
       <ConfirmDialog

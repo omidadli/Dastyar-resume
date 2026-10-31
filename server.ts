@@ -41,6 +41,7 @@ import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assess
 import { videoPublicRoutes, videoRoutes } from './server/routes/video';
 import { transcriptPublicRoutes, transcriptRoutes } from './server/routes/transcripts';
 import { onboardingRoutes } from './server/routes/onboarding';
+import { statusPublicRoutes, statusRoutes } from './server/routes/status';
 import { apiV1Routes } from './server/routes/api-v1';
 import { forwardActivity } from './server/chat-webhook';
 import { deliverActivity } from './server/webhooks';
@@ -127,6 +128,7 @@ async function startServer() {
   app.use('/api', assessmentPublicRoutes()); // public «آزمون و ارزیابی» page
   app.use('/api', videoPublicRoutes()); // public «مصاحبهٔ ویدئویی» recording page
   app.use('/api', transcriptPublicRoutes()); // signed playback of a transcript's recording
+  app.use('/api', statusPublicRoutes()); // «پیگیری درخواست» — the candidate's own status page
   app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
   app.use('/scim/v2', scimRoutes()); // «SCIM 2.0» — authenticated by the workspace's SCIM token
 
@@ -150,6 +152,7 @@ async function startServer() {
   app.use('/api', videoRoutes()); // «مصاحبهٔ ویدئویی»: questions, invite, watch, rate
   app.use('/api', transcriptRoutes()); // «رونویسی گفتار»: audio, subtitle, manual text
   app.use('/api', onboardingRoutes()); // «تحویل پس از استخدام»: checklist, start date, welcome mail
+  app.use('/api', statusRoutes()); // «پیگیری درخواست»: the revocable status link
   app.use('/api', privacyRoutes()); // candidate data export + erasure (DSAR)
   app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
   app.use('/api', referralRoutes()); // «معرفی همکار»: program, links, reward approval

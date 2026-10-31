@@ -62,6 +62,7 @@ const CostReport = lazyPage(() => import('./pages/CostReport'));
 const EeoReport = lazyPage(() => import('./pages/EeoReport'));
 const VideoInterviews = lazyPage(() => import('./pages/VideoInterviews'));
 const Onboarding = lazyPage(() => import('./pages/Onboarding'));
+const ApplicationStatus = lazyPage(() => import('./pages/ApplicationStatus'));
 const VideoRecord = lazyPage(() => import('./pages/VideoRecord'));
 const Sourcing = lazyPage(() => import('./pages/Sourcing'));
 const Automation = lazyPage(() => import('./pages/Automation'));
@@ -183,6 +184,15 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <Schedule token={m.token} />
+      </Suspense>
+    );
+  }
+  // «پیگیری درخواست» — the candidate's own status page; the token is the key.
+  m = matchPath('/status/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <ApplicationStatus token={m.token} />
       </Suspense>
     );
   }

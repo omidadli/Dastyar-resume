@@ -38,7 +38,8 @@
     "test:blind": "npm run build && tsx scripts/blind-api.test.ts",
     "test:kit": "npm run build && tsx scripts/interview-kit-api.test.ts",
     "test:team": "npm run build && tsx scripts/team-cost-api.test.ts",
-    "test:sso": "npm run build && tsx scripts/sso-api.test.ts"
+    "test:sso": "npm run build && tsx scripts/sso-api.test.ts",
+    "test:assessment": "npm run build && tsx scripts/assessment-api.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

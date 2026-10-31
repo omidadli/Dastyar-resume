@@ -16,6 +16,8 @@ import { buildTemplateUnderstanding } from './ai/screening';
 import type { CandidateEvaluation, DecisionStatus, Recommendation, ResumeRecord } from '../src/types/screening';
 import type { Department } from '../src/types/app';
 import type { CostKind } from '../src/types/reports';
+import { scoreAnswers } from './assessments';
+import { templateById } from './assessment-bank';
 import type { InterviewFeedback } from '../src/types/pipeline';
 import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
@@ -914,6 +916,68 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
       createdAtISO: at.toISOString(),
       createdAtJalali: formatJalaliDate(tehranJalaliOf(at), true),
     });
+  }
+
+  // «آزمون و ارزیابی»: one keyed test and one behavioural profile, plus a link
+  // that is still open — so the panel has a result and a pending state on day one.
+  const demoPeople = Array.from(peopleByName.values());
+  const pick = (needle: string) => demoPeople.find((p) => p.jobTitle.includes(needle)) || demoPeople[0];
+  const answerSet = (templateId: string, strength: 'strong' | 'medium') => {
+    const tpl = templateById(templateId)!;
+    const answers: Record<string, string | number> = {};
+    for (const q of tpl.questions) {
+      if (q.type === 'single') {
+        const ranked = [...q.options].sort((a, b) => b.score - a.score);
+        answers[q.id] = (strength === 'strong' ? ranked[0] ?? ranked[0] : ranked[1] ?? ranked[0]).id;
+      } else {
+        answers[q.id] = strength === 'strong' ? (q.reverse ? 2 : 5) : q.reverse ? 4 : 3;
+      }
+    }
+    return { tpl, answers, scored: scoreAnswers(tpl, answers) };
+  };
+  const seedAssessment = (target: ReturnType<typeof pick>, templateId: string, strength: 'strong' | 'medium', days: number, status: 'completed' | 'sent' | 'started') => {
+    const { tpl, answers, scored } = answerSet(templateId, strength);
+    const created = daysAgo(days);
+    const email = target.rec.contact?.email || null;
+    db.saveAssessment({
+      id: db.uid('asm'),
+      orgId: org.id,
+      token: crypto.randomBytes(18).toString('base64url'),
+      resumeId: target.rec.id,
+      jobId: target.jobId,
+      jobTitle: target.jobTitle,
+      templateId: tpl.id,
+      templateName: tpl.name,
+      kind: tpl.kind,
+      candidateName: target.rec.candidateName || null,
+      candidateEmail: email,
+      status,
+      source: 'hovida',
+      createdAtISO: created.toISOString(),
+      sentAtISO: created.toISOString(),
+      startedAtISO: status === 'sent' ? null : daysAgo(days, -1).toISOString(),
+      completedAtISO: status === 'completed' ? daysAgo(days, -2).toISOString() : null,
+      expiresAtISO: new Date(created.getTime() + 14 * 86_400_000).toISOString(),
+      score: status === 'completed' ? scored.score : null,
+      band: status === 'completed' ? scored.band : null,
+      dimensions: status === 'completed' ? scored.dimensions : null,
+      answeredCount: status === 'completed' ? tpl.questions.length : status === 'started' ? 2 : 0,
+      questionCount: tpl.questions.length,
+      note: null,
+      answers: status === 'completed' ? answers : null,
+    });
+    if (status === 'completed') {
+      db.logActivity(org.id, null, 'assessment.completed', `آزمون «${tpl.name}» را تکمیل کرد${scored.score !== null ? ` — نمرهٔ ${scored.score}` : ''}`, {
+        jobId: target.jobId,
+        resumeId: target.rec.id,
+        at: daysAgo(days, -2),
+      });
+    }
+  };
+  if (demoPeople.length) {
+    seedAssessment(pick('جذب'), 'situational-recruiting', 'strong', 6, 'completed');
+    seedAssessment(pick('نرم'), 'behavioral-core', 'medium', 4, 'completed');
+    seedAssessment(pick('شبکه'), 'work-sample-support', 'strong', 1, 'sent');
   }
 
   // The internal rate is entered like a real workspace would: the page adds the

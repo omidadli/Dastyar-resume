@@ -179,6 +179,8 @@ curl -X POST https://hovida.example.ir/api/v1/candidates/res_…/decision \
 | `ORG_SUSPENDED` | 403 | فضای کاری موقتاً متوقف است |
 | `JOB_NOT_FOUND` / `CANDIDATE_NOT_FOUND` | 404 | شناسه پیدا نشد |
 | `INVALID_STATUS` | 400 | مقدار `status` مجاز نیست |
+| `ASSESSMENT_NOT_FOUND` | 404 | آزمون پیدا نشد (یا مال این فضای کاری نیست) |
+| `ALREADY_COMPLETED` / `NO_RESULT` / `BAD_SCORE` | 409 / 400 | آزمون پیش‌تر نتیجه دارد، یا نتیجهٔ فرستاده‌شده ناقص/خارج از ۰–۱۰۰ است |
 | `RATE_LIMITED` | 429 | بیش از ۶۰۰ درخواست در دقیقه |
 
 ---
@@ -358,6 +360,35 @@ POST   /api/org/sso/check  → { ok, issuer, message, keys }   (مدیر/مال�
 fragment بازمی‌گردد و پاسخ callback سرآیند `Referrer-Policy: no-referrer` دارد.
 جدول کامل دلیل‌های بازگشت (`?sso=none|misconfigured|provider|expired|off|cancelled|code|denied|failed`)
 و ترتیب راه‌اندازی در [`SSO.md`](SSO.md) است.
+
+---
+
+## ۵د) آزمون و ارزیابی (داخل برنامه + قرارداد ارائه‌دهنده)
+
+```http
+GET    /api/assessments/templates?jobTitle=…  → { templates, suggestedId }
+GET    /api/assessments/templates/:id         → پیش‌نمایش بانک (بدون امتیاز گزینه‌ها)
+GET    /api/assessments?resumeId=&jobId=      → { items, summary }
+POST   /api/assessments                       → { assessment }   (فقط لینک؛ هیچ ایمیلی نمی‌رود)
+POST   /api/assessments/:id/send              → { assessment, emailed }
+POST   /api/assessments/:id/cancel            → { assessment }
+POST   /api/assessments/:id/result            → { assessment }   (نتیجهٔ ارائه‌دهنده/انسانی)
+
+GET    /api/assessment/public/:token          → { assessment, canAnswer }   (عمومی)
+POST   /api/assessment/public/:token/start    → { assessment }
+POST   /api/assessment/public/:token/submit   → { assessment, thanks }      (یک‌بار)
+```
+
+با کلید API (برای ارائه‌دهندهٔ آزمون):
+
+```http
+GET  /api/v1/assessments/:id           (scope: read)
+POST /api/v1/assessments/:id/result    (scope: write)  body: { score?, dimensions?, note? }
+```
+
+نتیجهٔ بیرونی با `source: "external"` ثبت می‌شود. صفحهٔ عمومی هیچ امتیاز گزینه، هیچ نام
+بُعد و هیچ شناسهٔ داخلی دریافت نمی‌کند. جدول کامل، فرمول امتیاز و «چه چیزی این نیست» در
+[`ASSESSMENT.md`](ASSESSMENT.md) است.
 
 ---
 

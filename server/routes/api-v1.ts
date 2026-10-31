@@ -17,6 +17,7 @@ import * as db from '../db';
 import { apiOf, requireApiKey } from '../api-keys';
 import { h, int, oneOf, str } from './util';
 import { blindLabel, blindOn } from '../blind';
+import { AssessmentError, recordExternal } from '../assessments';
 import { appVersion } from '../version';
 import type { DecisionStatus, MatchFilter, NoveltyFilter } from '../../src/types/screening';
 
@@ -175,6 +176,71 @@ export function apiV1Routes(): express.Router {
         resumeId: rec.id,
       });
       send(res, { candidate: db.toListItem(rec) });
+    })
+  );
+
+  // ---------------------------------------------------------- assessments --
+  // The provider contract: a licensed test service reads the invitation and
+  // writes its own result. Nothing here can send a test or read a résumé file.
+
+  r.get(
+    '/v1/assessments/:id',
+    h(async (req, res) => {
+      const { org } = apiOf(req);
+      const row = db.getAssessment(org.id, str(req.params.id, 80));
+      if (!row) return send(res, { error: 'آزمون پیدا نشد.', code: 'ASSESSMENT_NOT_FOUND' }, 404);
+      send(res, {
+        assessment: {
+          id: row.id,
+          resumeId: row.resumeId,
+          jobId: row.jobId,
+          jobTitle: row.jobTitle,
+          templateId: row.templateId,
+          templateName: row.templateName,
+          kind: row.kind,
+          status: row.status,
+          source: row.source,
+          score: row.score,
+          band: row.band,
+          dimensions: row.dimensions,
+          questionCount: row.questionCount,
+          answeredCount: row.answeredCount,
+          createdAtISO: row.createdAtISO,
+          sentAtISO: row.sentAtISO,
+          completedAtISO: row.completedAtISO,
+        },
+      });
+    })
+  );
+
+  r.post(
+    '/v1/assessments/:id/result',
+    requireApiKey('write'),
+    h(async (req, res) => {
+      const { key, org } = apiOf(req);
+      const actor = { id: `apikey:${key.id}`, name: `کلید API «${key.name}»` };
+      try {
+        const row = recordExternal(
+          org.id,
+          str(req.params.id, 80),
+          { score: req.body?.score, dimensions: req.body?.dimensions, note: req.body?.note },
+          actor
+        );
+        send(res, {
+          assessment: {
+            id: row.id,
+            status: row.status,
+            source: row.source,
+            score: row.score,
+            band: row.band,
+            dimensions: row.dimensions,
+            completedAtISO: row.completedAtISO,
+          },
+        });
+      } catch (err) {
+        if (err instanceof AssessmentError) return send(res, { error: err.message, code: err.code }, err.status);
+        throw err;
+      }
     })
   );
 

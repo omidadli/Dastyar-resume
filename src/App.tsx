@@ -65,6 +65,7 @@ const Careers = lazyPage(() => import('./pages/Careers'));
 const Offer = lazyPage(() => import('./pages/Offer'));
 const Schedule = lazyPage(() => import('./pages/Schedule'));
 const Survey = lazyPage(() => import('./pages/Survey'));
+const Assessment = lazyPage(() => import('./pages/Assessment'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
@@ -175,6 +176,15 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <Survey token={m.token} />
+      </Suspense>
+    );
+  }
+  // «آزمون و ارزیابی» — the test link a candidate got by e-mail.
+  m = matchPath('/assess/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Assessment token={m.token} />
       </Suspense>
     );
   }

@@ -56,6 +56,7 @@ import type { InterviewRecord, SentEmail, SentSms, SourcingSearch } from '../src
 import type { AutomationProposal, AutomationSettings } from '../src/types/automation';
 import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
+import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
 import type { CandidateComment } from '../src/types/pipeline';
 import type { ApiKeyPublic, ApiScope, WebhookDeliveryPublic, WebhookEndpointPublic } from '../src/types/developer';
 import type { RetentionPolicy } from '../src/types/retention';
@@ -160,6 +161,8 @@ export interface StoreSnapshot {
   schedulingLinks?: SchedulingLinkRow[];
   /** «تجربهٔ کارجو» — survey invitations and the answers that came back. */
   surveys?: SurveyInviteRow[];
+  /** «آزمون و ارزیابی» — invitations, answers and scores. */
+  assessments?: AssessmentInviteRow[];
   /** Team comments (@mentions) written on a candidate. */
   comments?: CommentRow[];
   /** API keys — only a SHA-256 hash of the key is ever stored. */
@@ -282,6 +285,18 @@ export type CostRow = CostEntry & { orgId: string };
 /** A survey invitation plus the secret that opens its public page. */
 export type SurveyInviteRow = SurveyInvite & { orgId: string; token: string; expiresAtISO: string };
 
+/**
+ * An assessment invitation. The token opens the public page, and the raw
+ * answers stay on the server — the workspace sees the result, never the
+ * candidate's keystrokes.
+ */
+export type AssessmentInviteRow = AssessmentInvite & {
+  orgId: string;
+  token: string;
+  /** Question id → chosen option id, or the 1–5 value of a scale item. */
+  answers: Record<string, AssessmentAnswerInput['value']> | null;
+};
+
 export type OfferRow = JobOffer & {
   orgId: string;
   /** Random, unguessable; the public link is /offer/<token>. */
@@ -316,6 +331,7 @@ const offers = new Map<string, OfferRow>();
 const schedulingLinks = new Map<string, SchedulingLinkRow>();
 const comments = new Map<string, CommentRow>();
 const surveys = new Map<string, SurveyInviteRow>();
+const assessments = new Map<string, AssessmentInviteRow>();
 const smsLog = new Map<string, SmsLogRow>();
 const apiKeys = new Map<string, ApiKeyRow>();
 const webhooks = new Map<string, WebhookEndpointRow>();
@@ -368,6 +384,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.schedulingLinks?.forEach((x) => schedulingLinks.set(x.id, x));
   snap.comments?.forEach((x) => comments.set(x.id, x));
   snap.surveys?.forEach((x) => surveys.set(x.id, x));
+  snap.assessments?.forEach((x) => assessments.set(x.id, x));
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   snap.apiKeys?.forEach((x) => apiKeys.set(x.id, x));
   snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
@@ -403,6 +420,7 @@ function clearMemory() {
   schedulingLinks.clear();
   comments.clear();
   surveys.clear();
+  assessments.clear();
   smsLog.clear();
   apiKeys.clear();
   webhooks.clear();
@@ -526,6 +544,7 @@ function snapshot(): StoreSnapshot {
     schedulingLinks: Array.from(schedulingLinks.values()),
     comments: Array.from(comments.values()),
     surveys: Array.from(surveys.values()),
+    assessments: Array.from(assessments.values()),
     smsLog: Array.from(smsLog.values()),
     apiKeys: Array.from(apiKeys.values()),
     webhooks: Array.from(webhooks.values()),
@@ -994,6 +1013,7 @@ export function deleteOrg(id: string) {
   for (const [k, v] of schedulingLinks) if (v.orgId === id) schedulingLinks.delete(k);
   for (const [k, v] of comments) if (v.orgId === id) comments.delete(k);
   for (const [k, v] of surveys) if (v.orgId === id) surveys.delete(k);
+  for (const [k, v] of assessments) if (v.orgId === id) assessments.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
@@ -2010,6 +2030,37 @@ export function openSurveyFor(orgId: string, resumeId: string): SurveyInviteRow 
   return listSurveys(orgId, { resumeId }).find((s) => s.status === 'sent' || s.status === 'opened') || null;
 }
 
+// ---------------------------------------------------------- assessments ----
+
+export function listAssessments(orgId: string, filter: { jobId?: string; resumeId?: string } = {}): AssessmentInviteRow[] {
+  return Array.from(assessments.values())
+    .filter((a) => a.orgId === orgId)
+    .filter((a) => (filter.jobId ? a.jobId === filter.jobId : true))
+    .filter((a) => (filter.resumeId ? a.resumeId === filter.resumeId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getAssessment(orgId: string, id: string): AssessmentInviteRow | null {
+  const a = assessments.get(id);
+  return a && a.orgId === orgId ? a : null;
+}
+
+export function findAssessmentByToken(token: string): AssessmentInviteRow | null {
+  for (const a of assessments.values()) if (a.token === token) return a;
+  return null;
+}
+
+export function saveAssessment(row: AssessmentInviteRow): AssessmentInviteRow {
+  assessments.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+/** The test the candidate has not finished yet — the one to remind about. */
+export function openAssessmentFor(orgId: string, resumeId: string): AssessmentInviteRow | null {
+  return listAssessments(orgId, { resumeId }).find((a) => a.status === 'sent' || a.status === 'started') || null;
+}
+
 // ------------------------------------------------------------ retention ----
 
 export function getRetention(orgId: string): RetentionPolicy | null {
@@ -2110,6 +2161,13 @@ export function anonymizeCandidate(rec: ResumeRecord): AnonymizedCounts {
       counts.scorecards++;
     }
   }
+  // An assessment result is a number, not a person: the score survives, the name does not.
+  for (const row of assessments.values()) {
+    if (row.orgId === rec.orgId && row.resumeId === rec.id) {
+      row.candidateName = 'کارجوی ناشناس';
+      row.candidateEmail = null;
+    }
+  }
   // A survey answer is the candidate's own words; the score survives, the words do not.
   for (const row of surveys.values()) {
     if (row.orgId === rec.orgId && row.resumeId === rec.id) {
@@ -2139,6 +2197,7 @@ export interface ErasedCounts {
   scorecards: number;
   links: number;
   automations: number;
+  assessments: number;
 }
 
 /**
@@ -2149,7 +2208,7 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
   for (const [k, v] of offers) if (v.orgId === orgId && v.resumeId === resumeId) { offers.delete(k); counts.offers++; }
@@ -2158,6 +2217,7 @@ export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | 
   for (const [k, v] of interviewFeedback) if (v.orgId === orgId && v.resumeId === resumeId) { interviewFeedback.delete(k); counts.scorecards++; }
   for (const [k, v] of schedulingLinks) if (v.orgId === orgId && v.resumeId === resumeId) { schedulingLinks.delete(k); counts.links++; }
   for (const [k, v] of surveys) if (v.orgId === orgId && v.resumeId === resumeId) { surveys.delete(k); counts.surveys++; }
+  for (const [k, v] of assessments) if (v.orgId === orgId && v.resumeId === resumeId) { assessments.delete(k); counts.assessments++; }
   for (const [k, v] of automationActions) if (v.orgId === orgId && v.resumeId === resumeId) { automationActions.delete(k); counts.automations++; }
   deleteResume(rec);
   counts.resumes = 1;
@@ -2335,6 +2395,7 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of schedulingLinks) if (v.orgId === job.orgId && v.jobId === job.id) schedulingLinks.delete(k);
   for (const [k, v] of comments) if (v.orgId === job.orgId && v.jobId === job.id) comments.delete(k);
   for (const [k, v] of surveys) if (v.orgId === job.orgId && v.jobId === job.id) surveys.delete(k);
+  for (const [k, v] of assessments) if (v.orgId === job.orgId && v.jobId === job.id) assessments.delete(k);
   for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
 }
 
@@ -3279,6 +3340,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     comments: Array.isArray(raw.comments)
       ? raw.comments.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && isStr(c.resumeId) && isStr(c.body))
       : [],
+    assessments: Array.isArray(raw.assessments)
+      ? raw.assessments.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.token) && isStr(a.resumeId) && isStr(a.templateId))
+      : undefined,
     surveys: Array.isArray(raw.surveys)
       ? raw.surveys.filter((s: any) => s && isStr(s.id) && isStr(s.orgId) && isStr(s.token))
       : [],

@@ -130,6 +130,8 @@ export type ActivityType =
   | 'retention.applied'
   | 'survey.sent'
   | 'survey.answered'
+  | 'assessment.sent'
+  | 'assessment.completed'
   | 'settings.changed';
 
 export interface ActivityItem {

@@ -7,6 +7,7 @@ import {
   Briefcase,
   CalendarClock,
   CheckCircle2,
+  ClipboardList,
   Clock3,
   Columns3,
   Copy,
@@ -78,6 +79,7 @@ import { OfferModal } from './OfferModal';
 import { SchedulingModal } from './SchedulingModal';
 import { CommentsSection } from './Comments';
 import { SurveyModal } from './SurveyModal';
+import { AssessmentModal } from './AssessmentModal';
 import { InterviewModal } from './InterviewModal';
 import type { PipelineStage } from '../../types/pipeline';
 
@@ -300,6 +302,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
   const [offerOpen, setOfferOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [surveyOpen, setSurveyOpen] = useState(false);
+  const [assessmentOpen, setAssessmentOpen] = useState(false);
   /** «آشکارسازی هویت» — blind mode is on and this copy hides the person. */
   const [revealOpen, setRevealOpen] = useState(false);
   const [revealReason, setRevealReason] = useState('');
@@ -882,6 +885,9 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   <Button size="sm" variant="ghost" icon={FileSignature} onClick={() => setOfferOpen(true)} disabled={hidden}>
                     پیشنهاد شغلی
                   </Button>
+                  <Button size="sm" variant="ghost" icon={ClipboardList} onClick={() => setAssessmentOpen(true)} disabled={hidden}>
+                    آزمون و ارزیابی
+                  </Button>
                   <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)} disabled={hidden}>
                     نظرسنجی تجربه
                   </Button>
@@ -1025,6 +1031,7 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
       )}
       {talentOpen && <TalentModal record={record} onClose={() => setTalentOpen(false)} onSaved={onChange} />}
       <SurveyModal record={surveyOpen ? record : null} jobTitle={jobTitle} onClose={() => setSurveyOpen(false)} />
+      <AssessmentModal record={assessmentOpen ? record : null} jobTitle={jobTitle} onClose={() => setAssessmentOpen(false)} />
       <ConfirmDialog
         open={eraseOpen}
         onClose={() => setEraseOpen(false)}

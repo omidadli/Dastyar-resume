@@ -12,6 +12,8 @@ import { blindLabel, maskText, redactRecord } from '../server/blind';
 import { bankSummary, matchPacksByCriteria, matchRole } from '../server/interview-kit';
 import { buildTeamReport } from '../server/team-report';
 import { COST_KINDS, byKind, normalizeAssumption, readAssumptionInput, readCostInput } from '../server/costs';
+import { ASSESSMENT_TEMPLATES, QUESTION_COUNT, TEMPLATE_COUNT, templateById } from '../server/assessment-bank';
+import { bandOf, scoreAnswers, suggestTemplateId } from '../server/assessments';
 import { OidcError, decodeJwt, safeEndpoint, verifyIdToken, clearOidcCaches } from '../server/oidc';
 import { emailDomain, identityFromClaims, normalizeDomains } from '../server/sso';
 import crypto from 'crypto';
@@ -484,6 +486,82 @@ const u: JobUnderstanding = {
   assert(normalizeDomains('a.ir, b.com').length === 2, 'a comma-separated string works too');
   assert(normalizeDomains([]).length === 0 && normalizeDomains('localhost').length === 0, 'an empty or single-label domain is not accepted');
   assert(emailDomain('Sara@Company.IR') === 'company.ir' && emailDomain('nope') === null, 'the domain is read from the address, honestly');
+}
+
+// ---- «آزمون و ارزیابی»: a real bank, an honest key, no accidental zeroes ----
+{
+  assert(TEMPLATE_COUNT === 5 && QUESTION_COUNT >= 40, 'the bank holds five templates and at least forty items', `${TEMPLATE_COUNT}/${QUESTION_COUNT}`);
+
+  const ids = new Set<string>();
+  let reverse = 0;
+  let keyed = 0;
+  let scales = 0;
+  for (const tpl of ASSESSMENT_TEMPLATES) {
+    assert(tpl.questions.length >= 6, `${tpl.id} has enough items to mean something`, String(tpl.questions.length));
+    assert(Boolean(tpl.reading && tpl.reading.length > 40), `${tpl.id} explains how its result is read`);
+    const dims = new Set(tpl.dimensions.map((d) => d.id));
+    for (const q of tpl.questions) {
+      assert(!ids.has(`${tpl.id}:${q.id}`), `question ids are unique inside ${tpl.id}`, q.id);
+      ids.add(`${tpl.id}:${q.id}`);
+      if (q.type === 'single') {
+        keyed++;
+        assert(q.options.length === 4, `${q.id} offers four answers`, String(q.options.length));
+        assert(new Set(q.options.map((o) => o.id)).size === 4, `${q.id} option ids are unique`);
+        assert(q.options.every((o) => o.score >= 0 && o.score <= 10), `${q.id} scores stay inside 0–10`);
+        assert(Math.max(...q.options.map((o) => o.score)) === 10, `${q.id} has one clearly best answer`);
+        assert(new Set(q.options.map((o) => o.label)).size === 4, `${q.id} answers are distinct`);
+      } else {
+        scales++;
+        if (q.reverse) reverse++;
+        assert(dims.has(q.dimension), `${q.id} feeds a declared dimension`, q.dimension);
+      }
+    }
+    if (tpl.scored) assert(tpl.questions.every((q) => q.type === 'single'), `${tpl.id} is keyed end to end`);
+    else assert(tpl.dimensions.length > 0, `${tpl.id} declares its dimensions`);
+  }
+  assert(keyed >= 30 && scales > 10 && reverse >= 3, 'both keyed and behavioural items are present', `${keyed}/${scales}/${reverse}`);
+
+  // The key is used here exactly as the server uses it.
+  const recruiting = templateById('situational-recruiting')!;
+  const best: Record<string, string> = {};
+  const worst: Record<string, string> = {};
+  for (const q of recruiting.questions) {
+    if (q.type !== 'single') continue;
+    const ranked = [...q.options].sort((a, b) => b.score - a.score);
+    best[q.id] = ranked[0].id;
+    worst[q.id] = ranked[ranked.length - 1].id;
+  }
+  assert(scoreAnswers(recruiting, best).score === 100, 'the best answer on every item is 100');
+  assert(scoreAnswers(recruiting, best).band === 'strong', 'and it reads as «هم‌راستا با نقش»');
+  const worstResult = scoreAnswers(recruiting, worst);
+  assert((worstResult.score || 0) < 25 && worstResult.band === 'review', 'the weakest set is a low score, not a crash', String(worstResult.score));
+  assert(scoreAnswers(recruiting, {}).score === 0, 'an empty set scores zero instead of throwing');
+  assert(scoreAnswers(recruiting, { ...best, 'rec-1': 'made-up' }).score === scoreAnswers(recruiting, { ...best, 'rec-1': '' }).score, 'an unknown option is ignored, not counted');
+
+  // Bands are a reading, never a verdict.
+  assert([bandOf(100), bandOf(75), bandOf(74), bandOf(55), bandOf(54), bandOf(0)].join(',') === 'strong,strong,medium,medium,review,review', 'band thresholds are exactly 75 and 55');
+
+  // Behavioural: reverse-keyed statements must count in the right direction.
+  const behavioural = templateById('behavioral-core')!;
+  const straight: Record<string, number> = {};
+  const inverted: Record<string, number> = {};
+  for (const q of behavioural.questions) {
+    if (q.type !== 'scale') continue;
+    straight[q.id] = q.reverse ? 1 : 5;
+    inverted[q.id] = q.reverse ? 5 : 1;
+  }
+  const straightDims = scoreAnswers(behavioural, straight).dimensions || [];
+  const invertedDims = scoreAnswers(behavioural, inverted).dimensions || [];
+  assert(straightDims.length === 5, 'five dimensions come back');
+  assert(straightDims.every((d) => d.score === 100), 'agreeing with the positive and rejecting the negative is 100', JSON.stringify(straightDims.map((d) => d.score)));
+  assert(invertedDims.every((d) => d.score === 0), 'the opposite answers are 0, not 100', JSON.stringify(invertedDims.map((d) => d.score)));
+  assert(scoreAnswers(behavioural, straight).score === null, 'a profile never pretends to be a total score');
+
+  // A role is pointed at a sensible starting test, not a random one.
+  assert(suggestTemplateId('کارشناس فروش') === 'situational-sales', 'sales roles start with the sales test');
+  assert(suggestTemplateId('مدیر تیم فنی') === 'situational-management', 'managers start with the leadership test');
+  assert(suggestTemplateId('کارشناس جذب') === 'situational-recruiting', 'recruiters start with the recruiting test');
+  assert(suggestTemplateId('برنامه‌نویس') === 'behavioral-core', 'everything else starts with the behavioural profile');
 }
 
 // ---- file extensions are preserved (bug #4) ----

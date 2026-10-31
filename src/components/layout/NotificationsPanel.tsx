@@ -19,6 +19,7 @@ import {
   Sparkles,
   Trash2,
   MessageSquareHeart,
+  ClipboardList,
   ShieldCheck,
   UserPlus,
   UserCog,
@@ -69,6 +70,8 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'retention.applied': ShieldCheck,
   'survey.sent': MessageSquareHeart,
   'survey.answered': MessageSquareHeart,
+  'assessment.sent': ClipboardList,
+  'assessment.completed': ClipboardList,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

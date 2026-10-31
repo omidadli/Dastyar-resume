@@ -253,5 +253,15 @@ if (created?.survey?.url) {
   assert(await waitFor(() => text().includes('پاسخ شما ثبت شد'), 12000), 'the candidate is thanked after answering');
 }
 
+// 8c. The assessment dialog: a real catalogue and an honest reading rule.
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('تصمیم شما'), 10000), 'candidate panel is back for the assessment step');
+assert(clickByText('اطلاعات بیشتر'), 'the panel tab with the contact actions opens');
+assert(await waitFor(() => text().includes('آزمون و ارزیابی')), 'the candidate panel offers the assessment module');
+assert(clickByText('آزمون و ارزیابی'), 'the assessment action exists in the candidate panel');
+assert(await waitFor(() => text().includes('قضاوت موقعیتی: کارشناس جذب') && text().includes('نمونه‌کار: پشتیبانی مشتری')), 'the dialog lists the real templates');
+assert(text().includes('نحوهٔ خواندن نتیجه'), 'the dialog explains how the result is read before sending');
+assert(text().includes('ارزیابی ساختاریافتهٔ داخلی'), 'the dialog never calls the test a psychometric instrument');
+
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

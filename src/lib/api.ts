@@ -50,6 +50,7 @@ import type {
 import type { ApiKeyPublic, CreatedApiKey, DeveloperOverview, WebhookDeliveryPublic, WebhookEndpointPublic, WebhookTestResult } from '../types/developer';
 import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '../types/retention';
 import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
+import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -579,6 +580,25 @@ export const api = {
       open: (token: string) => post<{ survey: PublicSurvey }>(`/api/survey/public/${encodeURIComponent(token)}/open`, {}),
       answer: (token: string, b: SurveySubmitInput) =>
         post<{ survey: PublicSurvey; thanks: string }>(`/api/survey/public/${encodeURIComponent(token)}/answer`, b),
+    },
+  },
+  assessments: {
+    templates: (jobTitle?: string) =>
+      get<{ templates: AssessmentTemplateSummary[]; suggestedId: string }>(`/api/assessments/templates${jobTitle ? `?jobTitle=${encodeURIComponent(jobTitle)}` : ''}`),
+    list: (p: { jobId?: string; resumeId?: string } = {}) =>
+      get<{ items: AssessmentInvite[]; summary: { total: number; completed: number; pending: number; averageScore: number | null; external: number } }>(
+        `/api/assessments${qs(p)}`
+      ),
+    create: (b: { resumeId: string; templateId: string; jobId?: string }) => post<{ assessment: AssessmentInvite }>('/api/assessments', b),
+    send: (id: string) => post<{ assessment: AssessmentInvite; emailed: boolean }>(`/api/assessments/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ assessment: AssessmentInvite }>(`/api/assessments/${encodeURIComponent(id)}/cancel`, {}),
+    recordResult: (id: string, b: { score?: number | null; dimensions?: { id: string; label: string; score: number }[]; note?: string }) =>
+      post<{ assessment: AssessmentInvite }>(`/api/assessments/${encodeURIComponent(id)}/result`, b),
+    public: {
+      get: (token: string) => get<{ assessment: PublicAssessment; canAnswer: boolean }>(`/api/assessment/public/${encodeURIComponent(token)}`),
+      start: (token: string) => post<{ assessment: PublicAssessment }>(`/api/assessment/public/${encodeURIComponent(token)}/start`, {}),
+      submit: (token: string, answers: Record<string, string | number>) =>
+        post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
     },
   },
   developer: {

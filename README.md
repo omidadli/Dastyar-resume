@@ -83,9 +83,10 @@ NODE_ENV=production npm start
 - **اتوماسیون جذب** (پیشنهاد دعوت/نامهٔ نتیجه/جلسه، با تأیید منابع انسانی) → [`docs/AUTOMATION.md`](docs/AUTOMATION.md).
 - **مقایسه با رقبا و فهرست امکانات** (ایران و جهان، با منبع و جای خالی‌ها) → [`docs/COMPETITORS.md`](docs/COMPETITORS.md).
 - **اسکریپت ارائهٔ فروش، پاسخ اعتراض‌ها، چک‌لیست دمو** → [`docs/SALES.md`](docs/SALES.md).
-- **API و وب‌هوک** (کلید API، شش مسیر `/api/v1`، وب‌هوک امضاشده با HMAC و نمونهٔ بررسی امضا) → [`docs/API.md`](docs/API.md).
+- **API و وب‌هوک** (کلید API، هشت مسیر `/api/v1` شامل ثبت نتیجهٔ آزمون، وب‌هوک امضاشده با HMAC و نمونهٔ بررسی امضا) → [`docs/API.md`](docs/API.md).
 - **نگه‌داری داده و حذف دادهٔ شخصی (DSAR)** (سیاست روزشمار، ناشناس‌سازی، خروجی و پاک‌سازی) → [`docs/DATA-RETENTION.md`](docs/DATA-RETENTION.md).
 - **ورود دومرحله‌ای** (QR برنامهٔ احراز هویت، کدهای بازیابی، بازنشانی توسط مدیر) → [`docs/TWO-FACTOR.md`](docs/TWO-FACTOR.md).
+- **آزمون و ارزیابی** (۵ آزمون / ۴۵ پرسش: قضاوت موقعیتی، نمونه‌کار، نمایهٔ پنج‌بُعدی رفتار؛ لینک عمومی یک‌بارمصرف، کلید امتیاز روشن، قرارداد ارائه‌دهندهٔ بیرونی) → [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
 - **ورود سازمانی (SSO)** (OIDC با Google Workspace، Microsoft 365، Okta یا Keycloak؛ دامنه‌های مجاز، ورود خودکار اعضا، «فقط SSO») → [`docs/SSO.md`](docs/SSO.md).
 - **غربالگری بی‌طرف** (پنهان‌سازی هویت سمت سرور، بستن تماس تا آشکارسازی، ثبت آشکارسازی) → [`docs/BLIND-SCREENING.md`](docs/BLIND-SCREENING.md).
 - **تجربهٔ کارجو (نظرسنجی و NPS)** (لینک عمومی، فرم دو دقیقه‌ای، محاسبهٔ NPS و گزارش) → [`docs/EXPERIENCE-SURVEY.md`](docs/EXPERIENCE-SURVEY.md).
@@ -216,6 +217,7 @@ docs/EXPERIENCE-SURVEY.md نظرسنجی تجربهٔ کارجو، محاسبه�
 docs/INTERVIEW-KIT.md     کیت مصاحبه: بانک پرسش و چیدمان روی معیارهای شغل
 docs/TEAM-AND-COST.md     عملکرد تیم و هزینهٔ هر استخدام (فرمول، API، محدودیت‌ها)
 docs/SSO.md               ورود سازمانی با OIDC: راه‌اندازی، قواعد امنیتی، خطاها
+docs/ASSESSMENT.md        آزمون و ارزیابی: بانک، امتیازدهی، قرارداد ارائه‌دهنده
 ```
 
 سیستم طراحی (رنگ‌ها، تایپوگرافی، اجزا و قواعد دسترس‌پذیری) در [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) مستند شده است.

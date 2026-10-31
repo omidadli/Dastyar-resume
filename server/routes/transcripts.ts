@@ -25,10 +25,25 @@ import {
   setText,
 } from '../transcripts';
 import type { Transcript, TranscriptStatusPayload } from '../../src/types/transcript';
+import { SummaryError, removeSummary, summarize } from '../summaries';
+import type { MeetingSummary } from '../../src/types/summary';
 
 function fail(res: express.Response, err: unknown) {
   if (err instanceof TranscriptError) return res.status(err.status).json({ error: err.message, code: err.code });
+  if (err instanceof SummaryError) return res.status(err.status).json({ error: err.message, code: err.code });
   throw err;
+}
+
+function summaryView(row: db.SummaryRow): MeetingSummary {
+  const { orgId: _o, ...rest } = row;
+  return rest;
+}
+
+/** A transcript belongs to a candidate; if that candidate is out of reach, so is it. */
+function guardTranscript(req: Request, res: express.Response, row: db.TranscriptRow): boolean {
+  const rec = db.getResume(row.orgId, row.resumeId);
+  if (!rec) return false;
+  return blockedByResume(req, res, rec);
 }
 
 function originOf(req: Request): string {
@@ -88,6 +103,14 @@ export function transcriptPublicRoutes() {
 export function transcriptRoutes() {
   const r = express.Router();
 
+  // A transcript quotes the person. While «غربالگری بی‌طرف» is on, it is closed
+  // like the résumé file itself — not redacted sentence by sentence, which would
+  // silently break the text.
+  r.use((req, res, next) => {
+    if (blockedByBlind(ctxOf(req).org, res)) return;
+    next();
+  });
+
   /** Whether auto-transcription is possible here, and why not when it is not. */
   r.get(
     '/transcripts/status',
@@ -106,6 +129,8 @@ export function transcriptRoutes() {
       const resumeId = str(req.query.resumeId, 80);
       const videoInviteId = str(req.query.videoInviteId, 80);
       if (!resumeId && !videoInviteId) return res.status(400).json({ error: 'کارجو یا مصاحبه را مشخص کنید.' });
+      const candidate = resumeId ? db.getResume(org.id, resumeId) : null;
+      if (candidate && blockedByResume(req, res, candidate)) return;
       const rows = db.listTranscripts(org.id, {
         ...(resumeId ? { resumeId } : {}),
         ...(videoInviteId ? { videoInviteId } : {}),
@@ -121,6 +146,7 @@ export function transcriptRoutes() {
       if (blockedByBlind(org, res)) return;
       const row = db.getTranscript(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'این رونویسی پیدا نشد.' });
+      if (guardTranscript(req, res, row)) return;
       res.json({ transcript: viewOf(row) });
     })
   );
@@ -205,6 +231,8 @@ export function transcriptRoutes() {
     '/transcripts/:id',
     h(async (req, res) => {
       const { org } = ctxOf(req);
+      const existing = db.getTranscript(org.id, str(req.params.id, 80));
+      if (existing && guardTranscript(req, res, existing)) return;
       try {
         const row = setText(org.id, str(req.params.id, 80), { text: req.body?.text, title: req.body?.title }, actorOf(req).name);
         res.json({ transcript: viewOf(row) });
@@ -218,8 +246,59 @@ export function transcriptRoutes() {
     '/transcripts/:id',
     h(async (req, res) => {
       const { org } = ctxOf(req);
+      const existing = db.getTranscript(org.id, str(req.params.id, 80));
+      if (existing && guardTranscript(req, res, existing)) return;
       const ok = await remove(org.id, str(req.params.id, 80), actorOf(req).name);
       if (!ok) return res.status(404).json({ error: 'این رونویسی پیدا نشد.' });
+      res.status(204).end();
+    })
+  );
+
+  /** «خلاصهٔ جلسه» — the ten lines someone will actually read. */
+  r.post(
+    '/transcripts/:id/summary',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      if (blockedByBlind(org, res)) return;
+      const row = db.getTranscript(org.id, str(req.params.id, 80));
+      if (!row) return res.status(404).json({ error: 'این رونویسی پیدا نشد.' });
+      if (guardTranscript(req, res, row)) return;
+      try {
+        const result = await summarize(org.id, row.id, actorOf(req).name);
+        res.status(201).json({ summary: summaryView(result.summary), fellBack: result.fellBack, note: result.note });
+      } catch (err) {
+        fail(res, err);
+      }
+    })
+  );
+
+  r.get(
+    '/summaries',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      if (blockedByBlind(org, res)) return;
+      const resumeId = str(req.query.resumeId, 80);
+      const transcriptId = str(req.query.transcriptId, 80);
+      if (!resumeId && !transcriptId) return res.status(400).json({ error: 'کارجو یا رونویسی را مشخص کنید.' });
+      if (resumeId) {
+        const rec = db.getResume(org.id, resumeId);
+        if (!rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+        if (blockedByResume(req, res, rec)) return;
+      }
+      const items = db.listSummaries(org.id, { ...(resumeId ? { resumeId } : {}), ...(transcriptId ? { transcriptId } : {}) });
+      res.json({ items: items.map(summaryView) });
+    })
+  );
+
+  r.delete(
+    '/summaries/:id',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const row = db.getSummary(org.id, str(req.params.id, 80));
+      if (!row) return res.status(404).json({ error: 'این خلاصه پیدا نشد.' });
+      const rec = db.getResume(org.id, row.resumeId);
+      if (rec && blockedByResume(req, res, rec)) return;
+      removeSummary(org.id, row.id);
       res.status(204).end();
     })
   );

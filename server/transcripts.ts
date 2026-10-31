@@ -489,6 +489,8 @@ export async function remove(orgId: string, id: string, actorName: string | null
   const row = db.getTranscript(orgId, id);
   if (!row) return false;
   if (row.filePath) storage().delete(row.filePath).catch(() => {});
+  // The summaries were derived from this text: they cannot outlive it.
+  db.deleteSummariesOfTranscript(orgId, id);
   db.deleteTranscript(orgId, id);
   db.logActivity(orgId, null, 'transcript.added', `رونویسی «${row.title}» را پاک کرد`, {
     jobId: row.jobId,

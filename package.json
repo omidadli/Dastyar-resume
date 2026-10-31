@@ -25,6 +25,7 @@
     "test:scim": "npm run build && tsx scripts/scim-api.test.ts",
     "test:video": "npm run build && tsx scripts/video-api.test.ts",
     "test:onboarding": "npm run build && tsx scripts/onboarding.test.ts",
+    "test:summary": "npm run build && tsx scripts/summary-api.test.ts",
     "test:transcript": "npm run build && tsx scripts/transcript-api.test.ts",
     "test:pwa": "npm run build && tsx scripts/pwa.test.ts",
     "build:cloudflare": "npm run build && node scripts/cloudflare/prepare-assets.mjs",

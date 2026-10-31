@@ -66,6 +66,7 @@ import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } fr
 import type { PublicVideoInvite, VideoInvite, VideoOverview, VideoSettings } from '../types/video';
 import type { Transcript, TranscriptStatusPayload } from '../types/transcript';
 import type { OnboardingOverview, OnboardingPlan } from '../types/onboarding';
+import type { MeetingSummary } from '../types/summary';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -654,6 +655,16 @@ export const api = {
     cancel: (id: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/cancel`, {}),
     remove: (id: string) => del<void>(`/api/onboarding/${encodeURIComponent(id)}`),
     exportUrl: '/api/onboarding/export',
+  },
+  summaries: {
+    list: (q: { resumeId?: string; transcriptId?: string }) => get<{ items: MeetingSummary[] }>(`/api/summaries${qs(q)}`),
+    create: (transcriptId: string) =>
+      post<{ summary: MeetingSummary; fellBack: boolean; note: string | null }>(
+        `/api/transcripts/${encodeURIComponent(transcriptId)}/summary`,
+        {},
+        { timeoutMs: 90_000 }
+      ),
+    remove: (id: string) => del<void>(`/api/summaries/${encodeURIComponent(id)}`),
   },
   transcripts: {
     status: () => get<TranscriptStatusPayload>('/api/transcripts/status'),

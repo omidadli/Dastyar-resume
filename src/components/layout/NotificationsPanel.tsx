@@ -22,6 +22,7 @@ import {
   Trash2,
   MessageSquareHeart,
   ClipboardList,
+  NotebookPen,
   PartyPopper,
   Video,
   ShieldCheck,
@@ -84,6 +85,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'transcript.added': FileText,
   'onboarding.started': PartyPopper,
   'onboarding.completed': PartyPopper,
+  'summary.created': NotebookPen,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

@@ -7,6 +7,8 @@ import { copyText } from '../../lib/clipboard';
 import { emitChange } from '../../lib/events';
 import { faDate } from '../../lib/format';
 import { Button, Callout, Chip, ConfirmDialog, Modal, Segmented, Spinner, TextArea, TextInput, toast } from '../ui';
+import { MeetingSummaryCard } from './MeetingSummaryCard';
+import type { MeetingSummary } from '../../types/summary';
 
 type Mode = 'text' | 'audio' | 'subtitle';
 
@@ -48,6 +50,9 @@ export function TranscriptModal({
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [removing, setRemoving] = useState<Transcript | null>(null);
+  // One latest summary per transcript, keyed by transcript id.
+  const [summaries, setSummaries] = useState<Record<string, MeetingSummary>>({});
+  const [busySummary, setBusySummary] = useState<string | null>(null);
   const audioRef = useRef<HTMLInputElement | null>(null);
   const subtitleRef = useRef<HTMLInputElement | null>(null);
 
@@ -57,6 +62,44 @@ export function TranscriptModal({
       .list({ resumeId: record.id })
       .then((r) => setItems(r.items))
       .catch(() => setItems([]));
+    api.summaries
+      .list({ resumeId: record.id })
+      .then((r) => {
+        const latest: Record<string, MeetingSummary> = {};
+        for (const s of r.items) if (!latest[s.transcriptId]) latest[s.transcriptId] = s;
+        setSummaries(latest);
+      })
+      .catch(() => setSummaries({}));
+  };
+
+  const makeSummary = async (t: Transcript) => {
+    setBusySummary(t.id);
+    try {
+      const r = await api.summaries.create(t.id);
+      setSummaries((prev) => ({ ...prev, [t.id]: r.summary }));
+      if (r.note) toast(r.note, r.fellBack ? 'info' : 'success', undefined, 8000);
+      else toast('خلاصه ساخته شد.', 'success');
+    } catch (err: any) {
+      toast(err?.message || 'ساختن خلاصه ممکن نشد.', 'error');
+    } finally {
+      setBusySummary(null);
+    }
+  };
+
+  const dropSummary = async (t: Transcript) => {
+    const s = summaries[t.id];
+    if (!s) return;
+    try {
+      await api.summaries.remove(s.id);
+      setSummaries((prev) => {
+        const next = { ...prev };
+        delete next[t.id];
+        return next;
+      });
+      toast('خلاصه پاک شد.', 'success');
+    } catch (err: any) {
+      toast(err?.message || 'پاک‌کردن ممکن نشد.', 'error');
+    }
   };
 
   useEffect(() => {
@@ -282,6 +325,24 @@ export function TranscriptModal({
                         <audio controls src={t.audioUrl} className="mt-2.5 w-full h-9">
                           مرورگر شما پخش صدا را پشتیبانی نمی‌کند.
                         </audio>
+                      )}
+
+                      {/* «خلاصهٔ جلسه» — ten lines instead of a transcript. */}
+                      {t.status === 'ready' && (
+                        <div className="mt-2.5">
+                          {summaries[t.id] ? (
+                            <MeetingSummaryCard
+                              summary={summaries[t.id]}
+                              regenerating={busySummary === t.id}
+                              onRegenerate={() => void makeSummary(t)}
+                              onDelete={() => void dropSummary(t)}
+                            />
+                          ) : (
+                            <Button size="sm" variant="secondary" icon={Sparkles} loading={busySummary === t.id} onClick={() => void makeSummary(t)}>
+                              ساخت خلاصهٔ جلسه
+                            </Button>
+                          )}
+                        </div>
                       )}
                       <div className="mt-2 flex items-center gap-1.5">
                         {t.status === 'ready' && (

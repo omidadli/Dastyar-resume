@@ -59,6 +59,7 @@ import type { SchedulingLink } from '../src/types/scheduling';
 import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
 import type { VideoAnswer, VideoInvite, VideoQuestion, VideoSettings } from '../src/types/video';
 import type { Transcript } from '../src/types/transcript';
+import type { MeetingSummary } from '../src/types/summary';
 import type { OnboardingPlan, OnboardingStatus, OnboardingTask } from '../src/types/onboarding';
 import type { CandidateComment } from '../src/types/pipeline';
 import type { ApiKeyPublic, ApiScope, WebhookDeliveryPublic, WebhookEndpointPublic } from '../src/types/developer';
@@ -175,6 +176,8 @@ export interface StoreSnapshot {
   transcripts?: TranscriptRow[];
   /** «تحویل پس از استخدام» — the checklist that outlives the funnel. */
   onboarding?: OnboardingRow[];
+  /** «خلاصهٔ جلسه» — summaries of transcripts. */
+  summaries?: SummaryRow[];
   /** Team comments (@mentions) written on a candidate. */
   comments?: CommentRow[];
   /** API keys — only a SHA-256 hash of the key is ever stored. */
@@ -300,6 +303,9 @@ export type SchedulingLinkRow = SchedulingLink & { orgId: string; token: string 
 export type CommentRow = CandidateComment & { orgId: string };
 /** A cost row as stored: the workspace-facing record plus its tenant. */
 export type CostRow = CostEntry & { orgId: string };
+/** «خلاصهٔ جلسه» — derived from a transcript, never invented. */
+export type SummaryRow = Omit<MeetingSummary, 'id'> & { id: string; orgId: string };
+
 /** «تحویل پس از استخدام» — one plan per hire, with its checklist. */
 export type OnboardingRow = Omit<OnboardingPlan, 'doneCount' | 'total' | 'daysUntil'> & { orgId: string };
 
@@ -371,6 +377,7 @@ const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
 const transcripts = new Map<string, TranscriptRow>();
 const onboardingPlans = new Map<string, OnboardingRow>();
+const summaries = new Map<string, SummaryRow>();
 const smsLog = new Map<string, SmsLogRow>();
 const apiKeys = new Map<string, ApiKeyRow>();
 const webhooks = new Map<string, WebhookEndpointRow>();
@@ -430,6 +437,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
   snap.transcripts?.forEach((x) => transcripts.set(x.id, x));
   snap.onboarding?.forEach((x) => onboardingPlans.set(x.id, x));
+  snap.summaries?.forEach((x) => summaries.set(x.id, x));
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   snap.apiKeys?.forEach((x) => apiKeys.set(x.id, x));
   snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
@@ -472,6 +480,7 @@ function clearMemory() {
   videoSettings.clear();
   transcripts.clear();
   onboardingPlans.clear();
+  summaries.clear();
   smsLog.clear();
   apiKeys.clear();
   webhooks.clear();
@@ -602,6 +611,7 @@ function snapshot(): StoreSnapshot {
     videoSettings: Object.fromEntries(videoSettings),
     transcripts: Array.from(transcripts.values()),
     onboarding: Array.from(onboardingPlans.values()),
+    summaries: Array.from(summaries.values()),
     smsLog: Array.from(smsLog.values()),
     apiKeys: Array.from(apiKeys.values()),
     webhooks: Array.from(webhooks.values()),
@@ -1098,6 +1108,7 @@ export function deleteOrg(id: string) {
   for (const k of Array.from(videoSettings.keys())) if (k.startsWith(`${id}:`)) videoSettings.delete(k);
   for (const [k, v] of transcripts) if (v.orgId === id) { transcripts.delete(k); deletePrefixQuietly(`transcripts/${id}/${v.resumeId}/`); }
   for (const [k, v] of onboardingPlans) if (v.orgId === id) onboardingPlans.delete(k);
+  for (const [k, v] of summaries) if (v.orgId === id) summaries.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
@@ -2236,6 +2247,48 @@ export function saveAssessment(row: AssessmentInviteRow): AssessmentInviteRow {
   return row;
 }
 
+// --------------------------------------------------------------- summaries ----
+
+export function listSummaries(orgId: string, filter: { resumeId?: string; transcriptId?: string } = {}): SummaryRow[] {
+  return Array.from(summaries.values())
+    .filter((x) => x.orgId === orgId)
+    .filter((x) => (filter.resumeId ? x.resumeId === filter.resumeId : true))
+    .filter((x) => (filter.transcriptId ? x.transcriptId === filter.transcriptId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getSummary(orgId: string, id: string): SummaryRow | null {
+  const row = summaries.get(id);
+  return row && row.orgId === orgId ? row : null;
+}
+
+export function saveSummary(row: SummaryRow): SummaryRow {
+  summaries.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deleteSummary(orgId: string, id: string): boolean {
+  const row = getSummary(orgId, id);
+  if (!row) return false;
+  summaries.delete(id);
+  scheduleSave();
+  return true;
+}
+
+/** A transcript that no longer exists cannot vouch for its summaries. */
+export function deleteSummariesOfTranscript(orgId: string, transcriptId: string): number {
+  let n = 0;
+  for (const [k, v] of summaries) {
+    if (v.orgId === orgId && v.transcriptId === transcriptId) {
+      summaries.delete(k);
+      n++;
+    }
+  }
+  if (n) scheduleSave();
+  return n;
+}
+
 // -------------------------------------------------------------- onboarding ----
 
 export function listOnboarding(orgId: string, filter: { resumeId?: string } = {}): OnboardingRow[] {
@@ -2504,6 +2557,7 @@ export interface ErasedCounts {
   videos: number;
   transcripts: number;
   onboarding: number;
+  summaries: number;
 }
 
 /**
@@ -2514,7 +2568,7 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0, summaries: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
   for (const [k, v] of offers) if (v.orgId === orgId && v.resumeId === resumeId) { offers.delete(k); counts.offers++; }
@@ -2524,6 +2578,11 @@ export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | 
   for (const [k, v] of schedulingLinks) if (v.orgId === orgId && v.resumeId === resumeId) { schedulingLinks.delete(k); counts.links++; }
   for (const [k, v] of surveys) if (v.orgId === orgId && v.resumeId === resumeId) { surveys.delete(k); counts.surveys++; }
   for (const [k, v] of assessments) if (v.orgId === orgId && v.resumeId === resumeId) { assessments.delete(k); counts.assessments++; }
+  for (const [k, v] of summaries)
+    if (v.orgId === orgId && v.resumeId === resumeId) {
+      summaries.delete(k);
+      counts.summaries++;
+    }
   for (const [k, v] of onboardingPlans)
     if (v.orgId === orgId && v.resumeId === resumeId) {
       onboardingPlans.delete(k);
@@ -2761,6 +2820,7 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of videoInvites) if (v.orgId === job.orgId && v.jobId === job.id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${job.orgId}/${k}/`); }
   videoSettings.delete(`${job.orgId}:${job.id}`);
   for (const [k, v] of transcripts) if (v.orgId === job.orgId && v.jobId === job.id) { transcripts.delete(k); deletePrefixQuietly(`transcripts/${job.orgId}/${v.resumeId}/`); }
+  for (const [k, v] of summaries) if (v.orgId === job.orgId && v.jobId === job.id) summaries.set(k, { ...v, jobId: null });
   // A plan is about the person, not the opening: it stays when the job record goes.
   for (const [k, v] of onboardingPlans) if (v.orgId === job.orgId && v.jobId === job.id) onboardingPlans.set(k, { ...v, jobId: null });
   for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
@@ -3726,6 +3786,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
         )
       : undefined,
     videoSettings: raw.videoSettings && typeof raw.videoSettings === 'object' && !Array.isArray(raw.videoSettings) ? raw.videoSettings : undefined,
+    summaries: Array.isArray(raw.summaries)
+      ? raw.summaries.filter((x: any) => x && isStr(x.id) && isStr(x.orgId) && isStr(x.transcriptId) && isStr(x.headline))
+      : undefined,
     onboarding: Array.isArray(raw.onboarding)
       ? raw.onboarding.filter((o: any) => o && isStr(o.id) && isStr(o.orgId) && isStr(o.resumeId) && Array.isArray(o.tasks))
       : undefined,

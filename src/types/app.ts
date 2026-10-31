@@ -165,6 +165,7 @@ export type ActivityType =
   | 'transcript.added'
   | 'onboarding.started'
   | 'onboarding.completed'
+  | 'summary.created'
   | 'settings.changed';
 
 export interface ActivityItem {

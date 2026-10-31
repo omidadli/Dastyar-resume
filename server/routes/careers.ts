@@ -247,7 +247,7 @@ export function careerPublicRoutes() {
 
       // Confirmation e-mail, only from a mailbox that is really connected.
       let emailed = false;
-      const secrets = db.getOrgSecrets(org.id);
+      const secrets = db.resolveOrgSecrets(org.id);
       if (email && isEmailConfigured(secrets)) {
         const stamp = new Date();
         const bodyText = [

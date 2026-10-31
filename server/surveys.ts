@@ -171,7 +171,7 @@ export async function sendInvite(orgId: string, id: string, url: string, actor: 
   if (!row) throw new SurveyError('نظرسنجی پیدا نشد.', 404, 'SURVEY_NOT_FOUND');
   if (row.status === 'answered') throw new SurveyError('این کارجو پیش‌تر پاسخ داده است.', 409, 'ALREADY_ANSWERED');
   if (!row.candidateEmail) throw new SurveyError('برای این کارجو ایمیل ثبت نشده است؛ لینک را دستی بفرستید.', 409, 'NO_EMAIL');
-  const secrets = db.getOrgSecrets(orgId);
+  const secrets = db.resolveOrgSecrets(orgId);
   if (!isEmailConfigured(secrets)) {
     throw new SurveyError('ایمیل سازمان وصل نیست؛ لینک را کپی کنید و از صندوق خودتان بفرستید.', 409, 'EMAIL_NOT_CONFIGURED');
   }

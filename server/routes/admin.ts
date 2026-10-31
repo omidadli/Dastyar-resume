@@ -17,15 +17,25 @@ import {
   audit,
   claimWithSetupCode,
   clearGoogleConnection,
+  clearSharedEmail,
+  clearSharedSms,
   clearSourcingConnection,
   connectionsPublic,
   deleteKey,
   envForcedOff,
   googleOAuthConnection,
   markGoogleProbe,
+  markSharedEmailProbe,
+  markSharedSmsProbe,
   markSourcingProbe,
   saveGoogleConnection,
+  saveSharedEmail,
+  saveSharedSms,
   saveSourcingConnection,
+  sharedEmailConnection,
+  sharedEmailSecrets,
+  sharedSmsConnection,
+  sharedSmsSecrets,
   sourcingConnection,
   isEnvAdmin,
   isPlatformAdmin,
@@ -38,6 +48,8 @@ import {
   updateKey,
   updateSystemSettings,
 } from '../platform';
+import { prepareEmailSettings, verifyEmail } from '../mailer';
+import { prepareSmsSettings, verifySms } from '../sms';
 import * as pool from '../ai/keypool';
 import { aiStatus, recentCalls, testKey, type AiFile } from '../ai/provider';
 import {
@@ -734,14 +746,23 @@ export function adminRoutes(): express.Router {
       const google = googleOAuthConnection();
       const origin = requestOrigin(req);
 
-      const [sourcingCheck, googleCheck] = await Promise.all([
+      const sharedEmailPrepared = sharedEmailSecrets();
+      const sharedSmsPrepared = sharedSmsSecrets();
+      const [sourcingCheck, googleCheck, sharedEmailCheck, sharedSmsCheck] = await Promise.all([
         sourcing
           ? probeProvider({ kind: sourcing.kind, endpoint: sourcing.endpointUrl, token: sourcing.token, actorId: sourcing.actorId })
           : Promise.resolve(null),
         google ? verifyGoogleClient(google.clientId, google.clientSecret, google.redirectUri || `${origin}/api/integrations/calendar/callback`) : Promise.resolve(null),
+        sharedEmailPrepared ? verifyEmail(sharedEmailPrepared) : Promise.resolve(null),
+        sharedSmsPrepared ? verifySms(sharedSmsPrepared) : Promise.resolve(null),
       ]);
       if (sourcingCheck) markSourcingProbe(sourcingCheck.ok, sourcingCheck.error);
       if (googleCheck) markGoogleProbe(googleCheck.ok, googleCheck.error);
+      if (sharedEmailCheck) markSharedEmailProbe(sharedEmailCheck.ok, sharedEmailCheck.error);
+      if (sharedSmsCheck) markSharedSmsProbe(sharedSmsCheck.ok, sharedSmsCheck.error);
+      const ai = aiStatus();
+      const aiKeys = ai.keys ?? 0;
+      const aiReady = ai.readyKeys ?? 0;
 
       const checks = [
         {
@@ -773,15 +794,59 @@ export function adminRoutes(): express.Router {
         },
         {
           key: 'email' as const,
-          title: 'صندوق ایمیل سازمان‌ها',
-          configured: adoption.email > 0,
-          // Per-workspace secrets cannot be tested from here without a real send.
+          title: 'ایمیل — صندوق مشترک سامانه',
+          configured: Boolean(sharedEmailConnection()),
+          ok: sharedEmailCheck ? sharedEmailCheck.ok : null,
+          message: !sharedEmailConnection()
+            ? 'صندوق مشترکی ثبت نشده است؛ فضای کاری بدون صندوق اختصاصی نمی‌تواند ایمیل بفرستد.'
+            : sharedEmailCheck!.ok
+              ? `صندوق مشترک پاسخ داد${sharedEmailPrepared ? ` (${sharedEmailPrepared.fromAddress})` : ''}.`
+              : sharedEmailCheck!.error || 'آزمایش صندوق مشترک ناموفق بود.',
+          detail: sharedEmailPrepared ? sharedEmailPrepared.host : `${adoption.email} / ${adoption.orgs} فضای کاری صندوق اختصاصی دارند`,
+        },
+        {
+          key: 'sms' as const,
+          title: 'پیامک — خط مشترک سامانه',
+          configured: Boolean(sharedSmsConnection()),
+          ok: sharedSmsCheck ? sharedSmsCheck.ok : null,
+          message: !sharedSmsConnection()
+            ? 'خط مشترکی ثبت نشده است؛ فضای کاری بدون خط اختصاصی نمی‌تواند پیامک بفرستد.'
+            : sharedSmsCheck!.ok
+              ? `سرویس پیامک پاسخ داد (خط ${sharedSmsPrepared ? sharedSmsPrepared.sender : '—'}).`
+              : sharedSmsCheck!.error || 'آزمایش خط مشترک ناموفق بود.',
+          detail: `${adoption.sms} / ${adoption.orgs} فضای کاری خط اختصاصی دارند`,
+        },
+        {
+          key: 'ai' as const,
+          title: 'کلیدهای هوش مصنوعی',
+          configured: ai.available || aiKeys > 0,
+          ok: ai.available ? true : aiKeys > 0 ? false : null,
+          message: ai.available
+            ? `${toPersianDigits(aiReady)} کلید آماده از ${toPersianDigits(aiKeys)} کلید؛ مدل فعال: ${ai.label}.`
+            : ai.reason || 'هوش مصنوعی در دسترس نیست.',
+          detail: ai.model,
+        },
+        {
+          key: 'chat' as const,
+          title: 'وب‌هوک چت فضای کاری‌ها',
+          configured: adoption.chat > 0,
           ok: null,
           message:
-            adoption.email > 0
-              ? `${toPersianDigits(adoption.email)} فضای کاری صندوق ایمیل خود را وصل کرده‌اند؛ آزمایش واقعی از «تنظیمات ← اتصال‌ها ← آزمایش» همان فضای کاری انجام می‌شود.`
-              : 'هیچ فضای کاری صندوق ایمیل وصل نکرده است؛ دکمهٔ «ارسال» با پیام روشن غیرفعال می‌ماند.',
-          detail: `${adoption.email} / ${adoption.orgs}`,
+            adoption.chat > 0
+              ? `${toPersianDigits(adoption.chat)} فضای کاری وب‌هوک چت (Slack/Teams) وصل کرده‌اند؛ آزمایش واقعی از تنظیمات همان فضای کاری انجام می‌شود.`
+              : 'هیچ فضای کاری وب‌هوک چت وصل نکرده است؛ اعلان‌ها فقط داخل هویدا می‌مانند.',
+          detail: `${adoption.chat} / ${adoption.orgs}`,
+        },
+        {
+          key: 'sso' as const,
+          title: 'ورود سازمانی (SSO) فضای کاری‌ها',
+          configured: adoption.sso > 0,
+          ok: null,
+          message:
+            adoption.sso > 0
+              ? `${toPersianDigits(adoption.sso)} فضای کاری SSO را فعال کرده‌اند؛ کلید هر سازمان نزد خودش است.`
+              : 'هنوز هیچ فضای کاری SSO را فعال نکرده است؛ ورود با ایمیل و رمز انجام می‌شود.',
+          detail: `${adoption.sso} / ${adoption.orgs}`,
         },
         {
           key: 'calendar' as const,
@@ -837,6 +902,144 @@ export function adminRoutes(): express.Router {
   r.delete('/connections/google', (req, res) => {
     const removed = clearGoogleConnection();
     if (removed) log(req, 'connections.google.remove', '', 'کلید OAuth گوگل پاک شد');
+    res.json(connectionsPublic(requestOrigin(req)));
+  });
+
+  // ------------------------------------------- shared mailbox and SMS line ----
+
+  /**
+   * «صندوق ایمیل مشترک» — a deployment-wide mailbox so a workspace does not have
+   * to bring one before the product can send its first e-mail. Verified before
+   * it is stored, exactly like a workspace's own mailbox; the password never
+   * comes back out.
+   */
+  r.put(
+    '/connections/email',
+    h(async (req, res) => {
+      const body = (req.body || {}) as {
+        host?: string;
+        port?: number;
+        secure?: boolean;
+        username?: string;
+        password?: string;
+        fromName?: string;
+        fromAddress?: string;
+        replyTo?: string | null;
+      };
+      const previous = sharedEmailSecrets() ?? undefined;
+      let prepared;
+      try {
+        prepared = prepareEmailSettings(
+          {
+            host: String(body.host || '').trim(),
+            port: Number(body.port) || 0,
+            secure: Boolean(body.secure),
+            username: String(body.username || '').trim(),
+            password: typeof body.password === 'string' ? body.password : '',
+            fromName: String(body.fromName || '').trim(),
+            fromAddress: String(body.fromAddress || '').trim(),
+            replyTo: (body.replyTo || '').trim() || null,
+          },
+          previous
+        );
+      } catch (err: any) {
+        return res.status(400).json({ error: err?.message || 'تنظیمات ایمیل معتبر نیست.', field: 'host' });
+      }
+      const check = await verifyEmail(prepared);
+      if (!check.ok) {
+        return res.status(400).json({
+          error: `اتصال به سرور ایمیل برقرار نشد و ذخیره نشد: ${check.error}`,
+          field: 'host',
+          code: 'SHARED_EMAIL_PROBE_FAILED',
+        });
+      }
+      try {
+        saveSharedEmail(body, actor(req).name);
+      } catch (err) {
+        return inputError(res, err);
+      }
+      markSharedEmailProbe(true, null);
+      log(req, 'connections.email', prepared.host, 'صندوق ایمیل مشترک سامانه ذخیره شد (رمز رمزنگاری‌شده)');
+      res.json(connectionsPublic(requestOrigin(req)));
+    })
+  );
+
+  r.post(
+    '/connections/email/test',
+    h(async (req, res) => {
+      const settings = sharedEmailConnection();
+      if (!settings) return res.status(409).json({ error: 'هنوز صندوق ایمیل مشترکی ثبت نشده است.', code: 'SHARED_EMAIL_NOT_CONFIGURED' });
+      const prepared = sharedEmailSecrets();
+      if (!prepared) return res.status(409).json({ error: 'رمز ذخیره‌شده خوانا نیست؛ دوباره واردش کنید.', code: 'SHARED_EMAIL_UNREADABLE' });
+      const check = await verifyEmail(prepared);
+      markSharedEmailProbe(check.ok, check.error);
+      log(req, 'connections.email.test', settings.host, check.ok ? 'موفق' : String(check.error));
+      res.json({ result: check, connections: connectionsPublic(requestOrigin(req)) });
+    })
+  );
+
+  r.delete('/connections/email', (req, res) => {
+    const removed = clearSharedEmail();
+    if (removed) log(req, 'connections.email.remove', '', 'صندوق ایمیل مشترک پاک شد');
+    res.json(connectionsPublic(requestOrigin(req)));
+  });
+
+  /**
+   * «خط پیامک مشترک» — same idea for the Iranian gateway. The workspace's own
+   * line always wins; this one only serves workspaces that have none.
+   */
+  r.put(
+    '/connections/sms',
+    h(async (req, res) => {
+      const body = (req.body || {}) as { provider?: string; apiKey?: string; sender?: string };
+      const previous = sharedSmsSecrets() ?? undefined;
+      let prepared;
+      try {
+        prepared = prepareSmsSettings(
+          {
+            provider: body.provider === 'smsir' ? 'smsir' : body.provider === 'kavenegar' ? 'kavenegar' : ('' as any),
+            apiKey: typeof body.apiKey === 'string' ? body.apiKey : '',
+            sender: String(body.sender || '').trim(),
+          },
+          previous
+        );
+      } catch (err: any) {
+        return res.status(400).json({ error: err?.message || 'تنظیمات پیامک معتبر نیست.', field: 'sender' });
+      }
+      const check = await verifySms(prepared);
+      if (!check.ok) {
+        return res.status(400).json({
+          error: `سرویس پیامک تأیید نشد و ذخیره نشد: ${check.error}`,
+          field: 'apiKey',
+          code: 'SHARED_SMS_PROBE_FAILED',
+        });
+      }
+      try {
+        saveSharedSms(body as any, actor(req).name);
+      } catch (err) {
+        return inputError(res, err);
+      }
+      markSharedSmsProbe(true, null);
+      log(req, 'connections.sms', prepared.sender, 'خط پیامک مشترک سامانه ذخیره شد (کلید رمزنگاری‌شده)');
+      res.json(connectionsPublic(requestOrigin(req)));
+    })
+  );
+
+  r.post(
+    '/connections/sms/test',
+    h(async (req, res) => {
+      const prepared = sharedSmsSecrets();
+      if (!prepared) return res.status(409).json({ error: 'هنوز خط پیامک مشترکی ثبت نشده است.', code: 'SHARED_SMS_NOT_CONFIGURED' });
+      const check = await verifySms(prepared);
+      markSharedSmsProbe(check.ok, check.error);
+      log(req, 'connections.sms.test', prepared.sender, check.ok ? 'موفق' : String(check.error));
+      res.json({ result: check, connections: connectionsPublic(requestOrigin(req)) });
+    })
+  );
+
+  r.delete('/connections/sms', (req, res) => {
+    const removed = clearSharedSms();
+    if (removed) log(req, 'connections.sms.remove', '', 'خط پیامک مشترک پاک شد');
     res.json(connectionsPublic(requestOrigin(req)));
   });
 

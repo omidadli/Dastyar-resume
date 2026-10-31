@@ -255,7 +255,7 @@ export async function sendInvite(orgId: string, id: string, url: string, actor: 
   if (row.status === 'completed') throw new AssessmentError('این کارجو آزمون را تکمیل کرده است.', 409, 'ALREADY_COMPLETED');
   if (row.status === 'cancelled') throw new AssessmentError('این آزمون لغو شده است.', 409, 'CANCELLED');
   if (!row.candidateEmail) throw new AssessmentError('برای این کارجو ایمیل ثبت نشده است؛ لینک را کپی کنید و از صندوق خودتان بفرستید.', 409, 'NO_EMAIL');
-  const secrets = db.getOrgSecrets(orgId);
+  const secrets = db.resolveOrgSecrets(orgId);
   if (!isEmailConfigured(secrets)) {
     throw new AssessmentError('ایمیل سازمان وصل نیست؛ لینک را کپی کنید و از صندوق خودتان بفرستید.', 409, 'EMAIL_NOT_CONFIGURED');
   }

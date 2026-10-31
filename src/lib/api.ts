@@ -721,6 +721,34 @@ export const adminApi = {
   saveGoogleConnection: (b: GoogleConnectionInput) =>
     put<{ connections: ConnectionsPayload; check: { ok: boolean | null; error: string | null } }>('/api/admin/connections/google', b, { timeoutMs: 40_000 }),
   removeGoogleConnection: () => del<ConnectionsPayload>('/api/admin/connections/google'),
+  /** صندوق ایمیل مشترک سامانه — verified before it is stored. */
+  saveSharedEmail: (b: {
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    password?: string;
+    fromName: string;
+    fromAddress: string;
+    replyTo?: string | null;
+  }) => put<ConnectionsPayload>('/api/admin/connections/email', b, { timeoutMs: 60_000 }),
+  testSharedEmail: () =>
+    post<{ result: { ok: boolean; error: string | null }; connections: ConnectionsPayload }>(
+      '/api/admin/connections/email/test',
+      {},
+      { timeoutMs: 60_000 }
+    ),
+  removeSharedEmail: () => del<ConnectionsPayload>('/api/admin/connections/email'),
+  /** خط پیامک مشترک سامانه — same rules. */
+  saveSharedSms: (b: { provider: 'kavenegar' | 'smsir'; apiKey?: string; sender: string }) =>
+    put<ConnectionsPayload>('/api/admin/connections/sms', b, { timeoutMs: 60_000 }),
+  testSharedSms: () =>
+    post<{ result: { ok: boolean; error: string | null }; connections: ConnectionsPayload }>(
+      '/api/admin/connections/sms/test',
+      {},
+      { timeoutMs: 60_000 }
+    ),
+  removeSharedSms: () => del<ConnectionsPayload>('/api/admin/connections/sms'),
   system: () => get<SystemSettings>('/api/admin/system'),
   updateSystem: (b: Partial<SystemSettings>) => patch<SystemSettings>('/api/admin/system', b),
   audit: (p: { q?: string; limit?: number } = {}) => get<{ items: AuditItem[] }>(`/api/admin/audit${qs(p)}`),

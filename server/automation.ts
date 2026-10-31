@@ -209,7 +209,7 @@ export async function runAutomation(
     return result;
   }
 
-  const emailReady = isEmailConfigured(db.getOrgSecrets(org.id));
+  const emailReady = isEmailConfigured(db.resolveOrgSecrets(org.id));
   for (const rec of db.listOrgResumes(org.id, jobId)) {
     if (rec.category === 'ERROR' && !rec.candidateName) continue;
     result.examined += 1;
@@ -338,7 +338,7 @@ export async function approveAction(
 
   // ---- message kinds: invite / reject / request_info ----
   if (!email) throw new AutomationError('ایمیلی برای این کارجو ثبت نشده است.', 400, 'NO_EMAIL');
-  const mailSecrets = db.getOrgSecrets(org.id).email;
+  const mailSecrets = db.resolveOrgSecrets(org.id).email;
   if (!mailSecrets) {
     throw new AutomationError(
       'صندوق ایمیل سازمان وصل نیست؛ در «تنظیمات ← اتصال‌ها» آن را وصل کنید.',
@@ -470,8 +470,8 @@ export function overview(orgId: string, opts: { jobId?: string } = {}): Automati
       failed: count('failed'),
     },
     readiness: {
-      emailConfigured: isEmailConfigured(db.getOrgSecrets(orgId)),
-      calendarConnected: calendarStatus(db.getOrgSecrets(orgId), null).connected,
+      emailConfigured: isEmailConfigured(db.resolveOrgSecrets(orgId)),
+      calendarConnected: calendarStatus(db.resolveOrgSecrets(orgId), null).connected,
       withoutEmail,
       analysing,
     },

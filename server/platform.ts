@@ -13,6 +13,8 @@
 import crypto from 'crypto';
 import * as db from './db';
 import { decryptSecret, encryptSecret } from './secret';
+import { prepareEmailSettings } from './mailer';
+import { prepareSmsSettings } from './sms';
 import type { PoolEntry } from './ai/keypool';
 import type {
   AiKeyInput,
@@ -88,9 +90,40 @@ interface StoredGoogleConnection {
   lastError: string | null;
 }
 
+interface StoredSharedEmail {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  passwordEnc: string;
+  fromName: string;
+  fromAddress: string;
+  replyTo: string | null;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+interface StoredSharedSms {
+  provider: 'kavenegar' | 'smsir';
+  apiKeyEnc: string;
+  sender: string;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
 interface ConnectionsStored {
   sourcing: StoredSourcingConnection | null;
   google: StoredGoogleConnection | null;
+  /** «صندوق ایمیل مشترک سامانه» — a fallback for workspaces that have none. */
+  email: StoredSharedEmail | null;
+  /** «پیامک مشترک سامانه» — same idea for the SMS gateway. */
+  sms: StoredSharedSms | null;
 }
 
 interface PlatformState {
@@ -214,6 +247,47 @@ function normalizeGoogleConn(raw: any): StoredGoogleConnection | null {
   };
 }
 
+function normalizeSharedEmail(raw: any): StoredSharedEmail | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const host = text(raw.host, 200).trim();
+  const username = text(raw.username, 200).trim();
+  const passwordEnc = text(raw.passwordEnc, 1000);
+  const fromAddress = text(raw.fromAddress, 200).trim();
+  if (!host || !username || !passwordEnc || !fromAddress) return null;
+  return {
+    host,
+    port: Math.round(clampNum(raw.port, 1, 65535, 587)),
+    secure: Boolean(raw.secure),
+    username,
+    passwordEnc,
+    fromName: text(raw.fromName, 80),
+    fromAddress,
+    replyTo: text(raw.replyTo, 200) || null,
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
+function normalizeSharedSms(raw: any): StoredSharedSms | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const apiKeyEnc = text(raw.apiKeyEnc, 1000);
+  const sender = text(raw.sender, 40).trim();
+  if (!apiKeyEnc || !sender) return null;
+  return {
+    provider: raw.provider === 'smsir' ? 'smsir' : 'kavenegar',
+    apiKeyEnc,
+    sender,
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
 function normalize(raw: any): PlatformState {
   const r = raw && typeof raw === 'object' ? raw : {};
   const ai = r.ai && typeof r.ai === 'object' ? r.ai : {};
@@ -233,6 +307,8 @@ function normalize(raw: any): PlatformState {
     connections: {
       sourcing: normalizeSourcingConn(r.connections?.sourcing),
       google: normalizeGoogleConn(r.connections?.google),
+      email: normalizeSharedEmail(r.connections?.email),
+      sms: normalizeSharedSms(r.connections?.sms),
     },
   };
 }
@@ -715,7 +791,54 @@ export function connectionsPublic(origin: string): ConnectionsPayload {
       lastError: storedGoogle?.lastError ?? null,
       fromEnv: goog?.source === 'env',
     },
+    email: sharedEmailPublic(),
+    sms: sharedSmsPublic(),
     docs: { sourcing: 'docs/CONNECT-LINKEDIN.md', google: 'docs/CONNECT-GOOGLE-CALENDAR.md' },
+  };
+}
+
+/** Masked view of the deployment-wide mailbox (never the password). */
+export function sharedEmailPublic() {
+  const stored = state().connections.email;
+  const eff = sharedEmailConnection();
+  const env = !stored ? envSharedEmail() : null;
+  return {
+    configured: Boolean(eff),
+    source: eff?.source ?? null,
+    host: eff?.host ?? null,
+    port: eff?.port ?? null,
+    secure: eff?.secure ?? true,
+    username: eff?.username ?? null,
+    fromName: eff?.fromName || '',
+    fromAddress: eff?.fromAddress ?? null,
+    replyTo: eff?.replyTo ?? null,
+    hasPassword: Boolean(eff?.password || stored?.passwordEnc || env?.password),
+    updatedAtISO: stored?.updatedAtISO ?? null,
+    updatedBy: stored?.updatedBy ?? null,
+    lastTestAtISO: stored?.lastTestAtISO ?? null,
+    lastTestOk: stored?.lastTestOk ?? null,
+    lastError: stored?.lastError ?? null,
+    fromEnv: !stored && Boolean(env),
+  };
+}
+
+/** Masked view of the deployment-wide SMS line. */
+export function sharedSmsPublic() {
+  const stored = state().connections.sms;
+  const eff = sharedSmsConnection();
+  const env = !stored ? envSharedSms() : null;
+  return {
+    configured: Boolean(eff),
+    source: eff?.source ?? null,
+    provider: eff?.provider ?? null,
+    sender: eff?.sender ?? null,
+    hasApiKey: Boolean(eff?.apiKey || stored?.apiKeyEnc || env?.apiKey),
+    updatedAtISO: stored?.updatedAtISO ?? null,
+    updatedBy: stored?.updatedBy ?? null,
+    lastTestAtISO: stored?.lastTestAtISO ?? null,
+    lastTestOk: stored?.lastTestOk ?? null,
+    lastError: stored?.lastError ?? null,
+    fromEnv: !stored && Boolean(env),
   };
 }
 
@@ -839,6 +962,283 @@ export function markGoogleProbe(ok: boolean | null, error: string | null): void 
     connections: {
       ...st.connections,
       google: { ...st.connections.google, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
+}
+
+// ------------------------------------------------- shared mail and SMS ----
+
+/**
+ * One mailbox and one SMS line for the whole deployment, entered in
+ * /admin › «کلیدها و اتصال‌ها». A workspace that has not connected its own
+ * mailbox/gateway uses these instead — and its settings page says so plainly
+ * («از طرف سامانه») rather than pretending the workspace owns the account.
+ */
+export interface SharedEmailConnection {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  password: string;
+  fromName: string;
+  fromAddress: string;
+  replyTo: string | null;
+  source: 'admin' | 'env';
+}
+
+export interface SharedSmsConnection {
+  provider: 'kavenegar' | 'smsir';
+  apiKey: string;
+  sender: string;
+  source: 'admin' | 'env';
+}
+
+/** Encrypted shapes for the settings card (never the password itself). */
+export function sharedEmailStored() {
+  return state().connections.email;
+}
+
+export function sharedSmsStored() {
+  return state().connections.sms;
+}
+
+function envSharedEmail(): SharedEmailConnection | null {
+  const host = (process.env.SMTP_HOST || '').trim();
+  const username = (process.env.SMTP_USER || process.env.SMTP_USERNAME || '').trim();
+  const password = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '').trim();
+  const fromAddress = (process.env.SMTP_FROM || process.env.SMTP_FROM_ADDRESS || username).trim();
+  if (!host || !username || !password || !fromAddress) return null;
+  return {
+    host,
+    port: Number(process.env.SMTP_PORT) || (process.env.SMTP_SECURE === '1' ? 465 : 587),
+    secure: process.env.SMTP_SECURE === '1',
+    username,
+    password,
+    fromName: (process.env.SMTP_FROM_NAME || '').trim(),
+    fromAddress,
+    replyTo: (process.env.SMTP_REPLY_TO || '').trim() || null,
+    source: 'env',
+  };
+}
+
+function envSharedSms(): SharedSmsConnection | null {
+  const apiKey = (process.env.SMS_API_KEY || process.env.KAVENEGAR_API_KEY || process.env.SMSIR_API_KEY || '').trim();
+  const sender = (process.env.SMS_SENDER || '').trim();
+  if (!apiKey || !sender) return null;
+  return {
+    provider: (process.env.SMS_PROVIDER || '').toLowerCase() === 'smsir' ? 'smsir' : 'kavenegar',
+    apiKey,
+    sender,
+    source: 'env',
+  };
+}
+
+export function sharedEmailConnection(): SharedEmailConnection | null {
+  const stored = state().connections.email;
+  if (stored) {
+    const password = decryptSecret(stored.passwordEnc);
+    if (!password) return null; // unreadable (another APP_SECRET) — never pretend
+    return {
+      host: stored.host,
+      port: stored.port,
+      secure: stored.secure,
+      username: stored.username,
+      password,
+      fromName: stored.fromName,
+      fromAddress: stored.fromAddress,
+      replyTo: stored.replyTo,
+      source: 'admin',
+    };
+  }
+  return envSharedEmail();
+}
+
+export function sharedSmsConnection(): SharedSmsConnection | null {
+  const stored = state().connections.sms;
+  if (stored) {
+    const apiKey = decryptSecret(stored.apiKeyEnc);
+    if (!apiKey) return null;
+    return { provider: stored.provider, apiKey, sender: stored.sender, source: 'admin' };
+  }
+  return envSharedSms();
+}
+
+/**
+ * Encrypted shapes for db.resolveOrgSecrets(). The env fallback is encrypted on
+ * the fly so that every consumer sees one uniform stored shape.
+ */
+export function sharedEmailSecrets(): NonNullable<import('./db').OrgSecrets['email']> | null {
+  const stored = state().connections.email;
+  if (stored) return { ...stored, source: 'shared' as const };
+  const env = envSharedEmail();
+  if (!env) return null;
+  try {
+    return {
+      host: env.host,
+      port: env.port,
+      secure: env.secure,
+      username: env.username,
+      passwordEnc: encryptSecret(env.password),
+      fromName: env.fromName || 'واحد منابع انسانی',
+      fromAddress: env.fromAddress,
+      replyTo: env.replyTo,
+      lastTestAtISO: null,
+      lastTestOk: null,
+      lastError: null,
+      source: 'env' as const,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function sharedSmsSecrets(): NonNullable<import('./db').OrgSecrets['sms']> | null {
+  const stored = state().connections.sms;
+  if (stored) return { ...stored, source: 'shared' as const };
+  const env = envSharedSms();
+  if (!env) return null;
+  try {
+    return {
+      provider: env.provider,
+      apiKeyEnc: encryptSecret(env.apiKey),
+      sender: env.sender,
+      lastTestAtISO: null,
+      lastTestOk: null,
+      lastError: null,
+      source: 'env' as const,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export interface SharedEmailInput {
+  host?: string;
+  port?: number;
+  secure?: boolean;
+  username?: string;
+  /** Empty on edit keeps the stored password. */
+  password?: string;
+  fromName?: string;
+  fromAddress?: string;
+  replyTo?: string | null;
+}
+
+export function saveSharedEmail(input: SharedEmailInput, actor: string): void {
+  const current = sharedEmailStored();
+  const previous = current
+    ? ({ ...current } as NonNullable<import('./db').OrgSecrets['email']>)
+    : undefined;
+  let prepared;
+  try {
+    prepared = prepareEmailSettings(
+      {
+        host: String(input.host || '').trim(),
+        port: Number(input.port) || 0,
+        secure: Boolean(input.secure),
+        username: String(input.username || '').trim(),
+        password: input.password ?? '',
+        fromName: String(input.fromName || '').trim(),
+        fromAddress: String(input.fromAddress || '').trim(),
+        replyTo: (input.replyTo || '').trim() || null,
+      },
+      previous
+    );
+  } catch (err: any) {
+    throw new PlatformInputError(err?.message || 'تنظیمات ایمیل معتبر نیست.', 'host');
+  }
+  const now = new Date().toISOString();
+  const next: StoredSharedEmail = {
+    host: prepared.host,
+    port: prepared.port,
+    secure: prepared.secure,
+    username: prepared.username,
+    passwordEnc: prepared.passwordEnc,
+    fromName: prepared.fromName,
+    fromAddress: prepared.fromAddress,
+    replyTo: prepared.replyTo,
+    updatedAtISO: now,
+    updatedBy: actor,
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous?.lastTestOk ?? null,
+    lastError: previous?.lastError ?? null,
+  };
+  const st = state();
+  commit({ ...st, connections: { ...st.connections, email: next } });
+}
+
+export function clearSharedEmail(): boolean {
+  const st = state();
+  if (!st.connections.email) return false;
+  commit({ ...st, connections: { ...st.connections, email: null } });
+  return true;
+}
+
+export function markSharedEmailProbe(ok: boolean, error: string | null): void {
+  const st = state();
+  if (!st.connections.email) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      email: { ...st.connections.email, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
+}
+
+export interface SharedSmsInput {
+  provider?: 'kavenegar' | 'smsir';
+  /** Empty on edit keeps the stored key. */
+  apiKey?: string;
+  sender?: string;
+}
+
+export function saveSharedSms(input: SharedSmsInput, actor: string): void {
+  const previous = sharedSmsStored();
+  const previousAsSecrets = previous ? ({ ...previous } as NonNullable<import('./db').OrgSecrets['sms']>) : undefined;
+  let prepared;
+  try {
+    prepared = prepareSmsSettings(
+      {
+        provider: input.provider === 'smsir' ? 'smsir' : input.provider === 'kavenegar' ? 'kavenegar' : previous?.provider || 'kavenegar',
+        apiKey: input.apiKey ?? '',
+        sender: String(input.sender || '').trim(),
+      },
+      previousAsSecrets
+    );
+  } catch (err: any) {
+    throw new PlatformInputError(err?.message || 'تنظیمات پیامک معتبر نیست.', 'sender');
+  }
+  const now = new Date().toISOString();
+  const next: StoredSharedSms = {
+    provider: prepared.provider,
+    apiKeyEnc: prepared.apiKeyEnc,
+    sender: prepared.sender,
+    updatedAtISO: now,
+    updatedBy: actor,
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous?.lastTestOk ?? null,
+    lastError: previous?.lastError ?? null,
+  };
+  const st = state();
+  commit({ ...st, connections: { ...st.connections, sms: next } });
+}
+
+export function clearSharedSms(): boolean {
+  const st = state();
+  if (!st.connections.sms) return false;
+  commit({ ...st, connections: { ...st.connections, sms: null } });
+  return true;
+}
+
+export function markSharedSmsProbe(ok: boolean, error: string | null): void {
+  const st = state();
+  if (!st.connections.sms) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      sms: { ...st.connections.sms, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
     },
   });
 }

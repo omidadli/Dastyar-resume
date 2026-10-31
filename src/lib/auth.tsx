@@ -22,10 +22,18 @@ export function onBeforeSignOut(fn: () => Promise<unknown> | unknown): () => voi
  * (other tabs, reloads) is never touched.
  */
 if (typeof window !== 'undefined') {
-  const m = window.location.hash.match(/^#support=([A-Za-z0-9_-]{20,256})$/);
+  // `to` lets /admin land the support session on the exact settings page the
+  // operator came to fill in («کلیدها و اتصال‌ها» links use it).
+  const m = window.location.hash.match(/^#support=([A-Za-z0-9_-]{20,256})(?:&to=([^&]+))?$/);
   if (m) {
     setToken(m[1], { persist: false });
-    window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+    let to = window.location.pathname + window.location.search;
+    if (m[2]) {
+      const decoded = decodeURIComponent(m[2]);
+      // Only an in-app path: never let a crafted fragment become an open redirect.
+      if (/^\/app(\/|$)/.test(decoded) && !decoded.includes('//') && !decoded.includes('\\')) to = decoded;
+    }
+    window.history.replaceState(window.history.state, '', to);
   }
   /**
    * «ورود سازمانی» comes back from the provider as /app#sso=<token>: the token

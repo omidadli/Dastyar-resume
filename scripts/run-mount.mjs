@@ -3,7 +3,8 @@
  * the main screens — landing, demo workspace, dashboard, jobs, job detail with
  * the candidate panel, comparison and settings.
  *
- *   npm run build && DATA_DIR=/tmp/hv-mount PORT=3000 NODE_ENV=production node dist/server.cjs
+ *   npm run build && DATA_DIR=/tmp/hv-mount PORT=3000 NODE_ENV=production \
+ *     ADMIN_EMAILS=admin@hovida-demo.ir node dist/server.cjs   # ADMIN_EMAILS adds the /admin step
  *   npm run test:mount
  */
 import { JSDOM } from 'jsdom';
@@ -77,7 +78,7 @@ const root2 = window.document.createElement('div');
 window.document.body.appendChild(root2);
 root.remove();
 navigate('/app');
-mount(root2);
+const app2 = mount(root2);
 assert(await waitFor(() => text().includes('در انتظار تصمیم شما'), 10000), 'dashboard renders for the demo workspace');
 // The card titles show while the figures still load: wait for the data itself.
 assert(await waitFor(() => text().includes('زمان صرفه‌جویی‌شده (برآورد)'), 10000), 'the time-saved figure is labelled as an estimate');
@@ -267,6 +268,33 @@ assert(clickByText('آزمون و ارزیابی'), 'the assessment action exist
 assert(await waitFor(() => text().includes('قضاوت موقعیتی: کارشناس جذب') && text().includes('نمونه‌کار: پشتیبانی مشتری')), 'the dialog lists the real templates');
 assert(text().includes('نحوهٔ خواندن نتیجه'), 'the dialog explains how the result is read before sending');
 assert(text().includes('ارزیابی ساختاریافتهٔ داخلی'), 'the dialog never calls the test a psychometric instrument');
+
+// 14. /admin › «کلیدها و اتصال‌ها» — the credential map. Only when this server
+// was started with ADMIN_EMAILS (the developer's local run), so the suite stays
+// runnable without one.
+const adminSignup = await nodeFetch(SERVER + '/api/auth/signup', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ orgName: 'سازمان مدیریت', name: 'مدیر سامانه', email: 'admin@hovida-demo.ir', password: 'Admin12345' }),
+})
+  .then((r) => r.json())
+  .catch(() => ({}));
+if (adminSignup?.token && adminSignup?.user?.platformAdmin) {
+  setToken(adminSignup.token);
+  app2.unmount();
+  const root3 = window.document.createElement('div');
+  window.document.body.appendChild(root3);
+  root2.remove();
+  navigate('/admin/connections');
+  mount(root3);
+  assert(await waitFor(() => text().includes('نقشهٔ کلیدها'), 12000), 'the admin page lists every key and what it powers');
+  assert(text().includes('صندوق ایمیل مشترک سامانه'), 'the shared mailbox card is on the admin page');
+  assert(text().includes('خط پیامک مشترک سامانه'), 'the shared SMS line card is on the admin page');
+  assert(text().includes('همه را بررسی کن'), 'the health check is offered');
+  assert(text().includes('ورود به تنظیمات یک فضای کاری'), 'the admin can step into a workspace to enter its own keys');
+} else {
+  console.log('INFO  admin hub step skipped (start the server with ADMIN_EMAILS to include it)');
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

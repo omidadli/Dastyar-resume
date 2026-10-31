@@ -46,6 +46,8 @@ export function emailStatus(secrets: OrgSecrets): EmailSettingsPublic {
   if (!e) {
     return {
       configured: false,
+      active: false,
+      source: null,
       host: null,
       port: null,
       secure: true,
@@ -61,6 +63,8 @@ export function emailStatus(secrets: OrgSecrets): EmailSettingsPublic {
   }
   return {
     configured: isEmailConfigured(secrets),
+    active: isEmailConfigured(secrets),
+    source: e.source ?? 'workspace',
     host: e.host,
     port: e.port,
     secure: e.secure,

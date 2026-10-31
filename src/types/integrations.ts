@@ -126,7 +126,12 @@ export interface SourcingStatusPublic {
 // ------------------------------------------------------------------- email ----
 
 export interface EmailSettingsPublic {
+  /** The workspace has saved its own mailbox. */
   configured: boolean;
+  /** Mail can actually go out (workspace mailbox, else the deployment-wide one). */
+  active: boolean;
+  /** Which account sends: the workspace's own, the platform's, or an env fallback. */
+  source: 'workspace' | 'shared' | 'env' | null;
   host: string | null;
   port: number | null;
   secure: boolean;
@@ -139,6 +144,8 @@ export interface EmailSettingsPublic {
   lastTestAtISO: string | null;
   lastTestOk: boolean | null;
   lastError: string | null;
+  /** Only in the status payload: the address an email would actually leave from. */
+  effectiveFromAddress?: string | null;
 }
 
 export type SentEmailStatus = 'sent' | 'failed';
@@ -226,7 +233,12 @@ export const SMS_PROVIDER_LABEL: Record<SmsProvider, string> = {
 };
 
 export interface SmsSettingsPublic {
+  /** The workspace has saved its own gateway. */
   configured: boolean;
+  /** Texts can actually go out (workspace gateway, else the deployment-wide one). */
+  active: boolean;
+  /** Which gateway sends: the workspace's own, the platform's, or an env fallback. */
+  source: 'workspace' | 'shared' | 'env' | null;
   provider: SmsProvider | null;
   /** The line/number the message is sent from (shown as stored). */
   sender: string | null;
@@ -234,6 +246,8 @@ export interface SmsSettingsPublic {
   lastTestAtISO: string | null;
   lastTestOk: boolean | null;
   lastError: string | null;
+  /** Only in the status payload: the line a text would actually leave from. */
+  effectiveSender?: string | null;
 }
 
 export interface SmsSettingsInput {

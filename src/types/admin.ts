@@ -167,9 +167,49 @@ export interface GoogleConnectionPublic {
   fromEnv: boolean;
 }
 
+/**
+ * «صندوق ایمیل مشترک سامانه» — one mailbox for every workspace that has not
+ * connected its own. Entered in /admin; never shown with the password.
+ */
+export interface SharedEmailPublic {
+  configured: boolean;
+  source: ConnectionSource | null;
+  host: string | null;
+  port: number | null;
+  secure: boolean;
+  username: string | null;
+  fromName: string;
+  fromAddress: string | null;
+  replyTo: string | null;
+  hasPassword: boolean;
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  fromEnv: boolean;
+}
+
+/** «خط پیامک مشترک سامانه» — the same idea for the Iranian SMS gateway. */
+export interface SharedSmsPublic {
+  configured: boolean;
+  source: ConnectionSource | null;
+  provider: 'kavenegar' | 'smsir' | null;
+  sender: string | null;
+  hasApiKey: boolean;
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  fromEnv: boolean;
+}
+
 export interface ConnectionsPayload {
   sourcing: SourcingConnectionPublic;
   google: GoogleConnectionPublic;
+  email: SharedEmailPublic;
+  sms: SharedSmsPublic;
   /** Both docs are served from the repository, absolute paths are not needed. */
   docs: { sourcing: string; google: string };
 }
@@ -180,7 +220,7 @@ export interface ConnectionsPayload {
  * needs a real send). Null is never displayed as «سالم».
  */
 export interface ConnectionHealthCheck {
-  key: 'sourcing' | 'google' | 'email' | 'calendar';
+  key: 'sourcing' | 'google' | 'email' | 'sms' | 'calendar' | 'chat' | 'sso' | 'ai';
   title: string;
   configured: boolean;
   ok: boolean | null;
@@ -191,7 +231,7 @@ export interface ConnectionHealthCheck {
 export interface ConnectionsHealth {
   atISO: string;
   checks: ConnectionHealthCheck[];
-  adoption: { orgs: number; email: number; calendar: number };
+  adoption: { orgs: number; email: number; calendar: number; sms: number; chat: number; sso: number };
 }
 
 export interface SourcingConnectionInput {

@@ -147,6 +147,10 @@ function EmailCard() {
             <Chip tone="brand" icon={CheckCircle2}>
               {email.fromAddress}
             </Chip>
+          ) : email?.active ? (
+            <Chip tone="outline" icon={ShieldCheck}>
+              {email.source === 'env' ? 'از تنظیمات سرور' : 'از صندوق مشترک سامانه'}
+            </Chip>
           ) : (
             <Chip tone="warning" icon={AlertTriangle}>
               متصل نیست
@@ -155,6 +159,13 @@ function EmailCard() {
         }
       />
       {!canEdit && <Callout tone="info" className="mb-4">فقط مالک یا مدیر فضای کاری می‌تواند اتصال ایمیل را تغییر دهد.</Callout>}
+      {!email?.configured && email?.active && (
+        <Callout tone="info" icon={ShieldCheck} className="mb-4">
+          این فضای کاری صندوق اختصاصی ندارد و ایمیل‌ها با{' '}
+          <span className="font-semibold">{email.source === 'env' ? 'تنظیمات سرور' : 'صندوق مشترک سامانه'}</span> ارسال می‌شوند. اگر
+          می‌خواهید نامه‌ها از حساب خودتان برود، فرم زیر را پر کنید؛ از آن لحظه صندوق اختصاصی جای مشترک را می‌گیرد.
+        </Callout>
+      )}
       {status.loading && <p className="text-[13px] text-ink-3">در حال خواندن وضعیت اتصال…</p>}
       {!status.loading && (
         <div className="flex flex-col gap-4">
@@ -701,9 +712,24 @@ function SmsCard() {
         icon={Send}
         title="پیامک سازمان"
         subtitle="کاوه‌نگار یا sms.ir — با حساب و خط خودتان"
-        action={configured ? <Chip tone="brand" icon={CheckCircle2}>متصل</Chip> : <Chip tone="neutral">وصل نشده</Chip>}
+        action={
+          configured ? (
+            <Chip tone="brand" icon={CheckCircle2}>متصل</Chip>
+          ) : sms?.active ? (
+            <Chip tone="outline" icon={ShieldCheck}>{sms.source === 'env' ? 'از تنظیمات سرور' : 'از خط مشترک سامانه'}</Chip>
+          ) : (
+            <Chip tone="neutral">وصل نشده</Chip>
+          )
+        }
       />
-      {!configured && (
+      {!configured && sms?.active && (
+        <Callout tone="info" icon={ShieldCheck} className="mb-4">
+          این فضای کاری خط پیامک اختصاصی ندارد و پیامک‌ها با{' '}
+          <span className="font-semibold">{sms.source === 'env' ? 'تنظیمات سرور' : 'خط مشترک سامانه'}</span> ارسال می‌شوند. با
+          وارد کردن کلید خودتان، خط سازمان شما جای آن را می‌گیرد.
+        </Callout>
+      )}
+      {!configured && !sms?.active && (
         <Callout tone="info" className="mb-4">
           در ایران بخش زیادی از کارجوها ایمیل را نمی‌بینند. با اتصال پیامک، دعوت مصاحبه و یادآوری جلسه را هم می‌توانید
           پیامک کنید. کلید API را از پنل کاوه‌نگار یا sms.ir بردارید؛ اعتبار و خط، مالِ خودتان می‌ماند.

@@ -25,8 +25,17 @@ export class SmsRequestError extends Error {
   }
 }
 
-const KAVENEGAR_BASE = process.env.KAVENEGAR_API_BASE || 'https://api.kavenegar.com';
-const SMSIR_BASE = process.env.SMSIR_API_BASE || 'https://api.sms.ir';
+/**
+ * Read per call, not at module load: the admin can change the base URL for a
+ * private gateway (or the tests point it at a mock server) and the next send
+ * uses the new value — an import-time constant would silently ignore it.
+ */
+function kavenegarBase(): string {
+  return (process.env.KAVENEGAR_API_BASE || 'https://api.kavenegar.com').replace(/\/$/, '');
+}
+function smsirBase(): string {
+  return (process.env.SMSIR_API_BASE || 'https://api.sms.ir').replace(/\/$/, '');
+}
 
 /** «۰۹۱۲…», «+98912…», «9121234567» → «09121234567». */
 export function normalizeIranMobile(raw: unknown): string | null {
@@ -52,6 +61,8 @@ export function smsStatus(secrets: OrgSecrets): SmsSettingsPublic {
   if (!s) {
     return {
       configured: false,
+      active: false,
+      source: null,
       provider: null,
       sender: null,
       hasApiKey: false,
@@ -62,6 +73,8 @@ export function smsStatus(secrets: OrgSecrets): SmsSettingsPublic {
   }
   return {
     configured: isSmsConfigured(secrets),
+    active: isSmsConfigured(secrets),
+    source: s.source ?? 'workspace',
     provider: s.provider,
     sender: s.sender,
     hasApiKey: Boolean(s.apiKeyEnc),
@@ -93,9 +106,9 @@ export function prepareSmsSettings(input: SmsSettingsInput, previous: OrgSecrets
 
 function describe(provider: SmsProvider, key: string): { url: string; headers: Record<string, string> } {
   return provider === 'smsir'
-    ? { url: `${SMSIR_BASE}/v1/send/bulk`, headers: { 'x-api-key': key, 'Content-Type': 'application/json', Accept: 'application/json' } }
+    ? { url: `${smsirBase()}/v1/send/bulk`, headers: { 'x-api-key': key, 'Content-Type': 'application/json', Accept: 'application/json' } }
     : {
-        url: `${KAVENEGAR_BASE}/v1/${encodeURIComponent(key)}/sms/send.json`,
+        url: `${kavenegarBase()}/v1/${encodeURIComponent(key)}/sms/send.json`,
         headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
       };
 }
@@ -115,7 +128,7 @@ export async function verifySms(settings: NonNullable<OrgSecrets['sms']>): Promi
   if (!key) return { ok: false, error: 'کلید API ذخیره‌شده خوانا نیست؛ دوباره واردش کنید.' };
   try {
     if (settings.provider === 'smsir') {
-      const res = await fetch(`${SMSIR_BASE}/v1/credit`, {
+      const res = await fetch(`${smsirBase()}/v1/credit`, {
         headers: { 'x-api-key': key, Accept: 'application/json' },
         signal: AbortSignal.timeout(20_000),
       });
@@ -123,7 +136,7 @@ export async function verifySms(settings: NonNullable<OrgSecrets['sms']>): Promi
       if (res.ok && (body?.status === 1 || body?.data !== undefined)) return { ok: true, error: null };
       return { ok: false, error: friendlySmsError(body, res.status) };
     }
-    const res = await fetch(`${KAVENEGAR_BASE}/v1/${encodeURIComponent(key)}/account/info.json`, {
+    const res = await fetch(`${kavenegarBase()}/v1/${encodeURIComponent(key)}/account/info.json`, {
       headers: { Accept: 'application/json' },
       signal: AbortSignal.timeout(20_000),
     });

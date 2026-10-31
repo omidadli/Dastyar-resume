@@ -92,10 +92,38 @@ function publicInterview(row: db.InterviewRecordRow) {
   return rest;
 }
 
+/**
+ * The mailbox that actually sends: the workspace's own, else the deployment-wide
+ * one from /admin. The settings form keeps editing the workspace's own entry —
+ * this helper is only for sending and testing.
+ */
 function emailSettingsOrThrow(orgId: string) {
-  const secrets = db.getOrgSecrets(orgId);
+  const secrets = db.resolveOrgSecrets(orgId);
   if (!isEmailConfigured(secrets)) throw new EmailNotConfiguredError();
   return secrets.email!;
+}
+
+/** Which account actually sends, so the settings page can say it plainly. */
+function emailStatusFor(orgId: string) {
+  const own = db.getOrgSecrets(orgId);
+  const effective = db.resolveOrgSecrets(orgId);
+  return {
+    ...emailStatus(own),
+    active: isEmailConfigured(effective),
+    source: own.email ? ('workspace' as const) : effective.email?.source ?? null,
+    effectiveFromAddress: effective.email?.fromAddress ?? null,
+  };
+}
+
+function smsStatusFor(orgId: string) {
+  const own = db.getOrgSecrets(orgId);
+  const effective = db.resolveOrgSecrets(orgId);
+  return {
+    ...smsStatus(own),
+    active: isSmsConfigured(effective),
+    source: own.sms ? ('workspace' as const) : effective.sms?.source ?? null,
+    effectiveSender: effective.sms?.sender ?? null,
+  };
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -180,8 +208,10 @@ export function integrationRoutes(): express.Router {
     const secrets = db.getOrgSecrets(org.id);
     res.json({
       sourcing: { ...sourcingStatus(), usage: sourcingUsage() },
-      email: emailStatus(secrets),
-      sms: smsStatus(secrets),
+      // `configured` describes the workspace's own form; `active`/`source` say
+      // whether mail/text actually goes out and whose account it goes through.
+      email: emailStatusFor(org.id),
+      sms: smsStatusFor(org.id),
       chat: chatStatus(secrets),
       calendar: {
         ...calendarStatus(secrets, redirectUriFor(originOf(req))),
@@ -224,7 +254,7 @@ export function integrationRoutes(): express.Router {
       }
       db.patchOrgSecrets(org.id, { sms: prepared });
       db.logActivity(org.id, { id: user.id, name: user.name }, 'settings.changed', 'پیامک سازمان را متصل کرد');
-      res.json({ sms: smsStatus(db.getOrgSecrets(org.id)) });
+      res.json({ sms: smsStatusFor(org.id) });
     })
   );
 
@@ -232,7 +262,7 @@ export function integrationRoutes(): express.Router {
     const { org } = ctxOf(req);
     db.patchOrgSecrets(org.id, { sms: undefined });
     db.logActivity(org.id, actorOf(req), 'settings.changed', 'اتصال پیامک سازمان را قطع کرد');
-    res.json({ sms: smsStatus(db.getOrgSecrets(org.id)) });
+    res.json({ sms: smsStatusFor(org.id) });
   });
 
   r.post(
@@ -240,12 +270,17 @@ export function integrationRoutes(): express.Router {
     requireRole('admin'),
     h(async (req, res) => {
       const { org } = ctxOf(req);
-      const settings = db.getOrgSecrets(org.id).sms;
+      const own = db.getOrgSecrets(org.id).sms;
+      const settings = db.resolveOrgSecrets(org.id).sms;
       if (!settings) return res.status(409).json({ error: 'پیامک سازمان هنوز متصل نشده است.', code: 'SMS_NOT_CONFIGURED' });
       const check = await verifySms(settings);
-      db.patchOrgSecrets(org.id, {
-        sms: { ...settings, lastTestAtISO: new Date().toISOString(), lastTestOk: check.ok, lastError: check.error },
-      });
+      // Only the workspace's own entry gets its probe result written back; the
+      // platform line is probed from /admin, not from a tenant.
+      if (own) {
+        db.patchOrgSecrets(org.id, {
+          sms: { ...own, lastTestAtISO: new Date().toISOString(), lastTestOk: check.ok, lastError: check.error },
+        });
+      }
       res.json({ ok: check.ok, error: check.error });
     })
   );
@@ -257,8 +292,8 @@ export function integrationRoutes(): express.Router {
       const { org, user } = ctxOf(req);
       // A text to a hidden candidate is still contact: wait for the reveal.
       if (str(req.body?.resumeId, 80) && blockedByBlind(org, res)) return;
-      const settings = db.getOrgSecrets(org.id).sms;
-      if (!settings || !isSmsConfigured(db.getOrgSecrets(org.id))) {
+      const settings = db.resolveOrgSecrets(org.id).sms;
+      if (!settings || !isSmsConfigured(db.resolveOrgSecrets(org.id))) {
         return res.status(409).json({
           error: 'پیامک سازمان متصل نیست؛ در «تنظیمات ← اتصال‌ها» سرویس پیامک را وصل کنید.',
           code: 'SMS_NOT_CONFIGURED',
@@ -408,7 +443,7 @@ export function integrationRoutes(): express.Router {
       }
       db.patchOrgSecrets(org.id, { email: prepared });
       db.logActivity(org.id, actorOf(req) || { id: user.id, name: user.name }, 'settings.changed', 'ایمیل سازمان را متصل کرد');
-      res.json({ email: emailStatus(db.getOrgSecrets(org.id)) });
+      res.json({ email: emailStatusFor(org.id) });
     })
   );
 
@@ -418,7 +453,7 @@ export function integrationRoutes(): express.Router {
     delete secrets.email;
     db.patchOrgSecrets(org.id, { email: undefined });
     db.logActivity(org.id, actorOf(req), 'settings.changed', 'اتصال ایمیل سازمان را قطع کرد');
-    res.json({ email: emailStatus(db.getOrgSecrets(org.id)) });
+    res.json({ email: emailStatusFor(org.id) });
   });
 
   r.post(
@@ -426,11 +461,14 @@ export function integrationRoutes(): express.Router {
     requireRole('admin'),
     h(async (req, res) => {
       const { org } = ctxOf(req);
+      const own = db.getOrgSecrets(org.id).email;
       const settings = emailSettingsOrThrow(org.id);
       const check = await verifyEmail(settings);
-      db.patchOrgSecrets(org.id, {
-        email: { ...settings, lastTestAtISO: new Date().toISOString(), lastTestOk: check.ok, lastError: check.error },
-      });
+      if (own) {
+        db.patchOrgSecrets(org.id, {
+          email: { ...own, lastTestAtISO: new Date().toISOString(), lastTestOk: check.ok, lastError: check.error },
+        });
+      }
       res.status(check.ok ? 200 : 400).json({ ok: check.ok, error: check.error });
     })
   );

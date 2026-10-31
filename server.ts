@@ -9,7 +9,7 @@ import * as db from './server/db';
 import { initAppSecret } from './server/secret';
 import { storage } from './server/storage';
 import { maintenanceGate, requireAuth } from './server/auth';
-import { initPlatform, systemSettings } from './server/platform';
+import { initPlatform, sharedEmailSecrets, sharedSmsSecrets, systemSettings } from './server/platform';
 import { adminRoutes } from './server/routes/admin';
 import { aiStatus, flushAiState } from './server/ai/provider';
 import { authRoutes } from './server/routes/auth';
@@ -46,6 +46,9 @@ async function startServer() {
   await initAppSecret();
   db.purgeExpired();
   initPlatform();
+  // Workspaces without their own mailbox/SMS line fall back to the deployment-
+  // wide ones entered in /admin › «کلیدها و اتصال‌ها».
+  db.setSharedSecretsSource(() => ({ email: sharedEmailSecrets() ?? undefined, sms: sharedSmsSecrets() ?? undefined }));
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', true);

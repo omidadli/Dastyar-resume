@@ -20,6 +20,7 @@ import { faDate } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import type { ConnectionsHealth, ConnectionsPayload } from '../../types/admin';
 import { AdminHeader } from './shared';
+import { KeyRegistry, SharedEmailCard, SharedSmsCard } from './KeyRegistry';
 
 function copy(text: string, what: string) {
   navigator.clipboard?.writeText(text).then(
@@ -446,8 +447,8 @@ function HealthPanel({ health, loading, onRun }: { health: ConnectionsHealth | n
       />
       {!health ? (
         <p className="text-[12.5px] text-ink-3">
-          هنوز بررسی‌ای اجرا نشده است؛ دکمهٔ «همه را بررسی کن» وضعیت سرویس جست‌وجو، کلید گوگل، صندوق ایمیل و
-          تقویم فضای کاری‌ها را یک‌جا نشان می‌دهد.
+          هنوز بررسی‌ای اجرا نشده است؛ دکمهٔ «همه را بررسی کن» وضعیت سرویس جست‌وجو، کلید گوگل، کلیدهای هوش مصنوعی،
+          صندوق ایمیل و خط پیامک (مشترک و اختصاصی) و تقویم فضای کاری‌ها را یک‌جا نشان می‌دهد.
         </p>
       ) : (
         <div className="flex flex-col gap-2">
@@ -482,6 +483,8 @@ function HealthPanel({ health, loading, onRun }: { health: ConnectionsHealth | n
 
 export default function ConnectionsPage() {
   const { data, error, reload, setData } = useAsync(() => adminApi.connections(), []);
+  // The AI section has its own page; here we only count its keys for the registry.
+  const ai = useAsync(() => adminApi.ai(), []);
   const [health, setHealth] = useState<ConnectionsHealth | null>(null);
   const [healthBusy, setHealthBusy] = useState(false);
 
@@ -502,7 +505,7 @@ export default function ConnectionsPage() {
   if (error && !data) {
     return (
       <div>
-        <AdminHeader title="اتصال‌ها" />
+        <AdminHeader title="کلیدها و اتصال‌ها" />
         <div className="hv-card">
           <ErrorState message={error} onRetry={reload} />
         </div>
@@ -514,18 +517,28 @@ export default function ConnectionsPage() {
   return (
     <div>
       <AdminHeader
-        title="اتصال‌ها"
-        subtitle="کلیدهایی که یک‌بار برای کل سامانه ثبت می‌شوند: سرویس جست‌وجوی LinkedIn و Google Calendar."
+        title="کلیدها و اتصال‌ها"
+        subtitle="هر کلیدی که هویدا لازم دارد: یک‌جا می‌بینید کدام ثبت شده، چه چیزی را روشن می‌کند و کجا وارد می‌شود."
       />
       <div className="space-y-5">
         <HealthPanel health={health} loading={healthBusy} onRun={() => void runHealth()} />
+        <KeyRegistry
+          data={data}
+          aiKeys={ai.data?.keys.length ?? 0}
+          aiEnabled={Boolean(ai.data?.enabled)}
+        />
+        <div id="card-sourcing" className="scroll-mt-4">
+          <SourcingCard data={data} setData={setData} />
+        </div>
+        <div id="card-google" className="scroll-mt-4">
+          <GoogleCard data={data} setData={setData} />
+        </div>
+        <SharedEmailCard data={data} setData={setData} />
+        <SharedSmsCard data={data} setData={setData} />
         <Callout tone="info" icon={KeyRound}>
-          دو اتصال دیگر — «ایمیل سازمان» و «حساب گوگل هر فضای کاری» — عمداً اینجا نیستند: هر فضای کاری از
-          «تنظیمات ← اتصال‌ها» صندوق ایمیل و حساب تقویم خودش را وصل می‌کند. کلیدهای هوش مصنوعی هم در بخش
-          «کلیدهای هوش مصنوعی» ثبت می‌شوند.
+          صندوق ایمیل و خط پیامک «مشترک» فقط جایگزین‌اند: هر فضای کاری که حساب خودش را در «تنظیمات ← اتصال‌ها» وصل کند،
+          همیشه از حساب خودش می‌فرستد. وب‌هوک چت، SSO و حساب Google Calendar هم مال هر فضای کاری است و همان‌جا وارد می‌شود.
         </Callout>
-        <SourcingCard data={data} setData={setData} />
-        <GoogleCard data={data} setData={setData} />
         <div className="text-[12.5px] text-ink-3 flex items-center gap-1.5">
           <ExternalLink className="w-3.5 h-3.5" />
           این مقادیر رمزنگاری‌شده در پشتیبان کامل سامانه ذخیره می‌شوند و فقط با همان APP_SECRET قابل خواندن‌اند.

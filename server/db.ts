@@ -193,6 +193,8 @@ export interface OrgSecrets {
     lastTestAtISO: string | null;
     lastTestOk: boolean | null;
     lastError: string | null;
+    /** Set when the deployment-wide mailbox from /admin stands in for this one. */
+    source?: 'workspace' | 'shared' | 'env';
   };
   /** Iranian SMS gateway (Kavenegar / sms.ir) — the API key is encrypted. */
   sms?: {
@@ -202,6 +204,7 @@ export interface OrgSecrets {
     lastTestAtISO: string | null;
     lastTestOk: boolean | null;
     lastError: string | null;
+    source?: 'workspace' | 'shared' | 'env';
   };
   /**
    * Slack / Microsoft Teams incoming webhook — where the workspace's own chat
@@ -1859,14 +1862,27 @@ export function saveEmail(record: SentEmailRow): SentEmailRow {
  * deployment-level health page reports this so «همه‌چیز وصل است» is not claimed
  * from the OAuth client alone.
  */
-export function connectionAdoption(): { orgs: number; email: number; calendar: number } {
+export function connectionAdoption(): {
+  orgs: number;
+  email: number;
+  calendar: number;
+  sms: number;
+  chat: number;
+  sso: number;
+} {
   let email = 0;
   let calendar = 0;
+  let sms = 0;
+  let chat = 0;
+  let sso = 0;
   for (const secrets of orgSecrets.values()) {
     if (secrets.email) email += 1;
     if (secrets.calendar?.refreshTokenEnc) calendar += 1;
+    if (secrets.sms) sms += 1;
+    if (secrets.chat) chat += 1;
+    if (secrets.sso?.enabled) sso += 1;
   }
-  return { orgs: orgs.size, email, calendar };
+  return { orgs: orgs.size, email, calendar, sms, chat, sso };
 }
 
 // ------------------------------------------------------ «اتوماسیون جذب» ----
@@ -2382,6 +2398,45 @@ export function dropAutomationOf(orgId: string) {
 
 export function getOrgSecrets(orgId: string): OrgSecrets {
   return orgSecrets.get(orgId) || {};
+}
+
+/**
+ * «صندوق مشترک سامانه» — the deployment-wide mailbox and SMS line entered in
+ * /admin. db.ts cannot import platform.ts (platform imports db), so the app
+ * registers this resolver once at startup; without it the behaviour is exactly
+ * what it was before (workspace-owned credentials only).
+ */
+type SharedSecretsSource = () => {
+  email?: NonNullable<OrgSecrets['email']>;
+  sms?: NonNullable<OrgSecrets['sms']>;
+};
+
+let sharedSecretsSource: SharedSecretsSource | null = null;
+
+export function setSharedSecretsSource(fn: SharedSecretsSource | null) {
+  sharedSecretsSource = fn;
+}
+
+/**
+ * What the workspace actually sends with: its own credentials when present,
+ * otherwise the deployment-wide fallback. Call sites that *send* (mail, SMS)
+ * use this; call sites that *edit* keep using getOrgSecrets so the settings
+ * form never shows somebody else's mailbox as if it were the workspace's.
+ */
+export function resolveOrgSecrets(orgId: string): OrgSecrets {
+  const own = getOrgSecrets(orgId);
+  if (own.email && own.sms) return own;
+  let shared: ReturnType<SharedSecretsSource> = {};
+  try {
+    shared = sharedSecretsSource ? sharedSecretsSource() : {};
+  } catch {
+    shared = {};
+  }
+  if (!shared.email && !shared.sms) return own;
+  const next: OrgSecrets = { ...own };
+  if (!next.email && shared.email) next.email = { ...shared.email, source: shared.email.source ?? 'shared' };
+  if (!next.sms && shared.sms) next.sms = { ...shared.sms, source: shared.sms.source ?? 'shared' };
+  return next;
 }
 
 export function patchOrgSecrets(orgId: string, patch: Partial<OrgSecrets>): OrgSecrets {

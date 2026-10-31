@@ -661,13 +661,14 @@ async function main() {
     // Read-only and free: the Apify token check must not start a run.
     const runsBefore = apifyRuns.length;
     const health = await call('POST', '/api/admin/connections/health', A, {});
-    assert(health.status === 200 && health.json.checks.length === 4, 'the health check answers for all four connections', String(health.status));
+    assert(health.status === 200 && health.json.checks.length === 8, 'the health check answers for every credential (8 rows)', String(health.json.checks?.length));
     const byKey = new Map<string, any>(health.json.checks.map((c: any) => [c.key, c]));
     assert(byKey.get('sourcing')?.ok === true, 'the sourcing provider is reported healthy', JSON.stringify(byKey.get('sourcing')));
     assert(apifyRuns.length === runsBefore, 'the health check costs nothing (no actor run is started)');
     assert(byKey.get('google')?.ok === null && byKey.get('google')?.configured === false, 'without a Google client the row says «تنظیم نشده», not «سالم»');
-    assert(byKey.get('email')?.ok === null && /صندوق ایمیل/.test(byKey.get('email')?.message || ''), 'the e-mail row explains that testing happens per workspace');
-    assert(/هیچ فضای کاری/.test(byKey.get('email')?.message || '') || byKey.get('email')?.configured === false, 'an untouched workspace is visible in the e-mail row');
+    assert(byKey.get('email')?.ok === null && /صندوق مشترک/.test(byKey.get('email')?.message || ''), 'without a shared mailbox the e-mail row says so instead of «healthy»');
+    assert(byKey.get('sms')?.configured === false && byKey.get('sms')?.ok === null, 'the SMS row is present and honestly «not configured»');
+    assert(byKey.get('ai')?.configured === true && byKey.get('chat')?.ok === null && byKey.get('sso')?.ok === null, 'the AI row reflects the working keys; chat/SSO are per workspace');
     assert(Boolean(health.json.atISO) && health.json.adoption.orgs >= 1, 'the check is stamped and counts the workspaces');
 
     const healthNoAdmin = await call('POST', '/api/admin/connections/health', S, {});

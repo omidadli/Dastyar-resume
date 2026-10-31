@@ -372,7 +372,7 @@ export function offerRoutes() {
       }
       const to = (row.candidateEmail || '').toLowerCase().trim();
       if (!EMAIL_RE.test(to)) return res.status(400).json({ error: 'برای این کارجو ایمیل معتبری ثبت نشده است؛ ابتدا آن را در پروفایل کامل کنید.' });
-      if (!isEmailConfigured(db.getOrgSecrets(org.id))) {
+      if (!isEmailConfigured(db.resolveOrgSecrets(org.id))) {
         return res.status(409).json({
           error: 'صندوق ایمیل سازمان هنوز وصل نشده است؛ از «تنظیمات ← اتصال‌ها» آن را وصل کنید تا پیشنهاد از ایمیل خودتان برود.',
           code: 'EMAIL_NOT_CONFIGURED',
@@ -382,7 +382,7 @@ export function offerRoutes() {
 
       const link = publicUrl(req, row.token);
       try {
-        await sendMail(db.getOrgSecrets(org.id).email!, {
+        await sendMail(db.resolveOrgSecrets(org.id).email!, {
           to,
           subject: `پیشنهاد شغلی — ${row.terms.title || row.jobTitle}`,
           text: emailBody(row, org.name, link),

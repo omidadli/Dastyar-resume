@@ -254,7 +254,7 @@ export function schedulingRoutes() {
       if (row.status !== 'open') return res.status(409).json({ error: 'این لینک دیگر باز نیست.' });
       const to = (row.candidateEmail || '').toLowerCase().trim();
       if (!EMAIL_RE.test(to)) return res.status(400).json({ error: 'برای این کارجو ایمیل معتبری ثبت نشده است.' });
-      if (!isEmailConfigured(db.getOrgSecrets(org.id))) {
+      if (!isEmailConfigured(db.resolveOrgSecrets(org.id))) {
         return res.status(409).json({ error: 'صندوق ایمیل سازمان وصل نشده است؛ لینک را کپی و با ابزار خودتان بفرستید.', code: 'EMAIL_NOT_CONFIGURED' });
       }
       const link = publicUrl(req, row.token);
@@ -271,7 +271,7 @@ export function schedulingRoutes() {
         org.name,
       ].join('\n');
       try {
-        await sendMail(db.getOrgSecrets(org.id).email!, { to, subject: `انتخاب زمان مصاحبه — ${row.jobTitle}`, text });
+        await sendMail(db.resolveOrgSecrets(org.id).email!, { to, subject: `انتخاب زمان مصاحبه — ${row.jobTitle}`, text });
       } catch (err: any) {
         return res.status(502).json({ error: `ارسال نشد: ${friendlySmtpError(err)}`, code: 'SMTP_FAILED' });
       }

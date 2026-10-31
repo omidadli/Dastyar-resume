@@ -16,6 +16,7 @@
     "brand": "python3 scripts/brand/make_logo.py",
     "test:admin": "tsx scripts/admin-api.test.ts",
     "test:integrations": "npm run build && tsx scripts/integrations-api.test.ts",
+    "test:credentials": "npm run build && tsx scripts/credentials-api.test.ts",
     "build:cloudflare": "npm run build && node scripts/cloudflare/prepare-assets.mjs",
     "test:backup": "tsx scripts/backup.test.ts",
     "test:cloudflare": "tsx scripts/cloudflare.test.ts",

@@ -73,7 +73,7 @@ export async function sendInterviewReminders(now = new Date(), orgId?: string): 
   const outcome: ReminderOutcome = { due: rows.length, sent: 0, skipped: [], failed: [], atISO };
 
   for (const row of rows) {
-    const secrets = db.getOrgSecrets(row.orgId).email;
+    const secrets = db.resolveOrgSecrets(row.orgId).email;
     if (!secrets) {
       outcome.skipped.push({ interviewId: row.id, reason: 'صندوق ایمیل این فضای کاری وصل نیست' });
       continue;

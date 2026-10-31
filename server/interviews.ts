@@ -121,7 +121,7 @@ export async function bookInterview(input: {
 
   // ---- Google Calendar (the invitation the candidate receives) ----
   let calendarError: string | null = null;
-  const secrets = db.getOrgSecrets(org.id);
+  const secrets = db.resolveOrgSecrets(org.id);
   if (secrets.calendar?.refreshTokenEnc) {
     try {
       const token = await accessTokenFor(secrets, decryptSecret, encryptSecret);
@@ -160,9 +160,9 @@ export async function bookInterview(input: {
   // ---- No Google connection (or it failed): the workspace can still send
   // the invitation itself, with a standard .ics attachment. ----
   let emailError: string | null = null;
-  const emailSecrets = db.getOrgSecrets(org.id).email;
+  const emailSecrets = db.resolveOrgSecrets(org.id).email;
   if (!row.calendarEventId && sendInvite) {
-    if (!isEmailConfigured(db.getOrgSecrets(org.id)) || !candidateEmail) {
+    if (!isEmailConfigured(db.resolveOrgSecrets(org.id)) || !candidateEmail) {
       emailError = !candidateEmail
         ? 'ایمیلی برای کارجو ثبت نشده است؛ دعوت‌نامه ایمیلی فرستاده نشد.'
         : 'ایمیل سازمان وصل نیست؛ دعوت‌نامه ایمیلی فرستاده نشد.';

@@ -21,6 +21,7 @@ import {
   Trash2,
   MessageSquareHeart,
   ClipboardList,
+  Video,
   ShieldCheck,
   UserPlus,
   UserCog,
@@ -74,6 +75,10 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'survey.answered': MessageSquareHeart,
   'assessment.sent': ClipboardList,
   'assessment.completed': ClipboardList,
+  'video.invited': Video,
+  'video.submitted': Video,
+  'video.reviewed': Video,
+  'video.cancelled': Video,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

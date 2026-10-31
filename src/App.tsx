@@ -60,6 +60,8 @@ const Reports = lazyPage(() => import('./pages/Reports'));
 const TeamReport = lazyPage(() => import('./pages/TeamReport'));
 const CostReport = lazyPage(() => import('./pages/CostReport'));
 const EeoReport = lazyPage(() => import('./pages/EeoReport'));
+const VideoInterviews = lazyPage(() => import('./pages/VideoInterviews'));
+const VideoRecord = lazyPage(() => import('./pages/VideoRecord'));
 const Sourcing = lazyPage(() => import('./pages/Sourcing'));
 const Automation = lazyPage(() => import('./pages/Automation'));
 const Careers = lazyPage(() => import('./pages/Careers'));
@@ -127,6 +129,7 @@ function appPage(pathname: string): React.ReactNode {
   if (pathname === '/app/compare') return <Compare />;
   if (pathname === '/app/talent') return <Talent />;
   if (pathname === '/app/sourcing') return <Sourcing />;
+  if (pathname === '/app/video') return <VideoInterviews />;
   if (pathname === '/app/automation') return <Automation />;
   m = matchPath('/app/talent/:dept', pathname);
   if (m) return <Talent dept={m.dept} />;
@@ -152,6 +155,15 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <Careers slug={m.slug} jobId={m.jobId} />
+      </Suspense>
+    );
+  }
+  // «مصاحبهٔ ویدئویی» — the candidate records answers here; the token is the key.
+  m = matchPath('/video/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <VideoRecord token={m.token} />
       </Suspense>
     );
   }

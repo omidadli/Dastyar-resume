@@ -63,6 +63,7 @@ import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '.
 import type { ReferralProgramInput, ReferralsPayload } from '../types/referrals';
 import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
 import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
+import type { PublicVideoInvite, VideoInvite, VideoOverview, VideoSettings } from '../types/video';
 import type {
   CalendarStatusPublic,
   EmailSettingsPublic,
@@ -629,6 +630,28 @@ export const api = {
       start: (token: string) => post<{ assessment: PublicAssessment }>(`/api/assessment/public/${encodeURIComponent(token)}/start`, {}),
       submit: (token: string, answers: Record<string, string | number>) =>
         post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
+    },
+  },
+  video: {
+    overview: (filter: { jobId?: string; resumeId?: string } = {}) => get<VideoOverview>(`/api/video${qs(filter)}`),
+    settings: (jobId: string) => get<{ settings: VideoSettings }>(`/api/video/settings?jobId=${encodeURIComponent(jobId)}`),
+    saveSettings: (b: { jobId: string } & Partial<VideoSettings>) => put<{ settings: VideoSettings }>('/api/video/settings', b),
+    create: (b: { resumeId: string; jobId?: string }) => post<{ invite: VideoInvite }>('/api/video/invites', b),
+    send: (id: string) => post<{ invite: VideoInvite; emailed: boolean }>(`/api/video/invites/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ invite: VideoInvite }>(`/api/video/invites/${encodeURIComponent(id)}/cancel`, {}),
+    review: (id: string, b: { rating?: number | null; note?: string }) =>
+      post<{ invite: VideoInvite }>(`/api/video/invites/${encodeURIComponent(id)}/review`, b),
+    viewed: (id: string) => post<{ invite: VideoInvite }>(`/api/video/invites/${encodeURIComponent(id)}/viewed`, {}),
+    remove: (id: string) => del<void>(`/api/video/invites/${encodeURIComponent(id)}`),
+    answerUrl: (id: string, questionId: string) =>
+      get<{ url: string; expiresAt: number }>(`/api/video/invites/${encodeURIComponent(id)}/answer/${encodeURIComponent(questionId)}`),
+    public: {
+      get: (token: string) => get<{ invite: PublicVideoInvite }>(`/api/video/public/${encodeURIComponent(token)}`, { anonymous: true }),
+      open: (token: string) => post<{ invite: PublicVideoInvite }>(`/api/video/public/${encodeURIComponent(token)}/open`, {}, { anonymous: true }),
+      answer: (token: string, b: { questionId: string; dataBase64: string; mimeType: string; durationMs: number }) =>
+        post<{ invite: PublicVideoInvite }>(`/api/video/public/${encodeURIComponent(token)}/answer`, b, { anonymous: true, timeoutMs: 120_000 }),
+      submit: (token: string) =>
+        post<{ invite: PublicVideoInvite; thanks: string }>(`/api/video/public/${encodeURIComponent(token)}/submit`, {}, { anonymous: true }),
     },
   },
   referrals: {

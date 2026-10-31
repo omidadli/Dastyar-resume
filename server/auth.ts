@@ -232,6 +232,31 @@ export function verifyFileSignature(resumeId: string, exp: number, inline: boole
   return expected.length === given.length && crypto.timingSafeEqual(expected, given);
 }
 
+/**
+ * «مصاحبهٔ ویدئویی» playback. A `<video>` element cannot send the session
+ * header, so the reviewer asks for a short-lived signed link instead — bound to
+ * that one answer, not to the workspace.
+ */
+const VIDEO_URL_TTL_MS = 30 * 60_000;
+
+function videoSignature(inviteId: string, questionId: string, exp: number): string {
+  return crypto.createHmac('sha256', appSecret()).update(`video.${inviteId}.${questionId}.${exp}`).digest('base64url');
+}
+
+export function signedVideoUrl(inviteId: string, questionId: string): { url: string; expiresAt: number } {
+  const exp = Date.now() + VIDEO_URL_TTL_MS;
+  const sig = videoSignature(inviteId, questionId, exp);
+  const qs = new URLSearchParams({ exp: String(exp), sig });
+  return { url: `/api/video/watch/${encodeURIComponent(inviteId)}/${encodeURIComponent(questionId)}?${qs.toString()}`, expiresAt: exp };
+}
+
+export function verifyVideoSignature(inviteId: string, questionId: string, exp: number, sig: string): boolean {
+  if (!Number.isFinite(exp) || exp < Date.now() || exp > Date.now() + VIDEO_URL_TTL_MS + 60_000) return false;
+  const expected = Buffer.from(videoSignature(inviteId, questionId, exp));
+  const given = Buffer.from(String(sig || ''));
+  return expected.length === given.length && crypto.timingSafeEqual(expected, given);
+}
+
 /** Full-backup downloads (/admin): a short-lived link bound to the admin who asked for it. */
 const BACKUP_URL_TTL_MS = 10 * 60_000;
 

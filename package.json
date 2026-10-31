@@ -23,6 +23,7 @@
     "test:portal-langs": "npm run build && tsx scripts/portal-langs.test.ts",
     "test:eeo": "npm run build && tsx scripts/eeo-api.test.ts",
     "test:scim": "npm run build && tsx scripts/scim-api.test.ts",
+    "test:video": "npm run build && tsx scripts/video-api.test.ts",
     "build:cloudflare": "npm run build && node scripts/cloudflare/prepare-assets.mjs",
     "test:backup": "tsx scripts/backup.test.ts",
     "test:cloudflare": "tsx scripts/cloudflare.test.ts",

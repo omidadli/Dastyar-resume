@@ -158,6 +158,10 @@ export type ActivityType =
   | 'survey.answered'
   | 'assessment.sent'
   | 'assessment.completed'
+  | 'video.invited'
+  | 'video.submitted'
+  | 'video.reviewed'
+  | 'video.cancelled'
   | 'settings.changed';
 
 export interface ActivityItem {

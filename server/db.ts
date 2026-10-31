@@ -57,6 +57,7 @@ import type { AutomationProposal, AutomationSettings } from '../src/types/automa
 import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
 import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
+import type { VideoAnswer, VideoInvite, VideoQuestion, VideoSettings } from '../src/types/video';
 import type { CandidateComment } from '../src/types/pipeline';
 import type { ApiKeyPublic, ApiScope, WebhookDeliveryPublic, WebhookEndpointPublic } from '../src/types/developer';
 import type { RetentionPolicy } from '../src/types/retention';
@@ -164,6 +165,10 @@ export interface StoreSnapshot {
   surveys?: SurveyInviteRow[];
   /** «آزمون و ارزیابی» — invitations, answers and scores. */
   assessments?: AssessmentInviteRow[];
+  /** «مصاحبهٔ ویدئویی» — invitations, questions and the recorded answers. */
+  videoInvites?: VideoInviteRow[];
+  /** Per-job video questions, keyed `<orgId>:<jobId>`. */
+  videoSettings?: Record<string, VideoSettings>;
   /** Team comments (@mentions) written on a candidate. */
   comments?: CommentRow[];
   /** API keys — only a SHA-256 hash of the key is ever stored. */
@@ -289,6 +294,17 @@ export type SchedulingLinkRow = SchedulingLink & { orgId: string; token: string 
 export type CommentRow = CandidateComment & { orgId: string };
 /** A cost row as stored: the workspace-facing record plus its tenant. */
 export type CostRow = CostEntry & { orgId: string };
+/**
+ * A «مصاحبهٔ ویدئویی» invitation. The token opens the candidate's page; the
+ * recorded files live in object storage under `videos/<org>/<invite>/`.
+ */
+export type VideoInviteRow = Omit<VideoInvite, 'url'> & {
+  orgId: string;
+  token: string;
+  /** questionId → how many takes have been recorded (the retake limit). */
+  takes: Record<string, number>;
+};
+
 /** A survey invitation plus the secret that opens its public page. */
 export type SurveyInviteRow = SurveyInvite & { orgId: string; token: string; expiresAtISO: string };
 
@@ -339,6 +355,8 @@ const schedulingLinks = new Map<string, SchedulingLinkRow>();
 const comments = new Map<string, CommentRow>();
 const surveys = new Map<string, SurveyInviteRow>();
 const assessments = new Map<string, AssessmentInviteRow>();
+const videoInvites = new Map<string, VideoInviteRow>();
+const videoSettings = new Map<string, VideoSettings>();
 const smsLog = new Map<string, SmsLogRow>();
 const apiKeys = new Map<string, ApiKeyRow>();
 const webhooks = new Map<string, WebhookEndpointRow>();
@@ -394,6 +412,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.comments?.forEach((x) => comments.set(x.id, x));
   snap.surveys?.forEach((x) => surveys.set(x.id, x));
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
+  snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
+  for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
   snap.smsLog?.forEach((x) => smsLog.set(x.id, x));
   snap.apiKeys?.forEach((x) => apiKeys.set(x.id, x));
   snap.webhooks?.forEach((x) => webhooks.set(x.id, x));
@@ -432,6 +452,8 @@ function clearMemory() {
   comments.clear();
   surveys.clear();
   assessments.clear();
+  videoInvites.clear();
+  videoSettings.clear();
   smsLog.clear();
   apiKeys.clear();
   webhooks.clear();
@@ -558,6 +580,8 @@ function snapshot(): StoreSnapshot {
     comments: Array.from(comments.values()),
     surveys: Array.from(surveys.values()),
     assessments: Array.from(assessments.values()),
+    videoInvites: Array.from(videoInvites.values()),
+    videoSettings: Object.fromEntries(videoSettings),
     smsLog: Array.from(smsLog.values()),
     apiKeys: Array.from(apiKeys.values()),
     webhooks: Array.from(webhooks.values()),
@@ -1050,6 +1074,8 @@ export function deleteOrg(id: string) {
   for (const [k, v] of comments) if (v.orgId === id) comments.delete(k);
   for (const [k, v] of surveys) if (v.orgId === id) surveys.delete(k);
   for (const [k, v] of assessments) if (v.orgId === id) assessments.delete(k);
+  for (const [k, v] of videoInvites) if (v.orgId === id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${id}/${k}/`); }
+  for (const k of Array.from(videoSettings.keys())) if (k.startsWith(`${id}:`)) videoSettings.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
@@ -2188,6 +2214,64 @@ export function saveAssessment(row: AssessmentInviteRow): AssessmentInviteRow {
   return row;
 }
 
+// -------------------------------------------------------- video interviews ----
+
+export function videoKeyOf(orgId: string, jobId: string): string {
+  return `${orgId}:${jobId}`;
+}
+
+/** Per-job video questions. `null` until HR saves a set for that opening. */
+export function getVideoSettings(orgId: string, jobId: string): VideoSettings | null {
+  return videoSettings.get(videoKeyOf(orgId, jobId)) || null;
+}
+
+export function saveVideoSettings(orgId: string, jobId: string, next: VideoSettings): VideoSettings {
+  videoSettings.set(videoKeyOf(orgId, jobId), next);
+  scheduleSave();
+  return next;
+}
+
+export function listVideoInvites(orgId: string, filter: { jobId?: string; resumeId?: string } = {}): VideoInviteRow[] {
+  return Array.from(videoInvites.values())
+    .filter((v) => v.orgId === orgId)
+    .filter((v) => (filter.jobId ? v.jobId === filter.jobId : true))
+    .filter((v) => (filter.resumeId ? v.resumeId === filter.resumeId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getVideoInvite(orgId: string, id: string): VideoInviteRow | null {
+  const row = videoInvites.get(id);
+  return row && row.orgId === orgId ? row : null;
+}
+
+export function findVideoInviteById(id: string): VideoInviteRow | null {
+  return videoInvites.get(id) || null;
+}
+
+export function findVideoInviteByToken(token: string): VideoInviteRow | null {
+  for (const row of videoInvites.values()) if (row.token === token) return row;
+  return null;
+}
+
+export function saveVideoInvite(row: VideoInviteRow): VideoInviteRow {
+  videoInvites.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deleteVideoInvite(orgId: string, id: string): boolean {
+  const row = getVideoInvite(orgId, id);
+  if (!row) return false;
+  videoInvites.delete(id);
+  scheduleSave();
+  return true;
+}
+
+/** The open (or finished) recording of one candidate — what HR opens again. */
+export function videoInviteFor(orgId: string, resumeId: string): VideoInviteRow | null {
+  return listVideoInvites(orgId, { resumeId }).find((v) => v.status === 'invited' || v.status === 'recording' || v.status === 'submitted') || null;
+}
+
 /** The test the candidate has not finished yet — the one to remind about. */
 export function openAssessmentFor(orgId: string, resumeId: string): AssessmentInviteRow | null {
   return listAssessments(orgId, { resumeId }).find((a) => a.status === 'sent' || a.status === 'started') || null;
@@ -2330,6 +2414,7 @@ export interface ErasedCounts {
   links: number;
   automations: number;
   assessments: number;
+  videos: number;
 }
 
 /**
@@ -2340,7 +2425,7 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
   for (const [k, v] of offers) if (v.orgId === orgId && v.resumeId === resumeId) { offers.delete(k); counts.offers++; }
@@ -2350,6 +2435,12 @@ export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | 
   for (const [k, v] of schedulingLinks) if (v.orgId === orgId && v.resumeId === resumeId) { schedulingLinks.delete(k); counts.links++; }
   for (const [k, v] of surveys) if (v.orgId === orgId && v.resumeId === resumeId) { surveys.delete(k); counts.surveys++; }
   for (const [k, v] of assessments) if (v.orgId === orgId && v.resumeId === resumeId) { assessments.delete(k); counts.assessments++; }
+  for (const [k, v] of videoInvites)
+    if (v.orgId === orgId && v.resumeId === resumeId) {
+      videoInvites.delete(k);
+      deletePrefixQuietly(`videos/${orgId}/${k}/`);
+      counts.videos++;
+    }
   for (const [k, v] of automationActions) if (v.orgId === orgId && v.resumeId === resumeId) { automationActions.delete(k); counts.automations++; }
   deleteResume(rec);
   counts.resumes = 1;
@@ -2567,6 +2658,8 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of comments) if (v.orgId === job.orgId && v.jobId === job.id) comments.delete(k);
   for (const [k, v] of surveys) if (v.orgId === job.orgId && v.jobId === job.id) surveys.delete(k);
   for (const [k, v] of assessments) if (v.orgId === job.orgId && v.jobId === job.id) assessments.delete(k);
+  for (const [k, v] of videoInvites) if (v.orgId === job.orgId && v.jobId === job.id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${job.orgId}/${k}/`); }
+  videoSettings.delete(`${job.orgId}:${job.id}`);
   for (const [k, v] of sourcingSearches) if (v.orgId === job.orgId && v.jobId === job.id) v.jobId = null;
 }
 
@@ -3513,6 +3606,12 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     comments: Array.isArray(raw.comments)
       ? raw.comments.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && isStr(c.resumeId) && isStr(c.body))
       : [],
+    videoInvites: Array.isArray(raw.videoInvites)
+      ? raw.videoInvites.filter(
+          (v: any) => v && isStr(v.id) && isStr(v.orgId) && isStr(v.token) && Array.isArray(v.questions) && Array.isArray(v.answers)
+        )
+      : undefined,
+    videoSettings: raw.videoSettings && typeof raw.videoSettings === 'object' && !Array.isArray(raw.videoSettings) ? raw.videoSettings : undefined,
     assessments: Array.isArray(raw.assessments)
       ? raw.assessments.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.token) && isStr(a.resumeId) && isStr(a.templateId))
       : undefined,

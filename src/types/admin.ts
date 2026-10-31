@@ -95,6 +95,165 @@ export interface AiCallLog {
 
 export type AiPurpose = 'evaluate' | 'deep' | 'understand' | 'calibrate' | 'message' | 'test' | 'lab' | 'other';
 
+// ----------------------------------------------------- outside connections ----
+/**
+ * Deployment-level credentials for the two connections that cannot be set per
+ * workspace: the LinkedIn-compatible sourcing provider (licensed at deployment
+ * level) and the Google OAuth client (registered once for this server).
+ * Everything a workspace needs on its own — the SMTP mailbox and each
+ * workspace's Google account — is connected from «تنظیمات ← اتصال‌ها».
+ *
+ * Both can also come from the environment (LINKEDIN_API_URL…, GOOGLE_CLIENT_ID…);
+ * the value saved in /admin wins, and the panel shows which one is in effect.
+ */
+
+export type ConnectionSource = 'admin' | 'env';
+
+/**
+ * How the sourcing provider is spoken to:
+ *  - contract: the small JSON contract documented in docs/CONNECT-LINKEDIN.md
+ *    (any licensed provider or your own gateway).
+ *  - apify: an Apify actor (e.g. harvestapi/linkedin-profile-search) run through
+ *    the Apify API. Its search input cannot filter by «open to work», so full
+ *    profiles are fetched and only those reporting openToWork are kept.
+ */
+export type SourcingProviderKind = 'contract' | 'apify';
+
+export interface SourcingConnectionPublic {
+  /** A provider endpoint + token are in effect (from /admin or the environment). */
+  configured: boolean;
+  source: ConnectionSource | null;
+  kind: SourcingProviderKind;
+  /** Apify actor id (only for kind = apify). */
+  actorId: string;
+  /** Apify: the run is asynchronous — a search may report «running» for a while. */
+  async: boolean;
+  /** Host only — the endpoint path is not a secret, the token never leaves the server. */
+  endpointHost: string | null;
+  endpointUrl: string;
+  providerLabel: string;
+  /** «سقف جست‌وجوی روزانه» (0 = بی‌سقف) — protects against a surprise invoice. */
+  dailyLimit: number;
+  /** Example: «AIza…9xQ2» — never the token itself. */
+  tokenHint: string;
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  /** True when the value is read-only because it comes from the environment. */
+  fromEnv: boolean;
+}
+
+export interface GoogleConnectionPublic {
+  configured: boolean;
+  source: ConnectionSource | null;
+  clientId: string;
+  /** Never the secret — only its last four characters. */
+  secretHint: string;
+  hasSecret: boolean;
+  calendarId: string;
+  /** Overrides the redirect URI derived from the request (rarely needed). */
+  redirectUri: string;
+  /** The URI to register in the Google Cloud console for this request's origin. */
+  effectiveRedirectUri: string;
+  /** openid, email, calendar.events */
+  scopes: string[];
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  fromEnv: boolean;
+}
+
+/**
+ * «صندوق ایمیل مشترک سامانه» — one mailbox for every workspace that has not
+ * connected its own. Entered in /admin; never shown with the password.
+ */
+export interface SharedEmailPublic {
+  configured: boolean;
+  source: ConnectionSource | null;
+  host: string | null;
+  port: number | null;
+  secure: boolean;
+  username: string | null;
+  fromName: string;
+  fromAddress: string | null;
+  replyTo: string | null;
+  hasPassword: boolean;
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  fromEnv: boolean;
+}
+
+/** «خط پیامک مشترک سامانه» — the same idea for the Iranian SMS gateway. */
+export interface SharedSmsPublic {
+  configured: boolean;
+  source: ConnectionSource | null;
+  provider: 'kavenegar' | 'smsir' | null;
+  sender: string | null;
+  hasApiKey: boolean;
+  updatedAtISO: string | null;
+  updatedBy: string | null;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+  fromEnv: boolean;
+}
+
+export interface ConnectionsPayload {
+  sourcing: SourcingConnectionPublic;
+  google: GoogleConnectionPublic;
+  email: SharedEmailPublic;
+  sms: SharedSmsPublic;
+  /** Both docs are served from the repository, absolute paths are not needed. */
+  docs: { sourcing: string; google: string };
+}
+
+/**
+ * One row of «همه را بررسی کن»: `ok` is null when the check could not be made
+ * (nothing configured, no route to the provider, or a per-workspace secret that
+ * needs a real send). Null is never displayed as «سالم».
+ */
+export interface ConnectionHealthCheck {
+  key: 'sourcing' | 'google' | 'email' | 'sms' | 'calendar' | 'chat' | 'sso' | 'ai';
+  title: string;
+  configured: boolean;
+  ok: boolean | null;
+  message: string;
+  detail: string | null;
+}
+
+export interface ConnectionsHealth {
+  atISO: string;
+  checks: ConnectionHealthCheck[];
+  adoption: { orgs: number; email: number; calendar: number; sms: number; chat: number; sso: number };
+}
+
+export interface SourcingConnectionInput {
+  kind?: SourcingProviderKind;
+  endpointUrl?: string;
+  /** Only sent to set/replace the token. */
+  token?: string;
+  providerLabel?: string;
+  /** Apify only, e.g. `harvestapi/linkedin-profile-search`. */
+  actorId?: string;
+  /** Daily search cap (0 = unlimited). Omitted keeps the current value. */
+  dailyLimit?: number;
+}
+
+export interface GoogleConnectionInput {
+  clientId?: string;
+  /** Only sent to set/replace the secret. */
+  clientSecret?: string;
+  calendarId?: string;
+  redirectUri?: string;
+}
+
 // ----------------------------------------------------------- system config ----
 
 export type BannerTone = 'info' | 'warning' | 'success';
@@ -246,6 +405,8 @@ export interface AdminUserRow {
   createdAtISO: string;
   lastLoginISO: string | null;
   sessions: number;
+  /** «ورود دومرحله‌ای» is on for this account. */
+  twoFactorEnabled: boolean;
 }
 
 export interface AdminMe {

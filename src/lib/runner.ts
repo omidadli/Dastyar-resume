@@ -46,6 +46,8 @@ export interface RunResult {
   localCount: number;
   unjudgeable: number;
   errors: number;
+  /** Candidates this department had already screened before («رزومهٔ تکراری»). */
+  duplicates: number;
 }
 
 /**
@@ -80,7 +82,7 @@ export async function runJobAnalysis(
   const extractionByItem = new Map<string, TextExtractionResult>();
   let processed = 0;
   let extractedCount = 0;
-  const result: RunResult = { total, aiCount: 0, localCount: 0, unjudgeable: 0, errors: 0 };
+  const result: RunResult = { total, aiCount: 0, localCount: 0, unjudgeable: 0, errors: 0, duplicates: 0 };
   let phase: 'extracting' | 'evaluating' | 'calibrating' | 'done' = 'extracting';
   /** Files being evaluated right now: item id → file name (names may repeat). */
   const active = new Map<string, string>();
@@ -261,6 +263,7 @@ export async function runJobAnalysis(
             );
             item.recordId = record.id;
             item.category = record.category;
+            if (record.novelty === 'duplicate') result.duplicates++;
             result.unjudgeable++;
           } catch (err: any) {
             if (err?.name === 'AbortError') throw err;
@@ -288,6 +291,7 @@ export async function runJobAnalysis(
           item.recordId = record.id;
           item.category = record.category;
           item.score = record.score;
+          if (record.novelty === 'duplicate') result.duplicates++;
           if (record.category === 'UNJUDGEABLE') {
             item.status = 'unjudgeable';
             item.unjudgeableReason = record.unjudgeableReason || 'اطلاعات رزومه برای قضاوت کافی نیست.';

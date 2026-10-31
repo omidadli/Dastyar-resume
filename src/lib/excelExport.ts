@@ -33,6 +33,9 @@ export async function exportJobToExcel(job: Job) {
     { مورد: 'تطابق پایین', مقدار: s.reject },
     { مورد: 'اطلاعات ناکافی / خطا', مقدار: s.unjudgeable + s.error },
     { مورد: 'تصمیم‌ها (تأیید / رد / نیاز به بررسی)', مقدار: `${toPersianDigits(s.approved)} / ${toPersianDigits(s.rejected)} / ${toPersianDigits(s.reviewDecision)}` },
+    { مورد: 'رزومه‌های تازه', مقدار: records.filter((r) => r.novelty === 'new').length },
+    { مورد: 'رزومه‌های تکراری (سابقهٔ همین دپارتمان)', مقدار: records.filter((r) => r.novelty === 'duplicate').length },
+    { مورد: 'بدون امکان تطبیق تکرار', مقدار: records.filter((r) => !r.novelty || r.novelty === 'unknown').length },
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summary), 'خلاصه');
 
@@ -40,6 +43,8 @@ export async function exportJobToExcel(job: Job) {
   const rows = records.map((r, i) => ({
     ردیف: i + 1,
     نام: candidateName(r),
+    'وضعیت تکرار': r.novelty === 'duplicate' ? 'تکراری' : r.novelty === 'new' ? 'جدید' : 'نامشخص',
+    'تکراری با': r.duplicateOf ? `${r.duplicateOf.roleTitle || 'همین دپارتمان'} — ${faDate(r.duplicateOf.createdAtISO)}` : '—',
     'میزان تطابق': matchMeta(r.category).label,
     'درصد تطابق': r.category === 'UNJUDGEABLE' || r.category === 'ERROR' ? '' : r.score,
     'موتور تحلیل': r.engine === 'local' ? 'موتور محلی (غیرهوشمند)' : r.engine === 'ai' ? 'هوش مصنوعی' : '—',
@@ -59,6 +64,7 @@ export async function exportJobToExcel(job: Job) {
     'تاریخ تصمیم': r.decidedAtISO ? faDate(r.decidedAtISO) : '—',
     'یادداشت تصمیم': r.decisionNote || '—',
     'بانک استعداد': r.inBank ? 'بله' : 'خیر',
+    منبع: r.source?.kind === 'linkedin' ? `LinkedIn (${r.source.profileUrl})` : 'بارگذاری رزومه',
     فایل: r.fileName,
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);

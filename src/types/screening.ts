@@ -3,6 +3,8 @@
 // Used by both the React client and the Express server.
 // ================================================================
 
+import type { PipelineStage } from './pipeline';
+
 export type Recommendation = 'INTERVIEW' | 'REVIEW' | 'REJECT';
 /**
  * Internal AI category codes. They are never shown raw in the UI: the client
@@ -207,6 +209,11 @@ export interface Job {
   criteriaSource: CriteriaSource;
   status: JobStatus;
   analysisStatus: AnalysisStatus;
+  /** Listed on the public career portal (`/careers/<slug>`). */
+  isPublic?: boolean;
+  publishedAtISO?: string | null;
+  /** The board's columns for this opening (defaults applied when absent). */
+  stages?: PipelineStage[];
   stats: JobStats;
   createdAtJalali: string;
   createdAtISO: string;
@@ -229,6 +236,27 @@ export interface AnalysisHistoryEntry {
   mode?: AnalysisMode;
 }
 
+/** Where a candidate came from — set for sourced profiles, null for uploads. */
+export interface ResumeSource {
+  /**
+   * Where the candidate came from: `careers` = the public career portal,
+   * `referral` = a colleague's referral link, `linkedin` = a sourced profile or
+   * a CSV export.
+   */
+  kind: 'linkedin' | 'careers' | 'referral';
+  profileUrl: string;
+  headline: string;
+  company: string | null;
+  location: string;
+  openToWork: boolean;
+  /** The sourcing search that found this profile. */
+  searchId: string | null;
+  /** For `referral`: the colleague the candidate names (free text, never resolved). */
+  referrer?: string | null;
+  /** «چطور با ما آشنا شدید؟» — kept as answered, for the source-of-hire report. */
+  heardFrom?: string | null;
+}
+
 export interface ResumeRecord {
   id: string;
   jobId: string;
@@ -238,9 +266,13 @@ export interface ResumeRecord {
   departmentName: string;
   roleTitle: string | null;
   fileName: string;
+  /** SHA-256 of the uploaded file — one of the duplicate signals. */
+  fileHash?: string | null;
   filePath: string | null;
   fileSize: number | null;
   extractedText: string;
+  /** Present when the candidate was added from a sourcing search. */
+  source?: ResumeSource | null;
   unjudgeableReason: string | null;
   errorMessage: string | null;
 
@@ -267,6 +299,14 @@ export interface ResumeRecord {
   rankInCategory: number | null;
   analysisHistory: AnalysisHistoryEntry[];
 
+  /**
+   * Duplicate screening: compared only against earlier resumes of the same
+   * workspace and department («اولین غربالگری»). `unknown` = no identifying
+   * signal yet (e.g. unreadable file), so neither «تکراری» nor «جدید».
+   */
+  novelty?: ResumeNovelty;
+  duplicateOf?: DuplicateLink | null;
+
   /** Talent pool («بانک استعداد») */
   inBank: boolean;
   bankDepartmentId: string | null;
@@ -274,6 +314,9 @@ export interface ResumeRecord {
   bankTags: string[];
   addedToBankAtJalali: string | null;
   addedToBankAtISO: string | null;
+
+  /** Which column of the pipeline board this candidate sits in. */
+  stageId?: string | null;
 
   messageStatus: 'none' | 'sent';
   lastMessagedAtJalali: string | null;
@@ -289,6 +332,14 @@ export interface ResumeRecord {
   createdAtISO: string;
   createdAtJalali: string;
   updatedAtISO: string;
+  /** Set when the retention policy stripped the personal data but kept the numbers. */
+  anonymizedAtISO?: string | null;
+  /**
+   * The server removed the identity from this copy because «غربالگری بی‌طرف»
+   * is on. The record on disk still has it; `POST /resumes/:id/reveal` returns
+   * it once, and writes the reveal to the workspace history.
+   */
+  blindHidden?: boolean;
 }
 
 /** Lightweight list shape: the extracted resume text stays on the server. */
@@ -300,6 +351,18 @@ export interface PagedResult<T> {
   pageSize: number;
   total: number;
   totalPages: number;
+}
+
+export type ResumeNovelty = 'new' | 'duplicate' | 'unknown';
+export type DuplicateReason = 'file' | 'text' | 'email' | 'phone';
+export type NoveltyFilter = 'all' | 'new' | 'duplicate' | 'unknown';
+
+export interface DuplicateLink {
+  resumeId: string;
+  jobId: string;
+  roleTitle: string | null;
+  createdAtISO: string;
+  reason: DuplicateReason;
 }
 
 export type MatchFilter = 'all' | 'high' | 'review' | 'low' | 'insufficient';
@@ -317,12 +380,17 @@ export interface ResumeQuery {
   fromJalali?: string;
   toJalali?: string;
   sort?: ResumeSort;
+  /** «جدید»، «تکراری» یا فاقد اطلاعات کافی برای تطبیق. */
+  novelty?: NoveltyFilter;
   page?: number;
   pageSize?: number;
 }
 
 export interface ResumeCounts {
   all: number;
+  novel: number;
+  duplicate: number;
+  unknownNovelty: number;
   high: number;
   review: number;
   low: number;

@@ -1,0 +1,22 @@
+{
+  "name": "هویدا — سامانه جذب و استخدام",
+  "short_name": "هویدا",
+  "description": "غربالگری رزومه، پورتال شغلی، مصاحبه، پیشنهاد شغلی و گزارش‌های استخدام در یک جا.",
+  "lang": "fa",
+  "dir": "rtl",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F7F8F7",
+  "theme_color": "#176F30",
+  "icons": [
+    { "src": "/brand/hovida-app-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "میزکار", "url": "/app" },
+    { "name": "فرصت‌های شغلی", "url": "/app/jobs" },
+    { "name": "اتوماسیون جذب", "url": "/app/automation" }
+  ]
+}

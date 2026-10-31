@@ -19,6 +19,7 @@ import {
   Sparkles,
   Wrench,
   UserRound,
+  UserSearch,
   Users,
   X,
   type LucideIcon,
@@ -50,6 +51,8 @@ const NAV: NavItem[] = [
   { to: '/app', label: 'داشبورد', icon: LayoutDashboard, match: (p) => p === '/app' || p === '/app/' },
   { to: '/app/jobs', label: 'فرصت‌های شغلی', icon: BriefcaseBusiness, match: (p) => p.startsWith('/app/jobs') },
   { to: '/app/candidates', label: 'رزومه‌ها', icon: Users, match: (p) => p.startsWith('/app/candidates') || p.startsWith('/app/compare') },
+  { to: '/app/sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch, match: (p) => p.startsWith('/app/sourcing') },
+  { to: '/app/automation', label: 'اتوماسیون جذب', icon: Sparkles, match: (p) => p.startsWith('/app/automation') },
   { to: '/app/talent', label: 'بانک استعداد', icon: Library, match: (p) => p.startsWith('/app/talent') },
   { to: '/app/reports', label: 'گزارش‌ها', icon: BarChart3, match: (p) => p.startsWith('/app/reports') },
   { to: '/app/settings', label: 'تنظیمات', icon: Settings, match: (p) => p.startsWith('/app/settings') },
@@ -226,7 +229,7 @@ function MobileNav({ onMore, moreOpen }: { onMore: () => void; moreOpen: boolean
     {
       label: 'بیشتر',
       icon: MenuIcon,
-      active: ['/app/talent', '/app/reports', '/app/settings'].some((p) => pathname.startsWith(p)),
+      active: ['/app/talent', '/app/sourcing', '/app/reports', '/app/settings'].some((p) => pathname.startsWith(p)),
       onClick: onMore,
     },
   ];
@@ -303,6 +306,7 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div className="p-3 grid gap-1">
           {[
             { to: '/app/jobs/new', label: 'ایجاد فرصت شغلی', icon: Plus },
+            { to: '/app/sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch },
             { to: '/app/talent', label: 'بانک استعداد', icon: Library },
             { to: '/app/reports', label: 'گزارش‌ها', icon: BarChart3 },
             { to: '/app/settings', label: 'تنظیمات', icon: Settings },

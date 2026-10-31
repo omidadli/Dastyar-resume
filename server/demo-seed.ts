@@ -13,8 +13,14 @@ import crypto from 'crypto';
 import * as db from './db';
 import { hashPassword, DEMO_TTL_MS } from './auth';
 import { buildTemplateUnderstanding } from './ai/screening';
-import type { CandidateEvaluation, DecisionStatus, Recommendation } from '../src/types/screening';
+import type { CandidateEvaluation, DecisionStatus, Recommendation, ResumeRecord } from '../src/types/screening';
 import type { Department } from '../src/types/app';
+import type { CostKind } from '../src/types/reports';
+import { scoreAnswers } from './assessments';
+import { templateById } from './assessment-bank';
+import type { InterviewFeedback } from '../src/types/pipeline';
+import { formatJalaliDate } from '../src/utils/jalali';
+import { tehranJalaliOf } from './tehran-time';
 
 // ---------------------------------------------------------------------------
 // A tiny, dependency-free PDF writer (single page, Helvetica, ASCII text).
@@ -89,6 +95,8 @@ interface DemoCandidate {
   decidedAgo?: number;
   bank?: { dept: string; note: string };
   msg?: boolean;
+  /** Approved and moved to «استخدام‌شده» — makes time-to-hire and cost-per-hire real. */
+  hired?: boolean;
   deep?: boolean;
   local?: boolean;
   unjudgeable?: string;
@@ -306,6 +314,18 @@ const JOBS: DemoJob[] = [
         tags: ['فروش حضوری', 'چیدمان', 'آرایشی‌بهداشتی'],
       },
       {
+        // Same person, same department, sent again a week later with a new file:
+        // the demo shows «تکراری» and points back to the first screening.
+        name: 'سعید جعفری', file: 'saeed-jafari-cv-1404.pdf', role: 'کارشناس فروش', years: 4, edu: 'کارشناسی مدیریت',
+        city: 'تهران', phone: '۰۹۱۲۸۸۸۹۹۰۰', email: 'saeed.jafari@example.com',
+        skills: ['فروش حضوری', 'چیدمان فروشگاهی', 'اکسل'], salary: '۳۴ میلیون تومان', score: 75, rec: 'REVIEW',
+        summary: 'نسخهٔ به‌روزشدهٔ همان رزومهٔ قبلی است (حقوق درخواستی تغییر کرده) و برای همین دپارتمان دوباره ارسال شده؛ کاندید تازه‌ای نیست.',
+        why: 'سابقه و مهارت‌ها همان رزومهٔ ثبت‌شده در غربالگری قبلی این دپارتمان است.',
+        s: [['سابقه فروش حضوری', '«چهار سال فروش حضوری»']],
+        w: [['تکرار درخواست برای همین دپارتمان', '«همین رزومه پیش‌تر ثبت شده بود»', 'minor']],
+        tags: ['فروش حضوری', 'تکراری'],
+      },
+      {
         name: 'مهدی قربانی', file: 'mahdi-ghorbani.txt', role: 'ویزیتور', years: 7, edu: 'دیپلم بازرگانی',
         city: 'اصفهان', phone: '09131112244', email: null, skills: ['ویزیت', 'پخش مویرگی', 'مسیربندی'], salary: '۳۰ میلیون تومان',
         score: 72, rec: 'REVIEW',
@@ -453,7 +473,7 @@ const JOBS: DemoJob[] = [
         ],
         w: [['ممکن است سطح نقش برایش پایین باشد', '«سرپرست تیم زیرساخت از ۱۴۰۱»', 'minor']],
         tags: ['زیرساخت', 'لینوکس', 'مانیتورینگ', 'ارشد'],
-        decision: 'approved', by: 'hossein', decidedAgo: 1, msg: true, deep: true,
+        decision: 'approved', by: 'hossein', decidedAgo: 1, msg: true, deep: true, hired: true,
       },
       {
         name: 'یاسمن طاهری', file: 'yasaman-taheri.txt', role: 'کارشناس شبکه', years: 4, edu: 'کارشناسی مهندسی کامپیوتر',
@@ -516,7 +536,7 @@ const JOBS: DemoJob[] = [
         s: [['نتایج عددی کمپین', '«افزایش ۴۰ درصدی ترافیک ارگانیک در ۸ ماه»']],
         w: [['تجربه مدیریت بودجه کلان تبلیغات ذکر نشده', NONE, 'minor']],
         tags: ['دیجیتال مارکتینگ', 'SEO', 'محتوا'],
-        decision: 'approved', by: 'maryam', decidedAgo: 40, msg: true,
+        decision: 'approved', by: 'maryam', decidedAgo: 40, msg: true, hired: true,
       },
       {
         name: 'مینا کرمی', file: 'mina-karami.txt', role: 'کارشناس بازاریابی', years: 3, edu: 'کارشناسی ارشد مدیریت کسب‌وکار',
@@ -651,6 +671,9 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
   db.logActivity(org.id, actor('maryam'), 'member.added', `«${people.you.name}» را به تیم اضافه کرد`, { at: daysAgo(59, 1) });
 
   const dept = (id: string): Department => org.departments.find((d) => d.id === id) || org.departments[org.departments.length - 1];
+  const created: { id: string; title: string; deptId: string }[] = [];
+  /** Candidates the walkthrough needs by name (scorecards, interviews, notes). */
+  const peopleByName = new Map<string, { rec: ResumeRecord; jobId: string; jobTitle: string; criteria: { id: string; title: string }[] }>();
 
   for (const spec of JOBS) {
     const d = dept(spec.deptId);
@@ -672,6 +695,7 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
       daysAgo(spec.createdAgo)
     );
     db.logActivity(org.id, actor(spec.by), 'job.created', `فرصت شغلی «${spec.title}» را ایجاد کرد`, { jobId: job.id, at: daysAgo(spec.createdAgo) });
+    created.push({ id: job.id, title: spec.title, deptId: spec.deptId });
 
     let i = 0;
     for (const c of spec.candidates) {
@@ -727,6 +751,20 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
             : `«${c.name}» را در وضعیت «نیاز به بررسی» گذاشت`;
         db.logActivity(org.id, actor(c.by || 'you'), 'decision', verb, { jobId: job.id, resumeId: rec.id, at: when });
       }
+      peopleByName.set(c.name || c.file, {
+        rec,
+        jobId: job.id,
+        jobTitle: spec.title,
+        criteria: (understanding.criteria || []).slice(0, 2).map((k) => ({ id: k.id, title: k.title })),
+      });
+      if (c.hired) {
+        db.setStage(rec, 'stage_hired');
+        db.logActivity(org.id, actor(c.by || 'you'), 'stage.moved', `«${c.name}» را به ستون «استخدام‌شده» برد`, {
+          jobId: job.id,
+          resumeId: rec.id,
+          at: daysAgo(Math.max(0, (c.decidedAgo ?? 1) - 0.1)),
+        });
+      }
       if (c.bank) {
         const when = daysAgo(Math.max(0, (c.decidedAgo ?? spec.createdAgo - 1) - 0.2));
         const bd = dept(c.bank.dept);
@@ -757,6 +795,194 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
     }
     job.updatedAtISO = daysAgo(Math.max(0, spec.createdAgo - 3)).toISOString();
   }
+
+  // «هزینهٔ هر استخدام»: a small, believable budget. Money is only ever what a
+  // human typed — here the demo workspace's own numbers, not a hidden estimate.
+  const costSpecs: { kind: CostKind; amount: number; days: number; job?: number; note: string }[] = [
+    { kind: 'advertising', amount: 18_000_000, days: 34, job: 3, note: 'آگهی جاب‌ویژن و ایران‌تلنت، ۳۰ روز' },
+    { kind: 'advertising', amount: 12_500_000, days: 22, job: 4, note: 'آگهی اینستاگرام و لینکدین' },
+    { kind: 'agency', amount: 45_000_000, days: 20, note: 'دستمزد ریکروتر برای نقش‌های فنی' },
+    { kind: 'tools', amount: 9_600_000, days: 30, note: 'اشتراک سالانهٔ ابزار سنجش' },
+    { kind: 'referral', amount: 5_000_000, days: 12, job: 3, note: 'پاداش معرفی همکار' },
+    { kind: 'interview', amount: 3_200_000, days: 8, job: 4, note: 'پذیرایی و جایگزین شیفت روز مصاحبه' },
+  ];
+  for (const c of costSpecs) {
+    const target = c.job !== undefined ? created[c.job] : undefined;
+    db.addCost(
+      org.id,
+      {
+        kind: c.kind,
+        amount: c.amount,
+        atISO: daysAgo(c.days).toISOString(),
+        jobId: target?.id ?? null,
+        jobTitle: target?.title ?? null,
+        note: c.note,
+      },
+      people.maryam.name
+    );
+  }
+  // Scorecards, notes and interviews: the collaboration the team report counts
+  // and the hours the cost estimate is built from. All backdated like the rest.
+  const scorecards: { name: string; reviewer: Who; days: number; recommendation: InterviewFeedback['recommendation']; notes: string }[] = [
+    { name: 'شیما رحیمی', reviewer: 'hossein', days: 2, recommendation: 'yes', notes: 'روی پایداری و مستندسازی مسلط است؛ برای مصاحبهٔ نهایی مناسب است.' },
+    { name: 'سارا محمدی', reviewer: 'maryam', days: 1, recommendation: 'strong_yes', notes: 'دقیقاً همان تجربهٔ جذب در محیط تولیدی که لازم داریم.' },
+    { name: 'نیلوفر شمس', reviewer: 'you', days: 41, recommendation: 'yes', notes: 'نتایج کمپین‌ها عددی است؛ بودجهٔ تبلیغات را باید پرسید.' },
+  ];
+  for (const sc of scorecards) {
+    const found = peopleByName.get(sc.name);
+    if (!found) continue;
+    const at = daysAgo(sc.days, 2);
+    db.saveFeedback({
+      id: db.uid('fb'),
+      orgId: org.id,
+      interviewId: null,
+      resumeId: found.rec.id,
+      jobId: found.jobId,
+      reviewerId: people[sc.reviewer].id,
+      reviewerName: people[sc.reviewer].name,
+      recommendation: sc.recommendation,
+      criteria: found.criteria.map((k, i) => ({ criterionId: k.id, title: k.title, score: i === 0 ? 5 : 4, note: '' })),
+      notes: sc.notes,
+      atISO: at.toISOString(),
+      atJalali: formatJalaliDate(tehranJalaliOf(at), true),
+    });
+    db.logActivity(org.id, actor(sc.reviewer), 'scorecard.added', `برای «${sc.name}» کارت ارزیابی ثبت کرد`, {
+      jobId: found.jobId,
+      resumeId: found.rec.id,
+      at,
+    });
+  }
+
+  const notes: { name: string; author: Who; days: number; body: string }[] = [
+    { name: 'سارا محمدی', author: 'maryam', days: 30, body: 'برای مصاحبهٔ دوم، نمونهٔ واقعی از کاهش زمان استخدام را بخواهیم.' },
+    { name: 'شیما رحیمی', author: 'hossein', days: 2, body: 'دسترسی به سرور آزمایشی برای آزمون عملی هماهنگ شد.' },
+  ];
+  for (const n of notes) {
+    const found = peopleByName.get(n.name);
+    if (!found) continue;
+    const at = daysAgo(n.days, 4);
+    db.saveComment({
+      id: db.uid('cm'),
+      orgId: org.id,
+      resumeId: found.rec.id,
+      jobId: found.jobId,
+      authorId: people[n.author].id,
+      authorName: people[n.author].name,
+      body: n.body,
+      mentions: [],
+      atISO: at.toISOString(),
+      atJalali: formatJalaliDate(tehranJalaliOf(at), true),
+    });
+    db.logActivity(org.id, actor(n.author), 'comment.added', `روی پروندهٔ «${n.name}» یادداشت گذاشت`, {
+      jobId: found.jobId,
+      resumeId: found.rec.id,
+      at,
+    });
+  }
+
+  const interviewSpecs: { name: string; interviewer: Who; days: number; duration: number; title: string }[] = [
+    { name: 'شیما رحیمی', interviewer: 'hossein', days: 2, duration: 60, title: 'مصاحبهٔ فنی زیرساخت' },
+    { name: 'نیلوفر شمس', interviewer: 'you', days: 42, duration: 45, title: 'مصاحبهٔ بازاریابی دیجیتال' },
+  ];
+  for (const iv of interviewSpecs) {
+    const found = peopleByName.get(iv.name);
+    if (!found) continue;
+    const at = daysAgo(iv.days, -3);
+    const who = people[iv.interviewer];
+    db.saveInterview({
+      id: db.uid('iv'),
+      orgId: org.id,
+      jobId: found.jobId,
+      jobTitle: found.jobTitle,
+      resumeId: found.rec.id,
+      candidateName: iv.name,
+      candidateEmail: found.rec.contact?.email || null,
+      title: iv.title,
+      startsAtISO: at.toISOString(),
+      durationMin: iv.duration,
+      timezone: 'Asia/Tehran',
+      interviewerIds: [who.id],
+      interviewerNames: [who.name],
+      interviewerEmails: [who.email],
+      location: 'اتاق جلسات ۲',
+      notes: '',
+      calendarEventId: null,
+      calendarHtmlLink: null,
+      meetLink: null,
+      inviteSentTo: found.rec.contact?.email || null,
+      status: 'scheduled',
+      createdBy: who.id,
+      createdByName: who.name,
+      createdAtISO: at.toISOString(),
+      createdAtJalali: formatJalaliDate(tehranJalaliOf(at), true),
+    });
+  }
+
+  // «آزمون و ارزیابی»: one keyed test and one behavioural profile, plus a link
+  // that is still open — so the panel has a result and a pending state on day one.
+  const demoPeople = Array.from(peopleByName.values());
+  const pick = (needle: string) => demoPeople.find((p) => p.jobTitle.includes(needle)) || demoPeople[0];
+  const answerSet = (templateId: string, strength: 'strong' | 'medium') => {
+    const tpl = templateById(templateId)!;
+    const answers: Record<string, string | number> = {};
+    for (const q of tpl.questions) {
+      if (q.type === 'single') {
+        const ranked = [...q.options].sort((a, b) => b.score - a.score);
+        answers[q.id] = (strength === 'strong' ? ranked[0] ?? ranked[0] : ranked[1] ?? ranked[0]).id;
+      } else {
+        answers[q.id] = strength === 'strong' ? (q.reverse ? 2 : 5) : q.reverse ? 4 : 3;
+      }
+    }
+    return { tpl, answers, scored: scoreAnswers(tpl, answers) };
+  };
+  const seedAssessment = (target: ReturnType<typeof pick>, templateId: string, strength: 'strong' | 'medium', days: number, status: 'completed' | 'sent' | 'started') => {
+    const { tpl, answers, scored } = answerSet(templateId, strength);
+    const created = daysAgo(days);
+    const email = target.rec.contact?.email || null;
+    db.saveAssessment({
+      id: db.uid('asm'),
+      orgId: org.id,
+      token: crypto.randomBytes(18).toString('base64url'),
+      resumeId: target.rec.id,
+      jobId: target.jobId,
+      jobTitle: target.jobTitle,
+      templateId: tpl.id,
+      templateName: tpl.name,
+      kind: tpl.kind,
+      candidateName: target.rec.candidateName || null,
+      candidateEmail: email,
+      status,
+      source: 'hovida',
+      createdAtISO: created.toISOString(),
+      sentAtISO: created.toISOString(),
+      startedAtISO: status === 'sent' ? null : daysAgo(days, -1).toISOString(),
+      completedAtISO: status === 'completed' ? daysAgo(days, -2).toISOString() : null,
+      expiresAtISO: new Date(created.getTime() + 14 * 86_400_000).toISOString(),
+      score: status === 'completed' ? scored.score : null,
+      band: status === 'completed' ? scored.band : null,
+      dimensions: status === 'completed' ? scored.dimensions : null,
+      answeredCount: status === 'completed' ? tpl.questions.length : status === 'started' ? 2 : 0,
+      questionCount: tpl.questions.length,
+      note: null,
+      answers: status === 'completed' ? answers : null,
+    });
+    if (status === 'completed') {
+      db.logActivity(org.id, null, 'assessment.completed', `آزمون «${tpl.name}» را تکمیل کرد${scored.score !== null ? ` — نمرهٔ ${scored.score}` : ''}`, {
+        jobId: target.jobId,
+        resumeId: target.rec.id,
+        at: daysAgo(days, -2),
+      });
+    }
+  };
+  if (demoPeople.length) {
+    seedAssessment(pick('جذب'), 'situational-recruiting', 'strong', 6, 'completed');
+    seedAssessment(pick('نرم'), 'behavioral-core', 'medium', 4, 'completed');
+    seedAssessment(pick('شبکه'), 'work-sample-support', 'strong', 1, 'sent');
+  }
+
+  // The internal rate is entered like a real workspace would: the page adds the
+  // cost of recorded hours only because someone typed this number.
+  db.setCostAssumption(org.id, { hourlyRate: 320_000, minutesPerScorecard: 25, minutesPerComment: 5, minutesPerDecision: 10 });
 
   // A few teammate actions stay "unread" so notifications have something to show.
   db.updateUser(people.you.id, { lastSeenActivityISO: daysAgo(2.5).toISOString(), lastLoginISO: new Date().toISOString() });

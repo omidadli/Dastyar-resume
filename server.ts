@@ -9,7 +9,7 @@ import * as db from './server/db';
 import { initAppSecret } from './server/secret';
 import { storage } from './server/storage';
 import { maintenanceGate, requireAuth } from './server/auth';
-import { initPlatform, systemSettings } from './server/platform';
+import { initPlatform, sharedEmailSecrets, sharedSmsSecrets, systemSettings } from './server/platform';
 import { adminRoutes } from './server/routes/admin';
 import { aiStatus, flushAiState } from './server/ai/provider';
 import { authRoutes } from './server/routes/auth';
@@ -17,7 +17,23 @@ import { orgRoutes } from './server/routes/org';
 import { jobRoutes } from './server/routes/jobs';
 import { fileRoutes, resumeRoutes } from './server/routes/resumes';
 import { insightRoutes } from './server/routes/insights';
+import { integrationPublicRoutes, integrationRoutes } from './server/routes/integrations';
+import { ssoPublicRoutes, ssoRoutes } from './server/routes/sso';
+import { automationRoutes } from './server/routes/automation';
+import { careerPublicRoutes, careerRoutes } from './server/routes/careers';
+import { offerPublicRoutes, offerRoutes } from './server/routes/offers';
+import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/scheduling';
+import { commentRoutes } from './server/routes/comments';
+import { developerRoutes } from './server/routes/developer';
+import { privacyRoutes } from './server/routes/privacy';
+import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
+import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
+import { apiV1Routes } from './server/routes/api-v1';
+import { forwardActivity } from './server/chat-webhook';
+import { deliverActivity } from './server/webhooks';
+import { runDuePolicies } from './server/retention';
 import { backupPublicRoutes } from './server/routes/backup';
+import { remindersEnabled, runRemindersQuietly } from './server/reminders';
 
 dotenv.config({ override: true });
 
@@ -30,6 +46,9 @@ async function startServer() {
   await initAppSecret();
   db.purgeExpired();
   initPlatform();
+  // Workspaces without their own mailbox/SMS line fall back to the deployment-
+  // wide ones entered in /admin › «کلیدها و اتصال‌ها».
+  db.setSharedSecretsSource(() => ({ email: sharedEmailSecrets() ?? undefined, sms: sharedSmsSecrets() ?? undefined }));
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', true);
@@ -76,7 +95,22 @@ async function startServer() {
   });
   app.use('/api/auth', authRoutes());
   app.use('/api', fileRoutes()); // HMAC-signed, no bearer token needed
+  // Every activity line can become a Slack/Teams message or a signed webhook,
+  // when the workspace asked for it. Both are fire-and-forget.
+  db.setActivityHook((item) => {
+    forwardActivity(item);
+    deliverActivity(item);
+  });
+
   app.use('/api', backupPublicRoutes()); // signed backup download + restore progress
+  app.use('/api', integrationPublicRoutes()); // Google Calendar OAuth callback
+  app.use('/api', ssoPublicRoutes()); // «ورود سازمانی»: lookup, start, callback (no session yet)
+  app.use('/api', careerPublicRoutes()); // public career portal (no session)
+  app.use('/api', offerPublicRoutes()); // public offer page + the candidate's signature
+  app.use('/api', schedulingPublicRoutes()); // public «choose an interview time» page
+  app.use('/api', surveyPublicRoutes()); // public «تجربهٔ کارجو» survey page
+  app.use('/api', assessmentPublicRoutes()); // public «آزمون و ارزیابی» page
+  app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
 
   // ---------------- Authenticated API ----------------
   app.use('/api', requireAuth);
@@ -86,6 +120,17 @@ async function startServer() {
   app.use('/api', jobRoutes());
   app.use('/api', resumeRoutes());
   app.use('/api', insightRoutes());
+  app.use('/api', integrationRoutes());
+  app.use('/api', ssoRoutes()); // connect / check / disconnect the workspace's SSO
+  app.use('/api', automationRoutes());
+  app.use('/api', careerRoutes());
+  app.use('/api', offerRoutes());
+  app.use('/api', schedulingRoutes());
+  app.use('/api', commentRoutes());
+  app.use('/api', surveyRoutes()); // candidate-experience surveys (NPS)
+  app.use('/api', assessmentRoutes()); // «آزمون و ارزیابی»: catalogue, send, result
+  app.use('/api', privacyRoutes()); // candidate data export + erasure (DSAR)
+  app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------
@@ -147,6 +192,16 @@ async function startServer() {
 
   // Housekeeping: expired sessions and demo workspaces.
   setInterval(() => db.purgeExpired(), 15 * 60_000).unref();
+  // «نگه‌داری داده»: a policy nobody clicked «اجرا» on still runs, once a day.
+  setInterval(() => runDuePolicies(), 60 * 60_000).unref();
+  if (process.env.RETENTION_SWEEP !== 'off') setTimeout(() => runDuePolicies(), 90_000).unref();
+
+  // «یادآوری مصاحبه»: once an hour, one day before each interview, from the
+  // workspace's own mailbox. Every interview is reminded at most once.
+  if (remindersEnabled()) {
+    setTimeout(() => void runRemindersQuietly(), 60_000).unref();
+    setInterval(() => void runRemindersQuietly(), 60 * 60_000).unref();
+  }
 
   const PORT = Number(process.env.PORT) || 3000;
   const server = app.listen(PORT, '0.0.0.0', () => {

@@ -1,15 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Braces,
   Building2,
   Copy,
+  EyeOff,
   Cpu,
   KeyRound,
   LayoutGrid,
   LogOut,
   MessageSquareText,
+  PlugZap,
   Plus,
   RefreshCw,
   Save,
+  ShieldCheck,
   Sparkles,
   Trash2,
   UserPlus,
@@ -18,7 +22,7 @@ import {
   Wand2,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { Button, ButtonLink, Callout, Card, CardHeader, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Tabs, TextArea, TextInput, toast } from '../components/ui';
+import { Button, ButtonLink, Callout, Card, CardHeader, Chip, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Switch, Tabs, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
 import { copyText } from '../lib/clipboard';
 import { useAuth, useCan } from '../lib/auth';
@@ -28,8 +32,12 @@ import { navigate, useLeaveGuard } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { Department, Role, TeamMember } from '../types/app';
+import type { RetentionAction } from '../types/retention';
+import { IntegrationsTab } from './settings/IntegrationsTab';
+import { OfferApprovalCard } from '../components/settings/OfferApprovalCard';
+import { DeveloperTab } from './settings/DeveloperTab';
 
-type SettingsTab = 'org' | 'departments' | 'team' | 'messages' | 'ai' | 'account';
+type SettingsTab = 'org' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'developer' | 'account';
 const ROLE_LABEL: Record<Role, string> = { owner: 'مالک', admin: 'مدیر', member: 'عضو' };
 
 function ReadOnlyNote() {
@@ -223,6 +231,7 @@ function TeamTab() {
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
   const [created, setCreated] = useState<{ email: string; password: string } | null>(null);
   const [removing, setRemoving] = useState<TeamMember | null>(null);
+  const [resetting, setResetting] = useState<TeamMember | null>(null);
 
   const add = async () => {
     setSaving(true);
@@ -247,6 +256,18 @@ function TeamTab() {
       toast('نقش به‌روز شد.');
     } catch (e: any) {
       toast(e?.message || 'انجام نشد.', 'error');
+    }
+  };
+  const resetTwoFactor = async () => {
+    if (!resetting) return;
+    try {
+      const res = await api.org.resetMemberTwoFactor(resetting.id);
+      q.setData((d) => (d ? { ...d, members: res.members } : d));
+      toast(`ورود دومرحله‌ای «${resetting.name}» برداشته شد؛ با رمز عبور وارد می‌شود و می‌تواند دوباره روشنش کند.`, 'info');
+      emitChange('activity');
+      setResetting(null);
+    } catch (e: any) {
+      toast(e?.message || 'بازنشانی ممکن نشد.', 'error');
     }
   };
   const remove = async () => {
@@ -336,6 +357,9 @@ function TeamTab() {
                   ) : (
                     <span className="text-[12.5px] font-bold text-ink-2 bg-line-2 rounded-full px-3 py-1">{ROLE_LABEL[m.role]}</span>
                   )}
+                  {m.twoFactorEnabled && (
+                    <IconButton icon={ShieldCheck} label="بازنشانی ورود دومرحله‌ای" size="sm" onClick={() => setResetting(m)} />
+                  )}
                   <IconButton icon={Trash2} label="حذف از تیم" size="sm" tone="danger" onClick={() => setRemoving(m)} />
                 </div>
               ) : (
@@ -385,6 +409,20 @@ function TeamTab() {
           {error && !error.field && <Callout tone="danger">{error.message}</Callout>}
         </div>
       </Modal>
+      <ConfirmDialog
+        open={Boolean(resetting)}
+        title="بازنشانی ورود دومرحله‌ای"
+        description={
+          <>
+            برای «{resetting?.name}» کلید دومرحله‌ای و همهٔ نشست‌هایش برداشته می‌شود. از این پس فقط با رمز عبور وارد می‌شود و می‌تواند از
+            «تنظیمات › حساب کاربری» دوباره روشنش کند. این کار در فعالیت‌های تیم ثبت می‌شود.
+          </>
+        }
+        confirmLabel="بازنشانی"
+        tone="primary"
+        onClose={() => setResetting(null)}
+        onConfirm={resetTwoFactor}
+      />
       <ConfirmDialog
         open={Boolean(removing)}
         onClose={() => setRemoving(null)}
@@ -578,55 +616,569 @@ function AccountTab() {
     }
   };
   return (
-    <div className="grid lg:grid-cols-2 gap-5 max-w-[1000px]">
-      <Card>
-        <CardHeader icon={UserRound} title="حساب کاربری" subtitle={<span className="hv-latin">{user.email}</span>} />
+    <div className="max-w-[1000px]">
+      <div className="grid lg:grid-cols-2 gap-5">
+        <Card>
+          <CardHeader icon={UserRound} title="حساب کاربری" subtitle={<span className="hv-latin">{user.email}</span>} />
+          <div className="flex flex-col gap-4">
+            <TextInput label="نام و نام خانوادگی" value={name} onChange={(e) => setName(e.target.value)} />
+            <TextInput label="سمت" optional value={title} onChange={(e) => setTitle(e.target.value)} placeholder="مثلاً کارشناس جذب" />
+          </div>
+          <div className="flex flex-wrap justify-between gap-3 mt-5 pt-4 border-t border-line-2">
+            <Button variant="danger-soft" icon={LogOut} onClick={() => void signOut()}>
+              خروج از حساب
+            </Button>
+            <Button
+              icon={Save}
+              onClick={saveProfile}
+              loading={savingProfile}
+              disabled={name.trim().length < 2 || (name.trim() === user.name && title.trim() === (user.title || ''))}
+            >
+              ذخیره
+            </Button>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader icon={KeyRound} title="تغییر رمز عبور" subtitle="پس از تغییر رمز، نشست‌های شما در دستگاه‌های دیگر بسته می‌شود." />
+          {org?.isDemo ? (
+            <Callout tone="info">در نسخه نمایشی امکان تغییر رمز عبور وجود ندارد.</Callout>
+          ) : (
+            <form
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (pw.current && pw.next.length >= 8 && !savingPw) void savePw();
+              }}
+            >
+              {/* Tells password managers which saved login to update. */}
+              <input type="text" name="username" autoComplete="username" value={user.email} readOnly hidden />
+              <div className="flex flex-col gap-4">
+                <TextInput label="رمز فعلی" type="password" latin value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} error={pwError?.field === 'currentPassword' ? pwError.message : null} autoComplete="current-password" />
+                <TextInput label="رمز تازه" type="password" latin value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} hint="دست‌کم ۸ کاراکتر، ترکیبی از حروف و عدد" error={pwError?.field === 'newPassword' ? pwError.message : null} autoComplete="new-password" />
+                {pwError && !pwError.field && <Callout tone="danger">{pwError.message}</Callout>}
+              </div>
+              <div className="flex justify-end mt-5 pt-4 border-t border-line-2">
+                <Button type="submit" icon={KeyRound} loading={savingPw} disabled={!pw.current || pw.next.length < 8}>
+                  تغییر رمز
+                </Button>
+              </div>
+            </form>
+          )}
+        </Card>
+      </div>
+      <TwoFactorCard />
+    </div>
+  );
+}
+
+/**
+ * «غربالگری بی‌طرف» — the workspace switch for blind screening.
+ *
+ * It is deliberately blunt about what it does: the server removes the identity
+ * from every screening view, and the only way back is a reveal that is written
+ * to the history with the name of whoever pressed it. Off by default: a small
+ * team that knows its candidates does not need it, and it should never surprise
+ * anyone mid-hiring.
+ */
+function BlindCard() {
+  const { org, setOrg } = useAuth();
+  const canEdit = useCan('admin');
+  const [busy, setBusy] = useState(false);
+  // Read it fresh: another admin may have flipped it since this tab signed in.
+  const state = useAsync(() => api.org.get(), []);
+  const current = state.data?.org ?? org;
+  if (!current) return null;
+  const on = Boolean(current.blindScreening);
+
+  const toggle = async (next: boolean) => {
+    setBusy(true);
+    try {
+      const { org: updated } = await api.org.update({ blindScreening: next });
+      setOrg(updated);
+      state.reload();
+      toast(next ? 'غربالگری بی‌طرف روشن شد؛ نام و راه تماس کارجوها پنهان می‌شود.' : 'غربالگری بی‌طرف خاموش شد؛ هویت‌ها دوباره دیده می‌شوند.', next ? 'success' : 'info');
+      emitChange('activity');
+    } catch (e: any) {
+      toast(e?.message || 'تغییر ممکن نشد.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card className="mt-5 max-w-[640px]">
+      <CardHeader
+        icon={EyeOff}
+        title="غربالگری بی‌طرف"
+        subtitle="در نمای غربالگری، نام، ایمیل، تلفن و فایل کارجو پنهان می‌شود تا تصمیم بر پایهٔ کار و شاهدها گرفته شود."
+        action={on ? <Chip tone="brand">روشن</Chip> : <Chip tone="neutral">خاموش</Chip>}
+      />
+      <div className="flex flex-col gap-4">
+        <Switch
+          checked={on}
+          disabled={!canEdit || busy}
+          onChange={(v) => void toggle(v)}
+          label={on ? 'پنهان‌سازی فعال است' : 'پنهان‌سازی خاموش است'}
+          description={
+            on
+              ? 'کارجوها با «کارجوی ۲۴۸۱» و مانند آن شناخته می‌شوند؛ امتیاز، معیارها و شاهدها کامل دیده می‌شوند.'
+              : 'همه‌چیز مثل قبل است. با روشن‌کردنش، فیلترها، تختهٔ جذب و پنل کارجو، بی‌نام می‌شوند.'
+          }
+        />
+        {on && (
+          <Callout tone="info" title="چطور هویت را ببینیم؟">
+            در پنل هر کارجو دکمهٔ «آشکارسازی هویت» هست: با یک دلیل کوتاه، نام و راه تماس برمی‌گردد و همان لحظه در
+            «فعالیت‌های تیم» با نام شما ثبت می‌شود. تا وقتی آشکار نکنید، ارسال ایمیل، پیامک، دعوت مصاحبه، پیشنهاد و
+            نظرسنجی برای آن کارجو بسته است — روی سرور، نه فقط در ظاهر صفحه.
+          </Callout>
+        )}
+        {!canEdit && <p className="text-[12px] text-ink-4">فقط مدیر یا مالک فضای کاری می‌تواند این تنظیم را تغییر دهد.</p>}
+        <p className="text-[12px] text-ink-3 leading-relaxed">
+          معیارها و امتیازها از رزومه می‌آیند و بی‌نام نمی‌شوند؛ آنچه پنهان می‌شود هویت است. اگر معیار شما «دانشگاه» یا
+          «نام شرکت قبلی» باشد، همان هم پنهان نمی‌شود — این ابزار برای کم‌کردن سوگیری هویتی است، نه ادعای بی‌طرفی کامل.
+        </p>
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * «ورود دومرحله‌ای» — a volunteer setting for every member, shown honestly:
+ * the secret is displayed once, the recovery codes only once, and turning it off
+ * needs the password plus a live code. The demo workspace cannot enable it.
+ */
+function TwoFactorCard() {
+  const { org, user, setUser } = useAuth();
+  const state = useAsync(() => api.auth.twoFactorStatus(), []);
+  const [mode, setMode] = useState<'idle' | 'setup' | 'off'>('idle');
+  const [password, setPassword] = useState('');
+  const [setup, setSetup] = useState<{ secret: string; otpauth: string; qr: string; recoveryCodes: string[] } | null>(null);
+  const [code, setCode] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [busy, setBusy] = useState<null | 'start' | 'enable' | 'disable' | 'recovery'>(null);
+  const [fresh, setFresh] = useState<string[]>([]);
+
+  if (state.error || !state.data) return null;
+  const status = state.data;
+  const reset = () => {
+    setMode('idle');
+    setPassword('');
+    setCode('');
+    setSetup(null);
+    setSaved(false);
+    setFresh([]);
+  };
+
+  const start = async () => {
+    setBusy('start');
+    try {
+      setSetup(await api.auth.twoFactorSetup({ password }));
+      setMode('setup');
+      setCode('');
+    } catch (e: any) {
+      toast(e?.message || 'شروع راه‌اندازی ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const enable = async () => {
+    setBusy('enable');
+    try {
+      const res = await api.auth.twoFactorEnable({ code: code.trim() });
+      state.reload();
+      if (user) setUser({ ...user, twoFactorEnabled: true });
+      reset();
+      toast(`ورود دومرحله‌ای روشن شد؛ ${toPersianDigits(res.recoveryLeft)} کد بازیابی باقی مانده است.`, 'success');
+    } catch (e: any) {
+      toast(e?.message || 'فعال‌سازی ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const turnOff = async () => {
+    setBusy('disable');
+    try {
+      await api.auth.twoFactorDisable({ password, code: code.trim() });
+      state.reload();
+      if (user) setUser({ ...user, twoFactorEnabled: false });
+      reset();
+      toast('ورود دومرحله‌ای خاموش شد.', 'info');
+    } catch (e: any) {
+      toast(e?.message || 'خاموش‌کردن ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const newCodes = async () => {
+    setBusy('recovery');
+    try {
+      const res = await api.auth.twoFactorRecovery({ code: code.trim() });
+      setFresh(res.recoveryCodes);
+      setCode('');
+      state.reload();
+      toast('کدهای بازیابی تازه ساخته شد؛ کدهای قبلی دیگر کار نمی‌کنند.', 'success');
+    } catch (e: any) {
+      toast(e?.message || 'ساخت کد تازه ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card className="mt-5 max-w-[640px]">
+      <CardHeader
+        icon={ShieldCheck}
+        title="ورود دومرحله‌ای"
+        subtitle="با هر ورود، گذشته از رمز عبور، یک کد ۶ رقمی از برنامهٔ احراز هویت گوشی هم لازم است."
+        action={
+          status.enabled ? (
+            <Chip tone="brand">روشن</Chip>
+          ) : (
+            <Chip tone="neutral">خاموش</Chip>
+          )
+        }
+      />
+
+      {status.enabled ? (
         <div className="flex flex-col gap-4">
-          <TextInput label="نام و نام خانوادگی" value={name} onChange={(e) => setName(e.target.value)} />
-          <TextInput label="سمت" optional value={title} onChange={(e) => setTitle(e.target.value)} placeholder="مثلاً کارشناس جذب" />
-        </div>
-        <div className="flex flex-wrap justify-between gap-3 mt-5 pt-4 border-t border-line-2">
-          <Button variant="danger-soft" icon={LogOut} onClick={() => void signOut()}>
-            خروج از حساب
-          </Button>
-          <Button
-            icon={Save}
-            onClick={saveProfile}
-            loading={savingProfile}
-            disabled={name.trim().length < 2 || (name.trim() === user.name && title.trim() === (user.title || ''))}
-          >
-            ذخیره
-          </Button>
-        </div>
-      </Card>
-      <Card>
-        <CardHeader icon={KeyRound} title="تغییر رمز عبور" subtitle="پس از تغییر رمز، نشست‌های شما در دستگاه‌های دیگر بسته می‌شود." />
-        {org?.isDemo ? (
-          <Callout tone="info">در نسخه نمایشی امکان تغییر رمز عبور وجود ندارد.</Callout>
-        ) : (
-          <form
-            noValidate
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (pw.current && pw.next.length >= 8 && !savingPw) void savePw();
-            }}
-          >
-            {/* Tells password managers which saved login to update. */}
-            <input type="text" name="username" autoComplete="username" value={user.email} readOnly hidden />
+          <Callout tone="info">
+            از {status.enabledAtISO ? faDate(status.enabledAtISO) : 'تاریخ فعال‌سازی'} روشن است؛ {toPersianDigits(status.recoveryLeft)} کد بازیابی
+            استفاده‌نشده دارید. اگر کدها را گم کرده‌اید، همین‌جا کد تازه بسازید.
+          </Callout>
+          {mode === 'off' ? (
             <div className="flex flex-col gap-4">
-              <TextInput label="رمز فعلی" type="password" latin value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} error={pwError?.field === 'currentPassword' ? pwError.message : null} autoComplete="current-password" />
-              <TextInput label="رمز تازه" type="password" latin value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} hint="دست‌کم ۸ کاراکتر، ترکیبی از حروف و عدد" error={pwError?.field === 'newPassword' ? pwError.message : null} autoComplete="new-password" />
-              {pwError && !pwError.field && <Callout tone="danger">{pwError.message}</Callout>}
+              <TextInput label="رمز عبور فعلی" type="password" latin value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
+              <TextInput label="کد فعلی برنامهٔ احراز هویت" latin inputMode="numeric" value={code} onChange={(e) => setCode(e.target.value)} hint="برای تأیید اینکه گوشی همراهتان است." />
+              <div className="flex flex-wrap gap-3 justify-end">
+                <Button variant="secondary" onClick={reset}>
+                  انصراف
+                </Button>
+                <Button variant="danger-soft" icon={ShieldCheck} onClick={turnOff} loading={busy === 'disable'} disabled={!password || !code.trim()}>
+                  خاموش کردن
+                </Button>
+              </div>
             </div>
-            <div className="flex justify-end mt-5 pt-4 border-t border-line-2">
-              <Button type="submit" icon={KeyRound} loading={savingPw} disabled={!pw.current || pw.next.length < 8}>
-                تغییر رمز
+          ) : (
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <TextInput
+                  className="flex-1"
+                  label="کد فعلی (برای ساخت کدهای بازیابی تازه)"
+                  latin
+                  inputMode="numeric"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                />
+                <Button variant="secondary" icon={RefreshCw} onClick={newCodes} loading={busy === 'recovery'} disabled={!code.trim()}>
+                  کد بازیابی تازه
+                </Button>
+              </div>
+              {fresh.length > 0 && <RecoveryCodes codes={fresh} />}
+              <div className="flex justify-end pt-4 border-t border-line-2">
+                <Button variant="ghost" onClick={() => setMode('off')}>
+                  خاموش کردن ورود دومرحله‌ای
+                </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : mode === 'setup' && setup ? (
+        <div className="flex flex-col gap-4">
+          <ol className="text-[13px] text-ink-2 leading-relaxed list-decimal pr-5">
+            <li>یک برنامهٔ احراز هویت نصب کنید (Google Authenticator، Microsoft Authenticator یا هر برنامهٔ TOTP).</li>
+            <li>کد QR را اسکن کنید؛ یا کلید زیر را دستی وارد کنید.</li>
+            <li>کد ۶ رقمی که برنامه نشان می‌دهد را اینجا وارد کنید.</li>
+          </ol>
+          <div className="flex flex-col sm:flex-row gap-4 items-start">
+            <img src={setup.qr} alt="کد QR برای افزودن حساب به برنامهٔ احراز هویت" width={180} height={180} className="rounded-xl border border-line bg-white p-2" />
+            <div className="flex-1 min-w-0">
+              <p className="text-[12px] text-ink-3 mb-1.5">کلید دستی</p>
+              <div className="flex items-center gap-2">
+                <code className="hv-latin text-[13px] font-bold tracking-[0.12em] break-all bg-surface-2 rounded-lg px-3 py-2 flex-1">{setup.secret}</code>
+                <IconButton icon={Copy} label="کپی کلید" onClick={() => void copyText(setup.secret).then((ok) => ok && toast('کلید کپی شد.'))} />
+              </div>
+              <p className="text-[12px] text-ink-3 mt-3 leading-relaxed">
+                این کلید معادل رمز دوم شماست؛ جایی ذخیره یا ارسالش نکنید. هویدا آن را رمزنگاری‌شده نگه می‌دارد.
+              </p>
+            </div>
+          </div>
+          <Callout tone="warning" title="کدهای بازیابی را همین حالا بردارید">
+            هر کد یک‌بار کار می‌کند و اگر گوشی را از دست دادید تنها راه ورود است. این کدها فقط همین یک‌بار نمایش داده می‌شوند.
+          </Callout>
+          <RecoveryCodes codes={setup.recoveryCodes} onCopied={() => setSaved(true)} saved={saved} />
+          <div className="flex flex-col gap-3 pt-4 border-t border-line-2">
+            <TextInput label="کد ۶ رقمی برنامه" latin inputMode="numeric" autoComplete="one-time-code" value={code} onChange={(e) => setCode(e.target.value)} placeholder="۱۲۳۴۵۶" />
+            <div className="flex flex-wrap gap-3 justify-end">
+              <Button variant="secondary" onClick={reset}>
+                انصراف
+              </Button>
+              <Button icon={ShieldCheck} onClick={enable} loading={busy === 'enable'} disabled={!code.trim() || !saved}>
+                روشن کردن
               </Button>
             </div>
-          </form>
-        )}
-      </Card>
+            {!saved && <p className="text-[12px] text-ink-3 text-end">پیش از روشن‌کردن، کدهای بازیابی را بردارید.</p>}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {org?.isDemo ? (
+            <Callout tone="info">در نسخهٔ نمایشی، حساب‌ها مشترک و موقتی‌اند؛ ورود دومرحله‌ای روی حساب واقعی سازمان خودتان روشن می‌شود.</Callout>
+          ) : (
+            <>
+              <TextInput
+                label="رمز عبور فعلی"
+                type="password"
+                latin
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                hint="برای اطمینان از اینکه خودتان هستید."
+              />
+              <div className="flex justify-end">
+                <Button icon={ShieldCheck} onClick={start} loading={busy === 'start'} disabled={!password}>
+                  راه‌اندازی
+                </Button>
+              </div>
+            </>
+          )}
+          <p className="text-[12px] text-ink-3 leading-relaxed">
+            مناسب تیم‌هایی که به رزومه‌های واقعی دسترسی دارند. اگر برنامهٔ احراز هویت را گم کنید، با کدهای بازیابی وارد می‌شوید و بعد کد
+            تازه می‌سازید؛ بدون هیچ‌کدام، مدیر سامانه باید دسترسی را بازنشانی کند.
+          </p>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/** The eight codes, shown once, with one button that copies all of them. */
+function RecoveryCodes({ codes, saved, onCopied }: { codes: string[]; saved?: boolean; onCopied?: () => void }) {
+  return (
+    <div className="rounded-xl border border-line-2 bg-surface-2 p-3.5">
+      <div className="grid grid-cols-2 gap-2">
+        {codes.map((c) => (
+          <code key={c} className="hv-latin text-[13px] font-bold tracking-[0.1em] bg-white rounded-lg px-2.5 py-1.5 text-center border border-line">
+            {c}
+          </code>
+        ))}
+      </div>
+      <div className="flex justify-end mt-3">
+        <Button
+          size="sm"
+          variant="secondary"
+          icon={Copy}
+          onClick={() => {
+            void copyText(codes.join('\n')).then((ok) => {
+              if (ok) toast('کدهای بازیابی کپی شدند.');
+              onCopied?.();
+            });
+          }}
+        >
+          {saved ? 'کپی شد' : 'کپی همهٔ کدها'}
+        </Button>
+      </div>
     </div>
+  );
+}
+
+/**
+ * «نگه‌داری داده»: after N days a candidate nobody hired either loses their name
+ * (anonymise) or the whole record (delete). Hired people and the talent pool are
+ * never touched. A dry run is always available, and it never pretends to have
+ * deleted anything.
+ */
+function RetentionCard() {
+  const canEdit = useCan('admin');
+  const state = useAsync(() => api.org.retention(), []);
+  const [days, setDays] = useState('');
+  const [action, setAction] = useState<RetentionAction>('anonymize');
+  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState<null | 'dry' | 'run'>(null);
+  const [confirmRun, setConfirmRun] = useState(false);
+  const [preview, setPreview] = useState<{ days: number; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } | null>(null);
+
+  useEffect(() => {
+    if (!state.data) return;
+    setDays(String(state.data.policy.days));
+    setAction(state.data.policy.action);
+  }, [state.data?.policy.days, state.data?.policy.action]);
+
+  if (state.error) return <Callout tone="warning" className="mt-4 max-w-[640px]">{state.error}</Callout>;
+  if (!state.data) return null;
+  const policy = state.data.policy;
+  const due = state.data.preview.items.length;
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.org.saveRetention({ days: Number(days) || 0, action });
+      state.reload();
+      setPreview(null);
+      toast(res.policy.days === 0 ? 'سیاست نگه‌داری خاموش شد.' : `سیاست روی ${toPersianDigits(res.policy.days)} روز ذخیره شد.`, 'success');
+    } catch (err: any) {
+      toast(err?.message || 'ذخیره ممکن نشد.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dry = async () => {
+    setBusy('dry');
+    try {
+      const res = await api.org.runRetention({ dryRun: true });
+      setPreview({ days: res.result.days, items: res.result.items });
+      toast(
+        res.result.items.length
+          ? `${toPersianDigits(res.result.items.length)} رکورد از این سیاست عبور می‌کند (هیچ‌چیز تغییر نکرد).`
+          : 'هیچ رکوردی از این سیاست عبور نمی‌کند.',
+        'info'
+      );
+    } catch (err: any) {
+      toast(err?.message || 'اجرای آزمایشی ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const run = async () => {
+    setBusy('run');
+    try {
+      const res = await api.org.runRetention({});
+      const total = res.result.deleted + res.result.anonymized;
+      toast(
+        total
+          ? `${toPersianDigits(total)} رکورد پردازش شد (${toPersianDigits(res.result.deleted)} حذف، ${toPersianDigits(res.result.anonymized)} ناشناس).`
+          : 'رکوردی برای پردازش نبود.',
+        'success'
+      );
+      setPreview(null);
+      state.reload();
+    } catch (err: any) {
+      toast(err?.message || 'اجرا ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+      setConfirmRun(false);
+    }
+  };
+
+  return (
+    <Card className="max-w-[640px] mt-5">
+      <CardHeader
+        icon={ShieldCheck}
+        title="نگه‌داری داده"
+        subtitle="چه مدت اطلاعات کارجویانی بماند که استخدام نشده‌اند"
+        action={policy.days > 0 ? <Chip tone="brand">روشن، {toPersianDigits(policy.days)} روز</Chip> : <Chip tone="neutral">خاموش</Chip>}
+      />
+      {!canEdit && <ReadOnlyNote />}
+      <div className="flex flex-col gap-4">
+        <TextInput
+          label="مدت نگه‌داری (روز)"
+          value={days}
+          onChange={(e) => setDays(e.target.value.replace(/[^0-9۰-۹]/g, ''))}
+          inputMode="numeric"
+          latin
+          hint="۰ = خاموش (هیچ‌چیز خودکار پاک نمی‌شود). حداکثر ۳۶۵۰ روز."
+          disabled={!canEdit || saving}
+        />
+        <div className="flex flex-wrap gap-1.5">
+          {[90, 180, 365, 730].map((n) => (
+            <button
+              key={n}
+              type="button"
+              onClick={() => setDays(String(n))}
+              disabled={!canEdit}
+              className={`text-[12px] rounded-full border px-2.5 py-1 transition ${
+                Number(days) === n ? 'border-brand bg-brand-soft text-brand-ink font-semibold' : 'border-line text-ink-3'
+              }`}
+            >
+              {toPersianDigits(n)} روز
+            </button>
+          ))}
+        </div>
+        <div>
+          <p className="text-[12.5px] font-semibold text-ink-2 mb-1.5">وقتی مدت تمام شد چه شود؟</p>
+          <div className="flex flex-col gap-2">
+            {(
+              [
+                { id: 'anonymize', title: 'ناشناس‌سازی (پیشنهاد ما)', hint: 'نام، ایمیل، تلفن، متن رزومه و فایل حذف می‌شود؛ امتیاز و آمار برای گزارش می‌ماند.' },
+                { id: 'delete', title: 'حذف کامل رکورد', hint: 'همهٔ داده‌ها و فایل پاک می‌شود؛ آمار گذشتهٔ آن کارجو در گزارش‌ها نمی‌ماند.' },
+              ] as Array<{ id: RetentionAction; title: string; hint: string }>
+            ).map((opt) => (
+              <button
+                key={opt.id}
+                type="button"
+                onClick={() => setAction(opt.id)}
+                disabled={!canEdit}
+                className={`text-right rounded-[12px] border px-3 py-2 transition ${
+                  action === opt.id ? 'border-brand bg-brand-soft' : 'border-line-2'
+                }`}
+              >
+                <span className="block text-[13px] font-bold text-ink">{opt.title}</span>
+                <span className="block text-[11.5px] text-ink-3 mt-0.5 leading-relaxed">{opt.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <Callout tone="info">
+          کارجویانی که استخدام شده‌اند یا در «بانک استعداد» نگه داشته شده‌اید هرگز مشمول این سیاست نمی‌شوند؛ برای آن‌ها فقط از «پاک‌سازی کامل»
+          در پروندهٔ همان کارجو استفاده کنید.
+        </Callout>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button icon={Save} onClick={() => void save()} loading={saving} disabled={!canEdit || saving}>
+            ذخیرهٔ سیاست
+          </Button>
+          <Button variant="secondary" icon={RefreshCw} onClick={() => void dry()} loading={busy === 'dry'} disabled={busy !== null}>
+            اجرای آزمایشی
+          </Button>
+          {policy.days > 0 && (
+            <Button variant="ghost" icon={Trash2} onClick={() => setConfirmRun(true)} disabled={!canEdit || busy !== null}>
+              اجرای الآن
+            </Button>
+          )}
+        </div>
+        {due > 0 && (
+          <p className="text-[12px] text-ink-3">
+            در این لحظه {toPersianDigits(due)} رکورد از سیاست عبور می‌کند
+            {policy.days > 0 ? ' — اجرای روزانه خودکار انجام می‌شود.' : ' (برای اجرا، سیاست را روشن کنید).'}
+          </p>
+        )}
+        {preview && preview.items.length > 0 && (
+          <div className="rounded-[12px] border border-line-2 p-3">
+            <p className="text-[12px] font-semibold text-ink-2 mb-1.5">نتیجهٔ اجرای آزمایشی (هیچ‌چیز تغییر نکرد)</p>
+            <ul className="text-[12px] text-ink-2 space-y-1">
+              {preview.items.slice(0, 6).map((it) => (
+                <li key={it.id} className="flex flex-wrap justify-between gap-2">
+                  <span className="font-semibold">{it.name}</span>
+                  <span className="text-ink-4">{it.roleTitle}</span>
+                  <span className="text-ink-4">{faDate(it.updatedAtISO)}</span>
+                </li>
+              ))}
+            </ul>
+            {preview.items.length > 6 && <p className="text-[11.5px] text-ink-4 mt-1.5">و {toPersianDigits(preview.items.length - 6)} رکورد دیگر.</p>}
+          </div>
+        )}
+        {policy.lastRunAtISO && (
+          <p className="text-[11.5px] text-ink-4">
+            آخرین اجرا: {faDate(policy.lastRunAtISO)} — {toPersianDigits(policy.lastRunCount)} رکورد
+          </p>
+        )}
+      </div>
+      <ConfirmDialog
+        open={confirmRun}
+        onClose={() => setConfirmRun(false)}
+        onConfirm={() => void run()}
+        title={action === 'delete' ? 'رکوردهای قدیمی حذف شوند؟' : 'رکوردهای قدیمی ناشناس شوند؟'}
+        description={
+          action === 'delete'
+            ? 'همهٔ رکوردهای خارج از سیاست — با فایل، یادداشت، مصاحبه و پیام — برای همیشه حذف می‌شوند. پیش از اجرا، «اجرای آزمایشی» را ببینید.'
+            : 'نام، ایمیل، تلفن، متن رزومه و فایل این رکوردها حذف می‌شود؛ امتیاز و آمار می‌ماند. این کار برگشت‌پذیر نیست.'
+        }
+        confirmLabel="اجرا"
+      />
+    </Card>
   );
 }
 
@@ -636,6 +1188,8 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   team: 'تیم',
   messages: 'پیام‌ها',
   ai: 'هوش مصنوعی',
+  integrations: 'اتصال‌ها',
+  developer: 'توسعه‌دهندگان',
   account: 'حساب کاربری',
 };
 
@@ -649,7 +1203,7 @@ export default function Settings({ tab }: { tab: string }) {
   }, [tab, known]);
   return (
     <div>
-      <PageHeader title="تنظیمات" subtitle="سازمان، دپارتمان‌ها، تیم، پیام‌ها و هوش مصنوعی" />
+      <PageHeader title="تنظیمات" subtitle="سازمان، دپارتمان‌ها، تیم، پیام‌ها، هوش مصنوعی، اتصال‌ها و API" />
       <Tabs<SettingsTab>
         className="mb-5"
         value={current}
@@ -660,14 +1214,25 @@ export default function Settings({ tab }: { tab: string }) {
           { id: 'team', label: TAB_LABELS.team, icon: Users },
           { id: 'messages', label: TAB_LABELS.messages, icon: MessageSquareText },
           { id: 'ai', label: TAB_LABELS.ai, icon: Sparkles },
+          { id: 'integrations', label: TAB_LABELS.integrations, icon: PlugZap },
+          { id: 'developer', label: TAB_LABELS.developer, icon: Braces },
           { id: 'account', label: TAB_LABELS.account, icon: UserRound },
         ]}
       />
-      {current === 'org' && <OrgTab />}
+      {current === 'org' && (
+        <>
+          <OrgTab />
+          <BlindCard />
+          <OfferApprovalCard />
+          <RetentionCard />
+        </>
+      )}
       {current === 'departments' && <DepartmentsTab />}
       {current === 'team' && <TeamTab />}
       {current === 'messages' && <MessagesTab />}
       {current === 'ai' && <AiTab />}
+      {current === 'integrations' && <IntegrationsTab />}
+      {current === 'developer' && <DeveloperTab />}
       {current === 'account' && <AccountTab />}
     </div>
   );

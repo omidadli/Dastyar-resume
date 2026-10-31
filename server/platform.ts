@@ -13,6 +13,8 @@
 import crypto from 'crypto';
 import * as db from './db';
 import { decryptSecret, encryptSecret } from './secret';
+import { prepareEmailSettings } from './mailer';
+import { prepareSmsSettings } from './sms';
 import type { PoolEntry } from './ai/keypool';
 import type {
   AiKeyInput,
@@ -20,8 +22,11 @@ import type {
   AiProviderKind,
   BehaviorConfig,
   BehaviorVersionInfo,
+  ConnectionsPayload,
+  GoogleConnectionInput,
   KeyStrategy,
   PublicConfig,
+  SourcingConnectionInput,
   SystemSettings,
 } from '../src/types/admin';
 
@@ -54,11 +59,79 @@ interface AiSettingsStored {
   keys: StoredKey[];
 }
 
+/** The LinkedIn-compatible sourcing provider (one per deployment, not per org). */
+interface StoredSourcingConnection {
+  kind: 'contract' | 'apify';
+  endpointUrl: string;
+  /** Apify actor id, only for kind = 'apify'. */
+  actorId: string;
+  tokenEnc: string;
+  tokenHint: string;
+  providerLabel: string;
+  /** «سقف جست‌وجوی روزانه» — 0 means no cap. Counted across all workspaces. */
+  dailyLimit: number;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+/** The OAuth *client* every workspace connects its own Google account with. */
+interface StoredGoogleConnection {
+  clientId: string;
+  clientSecretEnc: string;
+  calendarId: string;
+  redirectUri: string;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+interface StoredSharedEmail {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  passwordEnc: string;
+  fromName: string;
+  fromAddress: string;
+  replyTo: string | null;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+interface StoredSharedSms {
+  provider: 'kavenegar' | 'smsir';
+  apiKeyEnc: string;
+  sender: string;
+  updatedAtISO: string;
+  updatedBy: string;
+  lastTestAtISO: string | null;
+  lastTestOk: boolean | null;
+  lastError: string | null;
+}
+
+interface ConnectionsStored {
+  sourcing: StoredSourcingConnection | null;
+  google: StoredGoogleConnection | null;
+  /** «صندوق ایمیل مشترک سامانه» — a fallback for workspaces that have none. */
+  email: StoredSharedEmail | null;
+  /** «پیامک مشترک سامانه» — same idea for the SMS gateway. */
+  sms: StoredSharedSms | null;
+}
+
 interface PlatformState {
   ai: AiSettingsStored;
   system: SystemSettings;
   behavior: BehaviorConfig | null;
   behaviorHistory: Array<BehaviorVersionInfo & { config: BehaviorConfig }>;
+  connections: ConnectionsStored;
 }
 
 export const DEFAULT_SYSTEM: SystemSettings = {
@@ -131,6 +204,90 @@ function normalizeKey(k: any): StoredKey | null {
   };
 }
 
+const APIFY_DEFAULT_BASE = 'https://api.apify.com/v2';
+const APIFY_DEFAULT_ACTOR = 'harvestapi/linkedin-profile-search';
+
+function normalizeSourcingConn(raw: any): StoredSourcingConnection | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const kind = raw.kind === 'apify' ? 'apify' : 'contract';
+  const endpointUrl = text(raw.endpointUrl, 500).trim() || (kind === 'apify' ? APIFY_DEFAULT_BASE : '');
+  const tokenEnc = text(raw.tokenEnc, 1000);
+  if (!endpointUrl || !tokenEnc) return null;
+  return {
+    kind,
+    actorId: kind === 'apify' ? text(raw.actorId, 200).trim() || APIFY_DEFAULT_ACTOR : '',
+    endpointUrl,
+    tokenEnc,
+    tokenHint: text(raw.tokenHint, 40),
+    providerLabel: text(raw.providerLabel, 80).trim() || 'LinkedIn Talent API',
+    dailyLimit: raw.dailyLimit === undefined ? DEFAULT_DAILY_LIMIT : clampLimit(raw.dailyLimit),
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
+function normalizeGoogleConn(raw: any): StoredGoogleConnection | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const clientId = text(raw.clientId, 300).trim();
+  const clientSecretEnc = text(raw.clientSecretEnc, 1000);
+  if (!clientId || !clientSecretEnc) return null;
+  return {
+    clientId,
+    clientSecretEnc,
+    calendarId: text(raw.calendarId, 200).trim() || 'primary',
+    redirectUri: text(raw.redirectUri, 400).trim(),
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
+function normalizeSharedEmail(raw: any): StoredSharedEmail | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const host = text(raw.host, 200).trim();
+  const username = text(raw.username, 200).trim();
+  const passwordEnc = text(raw.passwordEnc, 1000);
+  const fromAddress = text(raw.fromAddress, 200).trim();
+  if (!host || !username || !passwordEnc || !fromAddress) return null;
+  return {
+    host,
+    port: Math.round(clampNum(raw.port, 1, 65535, 587)),
+    secure: Boolean(raw.secure),
+    username,
+    passwordEnc,
+    fromName: text(raw.fromName, 80),
+    fromAddress,
+    replyTo: text(raw.replyTo, 200) || null,
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
+function normalizeSharedSms(raw: any): StoredSharedSms | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const apiKeyEnc = text(raw.apiKeyEnc, 1000);
+  const sender = text(raw.sender, 40).trim();
+  if (!apiKeyEnc || !sender) return null;
+  return {
+    provider: raw.provider === 'smsir' ? 'smsir' : 'kavenegar',
+    apiKeyEnc,
+    sender,
+    updatedAtISO: text(raw.updatedAtISO, 40) || new Date().toISOString(),
+    updatedBy: text(raw.updatedBy, 120),
+    lastTestAtISO: text(raw.lastTestAtISO, 40) || null,
+    lastTestOk: typeof raw.lastTestOk === 'boolean' ? raw.lastTestOk : null,
+    lastError: text(raw.lastError, 400) || null,
+  };
+}
+
 function normalize(raw: any): PlatformState {
   const r = raw && typeof raw === 'object' ? raw : {};
   const ai = r.ai && typeof r.ai === 'object' ? r.ai : {};
@@ -147,6 +304,12 @@ function normalize(raw: any): PlatformState {
     system: normalizeSystem(r.system),
     behavior: r.behavior && typeof r.behavior === 'object' ? (r.behavior as BehaviorConfig) : null,
     behaviorHistory: Array.isArray(r.behaviorHistory) ? r.behaviorHistory.slice(0, BEHAVIOR_HISTORY_CAP) : [],
+    connections: {
+      sourcing: normalizeSourcingConn(r.connections?.sourcing),
+      google: normalizeGoogleConn(r.connections?.google),
+      email: normalizeSharedEmail(r.connections?.email),
+      sms: normalizeSharedSms(r.connections?.sms),
+    },
   };
 }
 
@@ -454,6 +617,630 @@ export function reorderKeys(ids: string[]) {
   const ordered = ids.map((id) => byId.get(id)).filter(Boolean) as StoredKey[];
   for (const k of s.ai.keys) if (!ordered.includes(k)) ordered.push(k);
   commit({ ...s, ai: { ...s.ai, keys: ordered } });
+}
+
+// -------------------------------------------------------- connections ----
+
+/**
+ * Deployment-level connection credentials, entered in /admin › «اتصال‌ها».
+ * The environment variables (LINKEDIN_API_URL, GOOGLE_CLIENT_ID…) still work and
+ * are used only when nothing was saved in the panel — so an existing .env keeps
+ * running, and a fresh install never has to touch the server at all.
+ */
+
+export interface SourcingConnection {
+  kind: 'contract' | 'apify';
+  endpointUrl: string;
+  actorId: string;
+  token: string;
+  providerLabel: string;
+  /** «سقف جست‌وجوی روزانه» (0 = بی‌سقف). */
+  dailyLimit: number;
+  source: 'admin' | 'env';
+}
+
+export interface GoogleOAuthConnection {
+  clientId: string;
+  clientSecret: string;
+  calendarId: string;
+  /** Fixed redirect URI from the panel/environment; empty = derive from the request origin. */
+  redirectUri: string;
+  source: 'admin' | 'env';
+}
+
+/** Default cap: a careless run should never turn into a surprise invoice. */
+export const DEFAULT_DAILY_LIMIT = 20;
+
+const clampLimit = (v: unknown, fallback = DEFAULT_DAILY_LIMIT) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(500, Math.round(n)));
+};
+
+export const GOOGLE_SCOPE_LIST = ['openid', 'email', 'https://www.googleapis.com/auth/calendar.events'];
+
+function envSourcing(): SourcingConnection | null {
+  const endpointUrl = (process.env.LINKEDIN_API_URL || '').trim();
+  const token = (process.env.LINKEDIN_API_TOKEN || process.env.LINKEDIN_ACCESS_TOKEN || '').trim();
+  if (!endpointUrl || !token) return null;
+  const kind = /apify\.com/i.test(endpointUrl) ? 'apify' : 'contract';
+  return {
+    kind,
+    endpointUrl,
+    actorId: kind === 'apify' ? (process.env.LINKEDIN_ACTOR_ID || '').trim() || APIFY_DEFAULT_ACTOR : '',
+    token,
+    providerLabel: (process.env.LINKEDIN_PROVIDER_LABEL || 'LinkedIn Talent API').trim() || 'LinkedIn Talent API',
+    dailyLimit: Number(process.env.LINKEDIN_DAILY_LIMIT) || 0,
+    source: 'env',
+  };
+}
+
+function envGoogle(): GoogleOAuthConnection | null {
+  const clientId = (process.env.GOOGLE_CLIENT_ID || '').trim();
+  const clientSecret = (process.env.GOOGLE_CLIENT_SECRET || '').trim();
+  if (!clientId || !clientSecret) return null;
+  return {
+    clientId,
+    clientSecret,
+    calendarId: (process.env.GOOGLE_CALENDAR_ID || 'primary').trim() || 'primary',
+    redirectUri: (process.env.GOOGLE_REDIRECT_URI || '').trim(),
+    source: 'env',
+  };
+}
+
+/** The sourcing provider in effect (panel first, then the environment). */
+export function sourcingConnection(): SourcingConnection | null {
+  const stored = state().connections.sourcing;
+  if (stored) {
+    const token = decryptSecret(stored.tokenEnc);
+    if (token) {
+      return {
+        kind: stored.kind,
+        endpointUrl: stored.endpointUrl,
+        actorId: stored.actorId,
+        token,
+        providerLabel: stored.providerLabel,
+        dailyLimit: stored.dailyLimit ?? DEFAULT_DAILY_LIMIT,
+        source: 'admin',
+      };
+    }
+    // An unreadable token (another APP_SECRET) must not silently look configured.
+    return null;
+  }
+  return envSourcing();
+}
+
+/** The Google OAuth client in effect (panel first, then the environment). */
+export function googleOAuthConnection(): GoogleOAuthConnection | null {
+  const stored = state().connections.google;
+  if (stored) {
+    const clientSecret = decryptSecret(stored.clientSecretEnc);
+    if (clientSecret) {
+      return {
+        clientId: stored.clientId,
+        clientSecret,
+        calendarId: stored.calendarId,
+        redirectUri: stored.redirectUri,
+        source: 'admin',
+      };
+    }
+    return null;
+  }
+  return envGoogle();
+}
+
+function hostOfUrl(url: string): string | null {
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+function hintOf(secret: string): string {
+  if (!secret) return '';
+  if (secret.length <= 8) return '••••';
+  return `${secret.slice(0, 4)}…${secret.slice(-4)}`;
+}
+
+/** What /admin and the workspace «اتصال‌ها» tab may see — never a secret. */
+export function connectionsPublic(origin: string): ConnectionsPayload {
+  const s = state().connections;
+  const src = sourcingConnection();
+  const goog = googleOAuthConnection();
+  const base = origin.replace(/\/$/, '');
+  const effective = goog?.redirectUri || `${base}/api/integrations/calendar/callback`;
+  const storedGoogle = s.google;
+  return {
+    sourcing: {
+      configured: Boolean(src),
+      source: src?.source ?? null,
+      kind: src?.kind ?? 'contract',
+      actorId: src?.actorId ?? '',
+      async: src?.kind === 'apify',
+      endpointHost: src ? hostOfUrl(src.endpointUrl) : null,
+      endpointUrl: src?.source === 'admin' ? src.endpointUrl : '',
+      providerLabel: src?.providerLabel || 'LinkedIn',
+      dailyLimit: src?.dailyLimit ?? DEFAULT_DAILY_LIMIT,
+      tokenHint: s.sourcing ? s.sourcing.tokenHint : src ? 'از متغیرهای محیطی سرور' : '',
+      updatedAtISO: s.sourcing?.updatedAtISO ?? null,
+      updatedBy: s.sourcing?.updatedBy ?? null,
+      lastTestAtISO: s.sourcing?.lastTestAtISO ?? null,
+      lastTestOk: s.sourcing?.lastTestOk ?? null,
+      lastError: s.sourcing?.lastError ?? null,
+      fromEnv: src?.source === 'env',
+    },
+    google: {
+      configured: Boolean(goog),
+      source: goog?.source ?? null,
+      clientId: goog?.clientId || '',
+      secretHint: storedGoogle
+        ? hintOf(decryptSecret(storedGoogle.clientSecretEnc) || '')
+        : goog
+          ? 'از متغیرهای محیطی سرور'
+          : '',
+      hasSecret: Boolean(goog),
+      calendarId: goog?.calendarId || 'primary',
+      redirectUri: goog?.redirectUri || '',
+      effectiveRedirectUri: effective,
+      scopes: GOOGLE_SCOPE_LIST,
+      updatedAtISO: storedGoogle?.updatedAtISO ?? null,
+      updatedBy: storedGoogle?.updatedBy ?? null,
+      lastTestAtISO: storedGoogle?.lastTestAtISO ?? null,
+      lastTestOk: storedGoogle?.lastTestOk ?? null,
+      lastError: storedGoogle?.lastError ?? null,
+      fromEnv: goog?.source === 'env',
+    },
+    email: sharedEmailPublic(),
+    sms: sharedSmsPublic(),
+    docs: { sourcing: 'docs/CONNECT-LINKEDIN.md', google: 'docs/CONNECT-GOOGLE-CALENDAR.md' },
+  };
+}
+
+/** Masked view of the deployment-wide mailbox (never the password). */
+export function sharedEmailPublic() {
+  const stored = state().connections.email;
+  const eff = sharedEmailConnection();
+  const env = !stored ? envSharedEmail() : null;
+  return {
+    configured: Boolean(eff),
+    source: eff?.source ?? null,
+    host: eff?.host ?? null,
+    port: eff?.port ?? null,
+    secure: eff?.secure ?? true,
+    username: eff?.username ?? null,
+    fromName: eff?.fromName || '',
+    fromAddress: eff?.fromAddress ?? null,
+    replyTo: eff?.replyTo ?? null,
+    hasPassword: Boolean(eff?.password || stored?.passwordEnc || env?.password),
+    updatedAtISO: stored?.updatedAtISO ?? null,
+    updatedBy: stored?.updatedBy ?? null,
+    lastTestAtISO: stored?.lastTestAtISO ?? null,
+    lastTestOk: stored?.lastTestOk ?? null,
+    lastError: stored?.lastError ?? null,
+    fromEnv: !stored && Boolean(env),
+  };
+}
+
+/** Masked view of the deployment-wide SMS line. */
+export function sharedSmsPublic() {
+  const stored = state().connections.sms;
+  const eff = sharedSmsConnection();
+  const env = !stored ? envSharedSms() : null;
+  return {
+    configured: Boolean(eff),
+    source: eff?.source ?? null,
+    provider: eff?.provider ?? null,
+    sender: eff?.sender ?? null,
+    hasApiKey: Boolean(eff?.apiKey || stored?.apiKeyEnc || env?.apiKey),
+    updatedAtISO: stored?.updatedAtISO ?? null,
+    updatedBy: stored?.updatedBy ?? null,
+    lastTestAtISO: stored?.lastTestAtISO ?? null,
+    lastTestOk: stored?.lastTestOk ?? null,
+    lastError: stored?.lastError ?? null,
+    fromEnv: !stored && Boolean(env),
+  };
+}
+
+function validEndpoint(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return /^https?:$/.test(u.protocol) && Boolean(u.host);
+  } catch {
+    return false;
+  }
+}
+
+function cleanSecret(v: unknown, max = 2000): string {
+  return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+export function saveSourcingConnection(input: SourcingConnectionInput, actor: string): void {
+  const st = state();
+  const previous = st.connections.sourcing;
+  const kind: 'contract' | 'apify' = input.kind === 'apify' ? 'apify' : input.kind === 'contract' ? 'contract' : previous?.kind || 'contract';
+  const fallbackUrl = kind === 'apify' ? APIFY_DEFAULT_BASE : '';
+  const endpointUrl = (typeof input.endpointUrl === 'string' ? input.endpointUrl.trim() : '') || previous?.endpointUrl || fallbackUrl;
+  if (!endpointUrl) throw new PlatformInputError('آدرس سرویس جست‌وجو را وارد کنید.', 'endpointUrl');
+  if (!validEndpoint(endpointUrl)) throw new PlatformInputError('آدرس باید با http:// یا https:// شروع شود.', 'endpointUrl');
+  let actorId = '';
+  if (kind === 'apify') {
+    const raw = (typeof input.actorId === 'string' ? input.actorId.trim() : '') || previous?.actorId || APIFY_DEFAULT_ACTOR;
+    actorId = raw.replace(/\//g, '~');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{1,80}~[A-Za-z0-9][A-Za-z0-9_.-]{1,120}$/.test(actorId)) {
+      throw new PlatformInputError('شناسهٔ Actor آپافی به شکل user~actor یا user/actor است.', 'actorId');
+    }
+  }
+  const token = cleanSecret(input.token) || (st.connections.sourcing ? decryptSecret(st.connections.sourcing.tokenEnc) || '' : '');
+  if (!token) throw new PlatformInputError('توکن دسترسی سرویس را وارد کنید.', 'token');
+  if (token.length < 4 || /\s/.test(token)) throw new PlatformInputError('توکن معتبر به نظر نمی‌رسد (دست‌کم ۴ نویسه، بدون فاصله).', 'token');
+  if (input.providerLabel !== undefined && input.providerLabel.length > 80) {
+    throw new PlatformInputError('نام سرویس خیلی طولانی است.', 'providerLabel');
+  }
+  const now = new Date().toISOString();
+  const next: StoredSourcingConnection = {
+    kind,
+    endpointUrl,
+    actorId,
+    tokenEnc: cleanSecret(input.token) ? encryptSecret(token) : previous!.tokenEnc,
+    tokenHint: hintOf(token),
+    providerLabel:
+      (input.providerLabel || '').trim() ||
+      previous?.providerLabel ||
+      (kind === 'apify' ? 'Apify · HarvestAPI' : 'LinkedIn Talent API'),
+    dailyLimit: input.dailyLimit === undefined ? previous?.dailyLimit ?? DEFAULT_DAILY_LIMIT : clampLimit(input.dailyLimit),
+    updatedAtISO: now,
+    updatedBy: actor,
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous?.lastTestOk ?? null,
+    lastError: previous?.lastError ?? null,
+  };
+  commit({ ...st, connections: { ...st.connections, sourcing: next } });
+}
+
+export function clearSourcingConnection(): boolean {
+  const st = state();
+  if (!st.connections.sourcing) return false;
+  commit({ ...st, connections: { ...st.connections, sourcing: null } });
+  return true;
+}
+
+export function markSourcingProbe(ok: boolean, error: string | null): void {
+  const st = state();
+  if (!st.connections.sourcing) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      sourcing: { ...st.connections.sourcing, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
+}
+
+export function saveGoogleConnection(input: GoogleConnectionInput, actor: string): void {
+  const st = state();
+  const previous = st.connections.google;
+  const clientId = (typeof input.clientId === 'string' ? input.clientId.trim() : previous?.clientId || '').slice(0, 300);
+  if (!clientId) throw new PlatformInputError('Client ID را وارد کنید.', 'clientId');
+  if (!/^[0-9A-Za-z_-]{6,}\.apps\.googleusercontent\.com$/.test(clientId)) {
+    throw new PlatformInputError('Client ID گوگل معمولاً به ‎.apps.googleusercontent.com ختم می‌شود.', 'clientId');
+  }
+  const secret = cleanSecret(input.clientSecret) || (previous ? decryptSecret(previous.clientSecretEnc) || '' : '');
+  if (!secret) throw new PlatformInputError('Client Secret را وارد کنید.', 'clientSecret');
+  if (secret.length < 8 || /\s/.test(secret)) throw new PlatformInputError('Client Secret معتبر به نظر نمی‌رسد.', 'clientSecret');
+  const redirectUri = input.redirectUri !== undefined ? input.redirectUri.trim().slice(0, 400) : previous?.redirectUri || '';
+  if (redirectUri && !validEndpoint(redirectUri)) throw new PlatformInputError('آدرس بازگشت باید یک URL کامل http(s) باشد.', 'redirectUri');
+  const calendarId = (input.calendarId !== undefined ? input.calendarId.trim() : previous?.calendarId || 'primary').slice(0, 200) || 'primary';
+  const now = new Date().toISOString();
+  const next: StoredGoogleConnection = {
+    clientId,
+    clientSecretEnc: cleanSecret(input.clientSecret) ? encryptSecret(secret) : previous!.clientSecretEnc,
+    calendarId,
+    redirectUri,
+    updatedAtISO: now,
+    updatedBy: actor,
+    // A changed client id/secret invalidates the previous probe result.
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous && previous.clientId === clientId ? previous.lastTestOk : null,
+    lastError: previous && previous.clientId === clientId ? previous.lastError : null,
+  };
+  commit({ ...st, connections: { ...st.connections, google: next } });
+}
+
+export function clearGoogleConnection(): boolean {
+  const st = state();
+  if (!st.connections.google) return false;
+  commit({ ...st, connections: { ...st.connections, google: null } });
+  return true;
+}
+
+export function markGoogleProbe(ok: boolean | null, error: string | null): void {
+  const st = state();
+  if (!st.connections.google) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      google: { ...st.connections.google, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
+}
+
+// ------------------------------------------------- shared mail and SMS ----
+
+/**
+ * One mailbox and one SMS line for the whole deployment, entered in
+ * /admin › «کلیدها و اتصال‌ها». A workspace that has not connected its own
+ * mailbox/gateway uses these instead — and its settings page says so plainly
+ * («از طرف سامانه») rather than pretending the workspace owns the account.
+ */
+export interface SharedEmailConnection {
+  host: string;
+  port: number;
+  secure: boolean;
+  username: string;
+  password: string;
+  fromName: string;
+  fromAddress: string;
+  replyTo: string | null;
+  source: 'admin' | 'env';
+}
+
+export interface SharedSmsConnection {
+  provider: 'kavenegar' | 'smsir';
+  apiKey: string;
+  sender: string;
+  source: 'admin' | 'env';
+}
+
+/** Encrypted shapes for the settings card (never the password itself). */
+export function sharedEmailStored() {
+  return state().connections.email;
+}
+
+export function sharedSmsStored() {
+  return state().connections.sms;
+}
+
+function envSharedEmail(): SharedEmailConnection | null {
+  const host = (process.env.SMTP_HOST || '').trim();
+  const username = (process.env.SMTP_USER || process.env.SMTP_USERNAME || '').trim();
+  const password = (process.env.SMTP_PASS || process.env.SMTP_PASSWORD || '').trim();
+  const fromAddress = (process.env.SMTP_FROM || process.env.SMTP_FROM_ADDRESS || username).trim();
+  if (!host || !username || !password || !fromAddress) return null;
+  return {
+    host,
+    port: Number(process.env.SMTP_PORT) || (process.env.SMTP_SECURE === '1' ? 465 : 587),
+    secure: process.env.SMTP_SECURE === '1',
+    username,
+    password,
+    fromName: (process.env.SMTP_FROM_NAME || '').trim(),
+    fromAddress,
+    replyTo: (process.env.SMTP_REPLY_TO || '').trim() || null,
+    source: 'env',
+  };
+}
+
+function envSharedSms(): SharedSmsConnection | null {
+  const apiKey = (process.env.SMS_API_KEY || process.env.KAVENEGAR_API_KEY || process.env.SMSIR_API_KEY || '').trim();
+  const sender = (process.env.SMS_SENDER || '').trim();
+  if (!apiKey || !sender) return null;
+  return {
+    provider: (process.env.SMS_PROVIDER || '').toLowerCase() === 'smsir' ? 'smsir' : 'kavenegar',
+    apiKey,
+    sender,
+    source: 'env',
+  };
+}
+
+export function sharedEmailConnection(): SharedEmailConnection | null {
+  const stored = state().connections.email;
+  if (stored) {
+    const password = decryptSecret(stored.passwordEnc);
+    if (!password) return null; // unreadable (another APP_SECRET) — never pretend
+    return {
+      host: stored.host,
+      port: stored.port,
+      secure: stored.secure,
+      username: stored.username,
+      password,
+      fromName: stored.fromName,
+      fromAddress: stored.fromAddress,
+      replyTo: stored.replyTo,
+      source: 'admin',
+    };
+  }
+  return envSharedEmail();
+}
+
+export function sharedSmsConnection(): SharedSmsConnection | null {
+  const stored = state().connections.sms;
+  if (stored) {
+    const apiKey = decryptSecret(stored.apiKeyEnc);
+    if (!apiKey) return null;
+    return { provider: stored.provider, apiKey, sender: stored.sender, source: 'admin' };
+  }
+  return envSharedSms();
+}
+
+/**
+ * Encrypted shapes for db.resolveOrgSecrets(). The env fallback is encrypted on
+ * the fly so that every consumer sees one uniform stored shape.
+ */
+export function sharedEmailSecrets(): NonNullable<import('./db').OrgSecrets['email']> | null {
+  const stored = state().connections.email;
+  if (stored) return { ...stored, source: 'shared' as const };
+  const env = envSharedEmail();
+  if (!env) return null;
+  try {
+    return {
+      host: env.host,
+      port: env.port,
+      secure: env.secure,
+      username: env.username,
+      passwordEnc: encryptSecret(env.password),
+      fromName: env.fromName || 'واحد منابع انسانی',
+      fromAddress: env.fromAddress,
+      replyTo: env.replyTo,
+      lastTestAtISO: null,
+      lastTestOk: null,
+      lastError: null,
+      source: 'env' as const,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function sharedSmsSecrets(): NonNullable<import('./db').OrgSecrets['sms']> | null {
+  const stored = state().connections.sms;
+  if (stored) return { ...stored, source: 'shared' as const };
+  const env = envSharedSms();
+  if (!env) return null;
+  try {
+    return {
+      provider: env.provider,
+      apiKeyEnc: encryptSecret(env.apiKey),
+      sender: env.sender,
+      lastTestAtISO: null,
+      lastTestOk: null,
+      lastError: null,
+      source: 'env' as const,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export interface SharedEmailInput {
+  host?: string;
+  port?: number;
+  secure?: boolean;
+  username?: string;
+  /** Empty on edit keeps the stored password. */
+  password?: string;
+  fromName?: string;
+  fromAddress?: string;
+  replyTo?: string | null;
+}
+
+export function saveSharedEmail(input: SharedEmailInput, actor: string): void {
+  const current = sharedEmailStored();
+  const previous = current
+    ? ({ ...current } as NonNullable<import('./db').OrgSecrets['email']>)
+    : undefined;
+  let prepared;
+  try {
+    prepared = prepareEmailSettings(
+      {
+        host: String(input.host || '').trim(),
+        port: Number(input.port) || 0,
+        secure: Boolean(input.secure),
+        username: String(input.username || '').trim(),
+        password: input.password ?? '',
+        fromName: String(input.fromName || '').trim(),
+        fromAddress: String(input.fromAddress || '').trim(),
+        replyTo: (input.replyTo || '').trim() || null,
+      },
+      previous
+    );
+  } catch (err: any) {
+    throw new PlatformInputError(err?.message || 'تنظیمات ایمیل معتبر نیست.', 'host');
+  }
+  const now = new Date().toISOString();
+  const next: StoredSharedEmail = {
+    host: prepared.host,
+    port: prepared.port,
+    secure: prepared.secure,
+    username: prepared.username,
+    passwordEnc: prepared.passwordEnc,
+    fromName: prepared.fromName,
+    fromAddress: prepared.fromAddress,
+    replyTo: prepared.replyTo,
+    updatedAtISO: now,
+    updatedBy: actor,
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous?.lastTestOk ?? null,
+    lastError: previous?.lastError ?? null,
+  };
+  const st = state();
+  commit({ ...st, connections: { ...st.connections, email: next } });
+}
+
+export function clearSharedEmail(): boolean {
+  const st = state();
+  if (!st.connections.email) return false;
+  commit({ ...st, connections: { ...st.connections, email: null } });
+  return true;
+}
+
+export function markSharedEmailProbe(ok: boolean, error: string | null): void {
+  const st = state();
+  if (!st.connections.email) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      email: { ...st.connections.email, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
+}
+
+export interface SharedSmsInput {
+  provider?: 'kavenegar' | 'smsir';
+  /** Empty on edit keeps the stored key. */
+  apiKey?: string;
+  sender?: string;
+}
+
+export function saveSharedSms(input: SharedSmsInput, actor: string): void {
+  const previous = sharedSmsStored();
+  const previousAsSecrets = previous ? ({ ...previous } as NonNullable<import('./db').OrgSecrets['sms']>) : undefined;
+  let prepared;
+  try {
+    prepared = prepareSmsSettings(
+      {
+        provider: input.provider === 'smsir' ? 'smsir' : input.provider === 'kavenegar' ? 'kavenegar' : previous?.provider || 'kavenegar',
+        apiKey: input.apiKey ?? '',
+        sender: String(input.sender || '').trim(),
+      },
+      previousAsSecrets
+    );
+  } catch (err: any) {
+    throw new PlatformInputError(err?.message || 'تنظیمات پیامک معتبر نیست.', 'sender');
+  }
+  const now = new Date().toISOString();
+  const next: StoredSharedSms = {
+    provider: prepared.provider,
+    apiKeyEnc: prepared.apiKeyEnc,
+    sender: prepared.sender,
+    updatedAtISO: now,
+    updatedBy: actor,
+    lastTestAtISO: previous?.lastTestAtISO ?? null,
+    lastTestOk: previous?.lastTestOk ?? null,
+    lastError: previous?.lastError ?? null,
+  };
+  const st = state();
+  commit({ ...st, connections: { ...st.connections, sms: next } });
+}
+
+export function clearSharedSms(): boolean {
+  const st = state();
+  if (!st.connections.sms) return false;
+  commit({ ...st, connections: { ...st.connections, sms: null } });
+  return true;
+}
+
+export function markSharedSmsProbe(ok: boolean, error: string | null): void {
+  const st = state();
+  if (!st.connections.sms) return;
+  commit({
+    ...st,
+    connections: {
+      ...st.connections,
+      sms: { ...st.connections.sms, lastTestAtISO: new Date().toISOString(), lastTestOk: ok, lastError: error },
+    },
+  });
 }
 
 // ---------------------------------------------------------- behaviour ----

@@ -202,6 +202,45 @@
   }
 }
 
+/* =====================================================================
+   Print — «کیت مصاحبه» prints on paper and on a phone's «save as PDF».
+   The app chrome (sidebar, sticky header, bottom nav, the compare tray) is
+   removed; cards stop breaking across pages; nothing else changes colour.
+   ===================================================================== */
+@media print {
+  @page {
+    margin: 14mm 12mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  aside[aria-label="نوار کناری"],
+  header[class*="sticky"],
+  nav[aria-label="ناوبری"],
+  .print-hide,
+  .hv-compare-tray,
+  [role="dialog"] {
+    display: none !important;
+  }
+  main#main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  .print-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* Cards lose their shadow and borders stay hairline: readable on paper. */
+  .hv-card {
+    box-shadow: none !important;
+    border-color: #d9dedb !important;
+  }
+  a[href]::after {
+    content: ''; /* no URL noise after every link */
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

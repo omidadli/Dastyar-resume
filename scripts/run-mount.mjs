@@ -3,7 +3,8 @@
  * the main screens — landing, demo workspace, dashboard, jobs, job detail with
  * the candidate panel, comparison and settings.
  *
- *   npm run build && DATA_DIR=/tmp/hv-mount PORT=3000 NODE_ENV=production node dist/server.cjs
+ *   npm run build && DATA_DIR=/tmp/hv-mount PORT=3000 NODE_ENV=production \
+ *     ADMIN_EMAILS=admin@hovida-demo.ir node dist/server.cjs   # ADMIN_EMAILS adds the /admin step
  *   npm run test:mount
  */
 import { JSDOM } from 'jsdom';
@@ -62,6 +63,10 @@ const app1 = mount(root);
 assert(await waitFor(() => text().includes('روشن می‌شود')), 'landing renders the brand tagline');
 assert(bootHidden || root.childElementCount > 0, '#root is not empty (no blank page)');
 assert(text().includes('ورود به نسخه نمایشی'), 'the demo entry point is offered');
+// The login page (not the landing) carries the organizational entry.
+navigate('/login');
+assert(await waitFor(() => text().includes('ورود سازمانی') && text().includes('ادامه با حساب سازمانی')), 'the login page offers the organizational (SSO) entry');
+assert(text().includes('ایمیل سازمانی'), 'the SSO box asks for the work e-mail first');
 
 // 2. Demo workspace → dashboard
 const demo = await nodeFetch(SERVER + '/api/auth/demo', { method: 'POST', headers: { 'Content-Type': 'application/json' } }).then((r) => r.json());
@@ -73,7 +78,7 @@ const root2 = window.document.createElement('div');
 window.document.body.appendChild(root2);
 root.remove();
 navigate('/app');
-mount(root2);
+const app2 = mount(root2);
 assert(await waitFor(() => text().includes('در انتظار تصمیم شما'), 10000), 'dashboard renders for the demo workspace');
 // The card titles show while the figures still load: wait for the data itself.
 assert(await waitFor(() => text().includes('زمان صرفه‌جویی‌شده (برآورد)'), 10000), 'the time-saved figure is labelled as an estimate');
@@ -99,6 +104,197 @@ assert(await waitFor(() => text().includes('مقایسه کاندیداها') &&
 // 6. Settings › AI is honest about the engine
 navigate('/app/settings/ai');
 assert(await waitFor(() => text().includes('وضعیت هوش مصنوعی')), 'AI settings render');
+
+// 7. Talent sourcing page (honest about a missing provider too)
+navigate('/app/sourcing');
+assert(await waitFor(() => text().includes('دنبال چه کسی هستید؟'), 10000), 'sourcing page renders its brief form');
+assert(
+  text().includes('جست‌وجو در LinkedIn') || text().includes('در این نصب فعال نیست'),
+  'sourcing shows the search action or an honest «not configured» note'
+);
+// The file path works with no provider at all, so it must always be on the page.
+assert(text().includes('فهرستی از قبل دارید؟'), 'the CSV import card is available without any provider');
+assert(text().includes('انتخاب فایل CSV') && text().includes('ساخت فهرست و غربال'), 'the CSV card offers choosing a file and building the list');
+
+// 8. Settings › connections (e-mail + calendar)
+navigate('/app/settings/integrations');
+assert(await waitFor(() => text().includes('ایمیل سازمان') && text().includes('Google Calendar')), 'connection settings render both cards');
+assert(text().includes('اتصال‌ها'), 'the connections tab is reachable from settings');
+assert(text().includes('پیامک سازمان'), 'the connections tab offers the workspace SMS line');
+assert(text().includes('پورتال شغلی'), 'the connections tab offers the public career portal');
+assert(text().includes('ورود سازمانی (SSO)'), 'the connections tab offers SSO for the team');
+assert(text().includes('دامنه‌های ایمیل مجاز') && text().includes('بررسی اتصال'), 'the SSO card asks for the company domains and can test the provider');
+
+// 8a. Settings › organization: the offer approval chain is configurable.
+navigate('/app/settings/org');
+assert(await waitFor(() => text().includes('غربالگری بی‌طرف')), 'the organization tab renders its cards');
+assert(text().includes('گردش تأیید پیشنهاد'), 'the organization tab offers the offer approval chain');
+
+// 8b. Settings › account: the 2FA card is there, and the demo is honest about it.
+navigate('/app/settings/account');
+assert(await waitFor(() => text().includes('ورود دومرحله‌ای')), 'the account tab offers two-factor login');
+assert(await waitFor(() => text().includes('در نسخهٔ نمایشی')), 'the demo workspace says 2FA belongs on a real account');
+assert(text().includes('تغییر رمز عبور'), 'the password card is still beside it');
+
+// 9. Interview modal opens from the candidate panel
+const clickByText = (needle) => {
+  const el = Array.from(window.document.querySelectorAll('button, a')).find((b) => (b.textContent || '').includes(needle));
+  if (!el) return false;
+  el.click();
+  return true;
+};
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('تصمیم شما'), 10000), 'candidate panel is back for the interview step');
+assert(clickByText('تعیین جلسهٔ مصاحبه'), 'the interview button exists in the candidate panel');
+assert(await waitFor(() => text().includes('مدت جلسه') && text().includes('مصاحبه‌گران')), 'the interview form opens with its fields');
+assert(text().includes('تاریخ (شمسی)') && text().includes('ساعت (تهران)'), 'the interview form asks for a Jalali date and Tehran time');
+
+// 10. Message modal explains how the message leaves HOVIDA
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('تصمیم شما'), 10000), 'candidate panel is back for the message step');
+assert(clickByText('پیام'), 'the message action exists in the candidate panel');
+// The two newer candidate actions live in the «اطلاعات بیشتر» tab: a scheduling
+// link the candidate uses to pick a time, and an offer letter they sign.
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('اطلاعات بیشتر'), 10000), 'the candidate panel is open');
+assert(clickByText('اطلاعات بیشتر'), 'the «more» tab is reachable');
+const hasAction = (needle) => Array.from(window.document.querySelectorAll('button')).some((b) => (b.textContent || '').includes(needle));
+assert(await waitFor(() => hasAction('انتخاب زمان مصاحبه'), 8000), 'the candidate panel offers the self-scheduling link');
+assert(hasAction('پیشنهاد شغلی'), 'the candidate panel offers the offer letter');
+assert(
+  await waitFor(() => text().includes('ارسال با ایمیل سازمان') || text().includes('ایمیل سازمان را در «تنظیمات'), 12000),
+  'the message modal offers organizational e-mail or explains how to connect it'
+);
+
+// 11. «اتوماسیون جذب» — the queue, the rules, and the promise that nothing is
+// sent to a candidate before a human approves it.
+navigate('/app/automation');
+assert(await waitFor(() => text().includes('اتوماسیون جذب'), 12000), 'automation page renders');
+assert(await waitFor(() => text().includes('صف تأیید') && text().includes('قواعد و متن‌ها'), 15000), 'the queue and the rules tabs are offered');
+assert(text().includes('تا شما تأیید نکنید'), 'the page states that nothing is sent before approval');
+assert(clickByText('پیش‌نمایش'), 'the dry-run button exists');
+assert(await waitFor(() => text().includes('پیش‌نمایش بدون ثبت'), 15000), 'a dry run says that nothing was saved');
+assert(clickByText('قواعد و متن‌ها'), 'the rules tab is reachable');
+assert(await waitFor(() => text().includes('آستانهٔ دعوت'), 12000), 'the rules tab shows the invite threshold');
+assert(text().includes('ارسال خودکار نامهٔ نتیجه'), 'the automatic-send rule is exposed with its warning');
+assert(text().includes('متغیرهای متن'), 'the template variables are documented on the page');
+
+// 11a. «کیت مصاحبه» — the questions this job needs, and this candidate's own.
+navigate(`/app/jobs/${hr.id}/kit`);
+assert(await waitFor(() => text().includes('کیت مصاحبه'), 15000), 'the interview kit opens from the job');
+assert(await waitFor(() => text().includes('بشنوید') && text().includes('علامت هشدار'), 15000), 'each question says what to listen for and what to worry about');
+assert(text().includes('پایان جلسه'), 'the kit closes the session with a next step');
+assert(text().includes('چطور از این کیت استفاده کنیم'), 'the sidebar explains how to run it');
+assert(text().includes('معیارهای این فرصت'), 'the job criteria are repeated beside the questions');
+navigate(`/app/jobs/${hr.id}/kit?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('پرسش از خود این رزومه'), 15000), 'with a candidate, the kit asks about that résumé');
+assert(text().includes('این کیت برای'), 'and says whose kit it is');
+
+// 11a2. «عملکرد تیم» و «هزینهٔ هر استخدام» — the numbers a manager asks for.
+navigate('/app/reports/team');
+assert(await waitFor(() => text().includes('عملکرد تیم') && text().includes('هر عضو، چه کاری انجام داده'), 15000), 'the team report opens');
+assert(await waitFor(() => text().includes('تصمیم‌های ثبت‌شده') && text().includes('کارت ارزیابی'), 15000), 'team KPIs are counted, not placeholders');
+assert(text().includes('این گزارش چه چیزی نیست'), 'the team report says plainly what it is not');
+assert(!text().includes('مینا'), 'no candidate name appears in the team report');
+navigate('/app/reports/cost');
+assert(await waitFor(() => text().includes('هزینهٔ هر استخدام') && text().includes('ردیف‌های هزینه'), 15000), 'the cost report opens for the demo owner');
+assert(await waitFor(() => text().includes('هزینهٔ زمان تیم'), 15000), 'the time-cost card is present');
+assert(text().includes('آگهی و تبلیغ') || text().includes('شرکت مشاور'), 'the demo cost rows are listed');
+assert(text().includes('مستقیم + برآورد زمان تیم'), 'direct cost and the estimate are labelled separately');
+navigate('/app/reports');
+assert(await waitFor(() => text().includes('روند رزومه‌ها'), 15000), 'the screening report still opens');
+assert(text().includes('غربالگری') && text().includes('عملکرد تیم') && text().includes('هزینهٔ استخدام'), 'all three reports are one click apart');
+
+// 11b. «غربالگری بی‌طرف» — the switch, the masked table, the reveal.
+const setBlind = (on) =>
+  nodeFetch(SERVER + '/api/org', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Hovida-Session': demo.token },
+    body: JSON.stringify({ blindScreening: on }),
+  }).then((r) => r.json());
+
+const firstName = list.items[0].candidateName;
+await setBlind(true);
+navigate('/app/settings/org');
+assert(await waitFor(() => text().includes('غربالگری بی‌طرف'), 12000), 'the workspace settings offer blind screening');
+assert(await waitFor(() => text().includes('پنهان‌سازی فعال است'), 8000), 'the card shows it as on');
+assert(text().includes('آشکارسازی هویت'), 'the card explains how the identity comes back');
+
+navigate(`/app/jobs/${hr.id}`);
+assert(await waitFor(() => text().includes('کارجوی'), 15000), 'the screening table labels candidates blind');
+assert(Boolean(firstName) && !text().includes(firstName), 'the real name is not on the page', String(firstName));
+
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('این کارجو بی‌نام نمایش داده می‌شود'), 15000), 'the panel says why it is anonymous');
+assert(clickByText('آشکارسازی هویت'), 'the reveal action is offered');
+assert(await waitFor(() => text().includes('دلیل آشکارسازی'), 12000), 'the reveal asks for a reason');
+assert(clickByText('آشکار کن'), 'the reveal can be confirmed');
+assert(await waitFor(() => text().includes('هویت آشکار شد'), 15000), 'the reveal reports itself');
+assert(await waitFor(() => !text().includes('این کارجو بی‌نام نمایش داده می‌شود'), 12000), 'the banner goes away after the reveal');
+
+await setBlind(false);
+navigate(`/app/jobs/${hr.id}`);
+assert(await waitFor(() => text().includes(firstName || 'کارجوی'), 15000), 'switching it off brings the names back');
+
+// 12. «تجربهٔ کارجو» — the public survey page a candidate opens from the e-mail.
+// Created through the API so the page is exercised exactly as a candidate sees it.
+const surveyRes = await nodeFetch(SERVER + '/api/surveys', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Hovida-Session': demo.token },
+  body: JSON.stringify({ resumeId: list.items[0].id, stage: 'after_interview' }),
+});
+const created = await surveyRes.json().catch(() => ({}));
+assert(Boolean(created?.survey?.url), 'a survey link can be created for a candidate', String(surveyRes.status));
+if (created?.survey?.url) {
+  const token = created.survey.url.split('/survey/')[1];
+  navigate(`/survey/${token}`);
+  assert(await waitFor(() => text().includes('معرفی'), 12000), 'the public survey page asks the NPS question');
+  assert(text().includes('روشن بودن مراحل') && text().includes('رفتار محترمانه'), 'the three experience dimensions are shown');
+  assert(text().includes('ثبت نظر'), 'the submit button is offered');
+  const zeroButton = Array.from(window.document.querySelectorAll('button')).find((b) => (b.textContent || '').trim() === '۰');
+  assert(Boolean(zeroButton), 'the 0–10 scale is rendered with Persian digits');
+  zeroButton?.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+  await sleep(200);
+  assert(clickByText('ثبت نظر'), 'a score can be picked and submitted');
+  assert(await waitFor(() => text().includes('پاسخ شما ثبت شد'), 12000), 'the candidate is thanked after answering');
+}
+
+// 8c. The assessment dialog: a real catalogue and an honest reading rule.
+navigate(`/app/jobs/${hr.id}?c=${list.items[0].id}`);
+assert(await waitFor(() => text().includes('تصمیم شما'), 10000), 'candidate panel is back for the assessment step');
+assert(clickByText('اطلاعات بیشتر'), 'the panel tab with the contact actions opens');
+assert(await waitFor(() => text().includes('آزمون و ارزیابی')), 'the candidate panel offers the assessment module');
+assert(clickByText('آزمون و ارزیابی'), 'the assessment action exists in the candidate panel');
+assert(await waitFor(() => text().includes('قضاوت موقعیتی: کارشناس جذب') && text().includes('نمونه‌کار: پشتیبانی مشتری')), 'the dialog lists the real templates');
+assert(text().includes('نحوهٔ خواندن نتیجه'), 'the dialog explains how the result is read before sending');
+assert(text().includes('ارزیابی ساختاریافتهٔ داخلی'), 'the dialog never calls the test a psychometric instrument');
+
+// 14. /admin › «کلیدها و اتصال‌ها» — the credential map. Only when this server
+// was started with ADMIN_EMAILS (the developer's local run), so the suite stays
+// runnable without one.
+const adminSignup = await nodeFetch(SERVER + '/api/auth/signup', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ orgName: 'سازمان مدیریت', name: 'مدیر سامانه', email: 'admin@hovida-demo.ir', password: 'Admin12345' }),
+})
+  .then((r) => r.json())
+  .catch(() => ({}));
+if (adminSignup?.token && adminSignup?.user?.platformAdmin) {
+  setToken(adminSignup.token);
+  app2.unmount();
+  const root3 = window.document.createElement('div');
+  window.document.body.appendChild(root3);
+  root2.remove();
+  navigate('/admin/connections');
+  mount(root3);
+  assert(await waitFor(() => text().includes('نقشهٔ کلیدها'), 12000), 'the admin page lists every key and what it powers');
+  assert(text().includes('صندوق ایمیل مشترک سامانه'), 'the shared mailbox card is on the admin page');
+  assert(text().includes('خط پیامک مشترک سامانه'), 'the shared SMS line card is on the admin page');
+  assert(text().includes('همه را بررسی کن'), 'the health check is offered');
+  assert(text().includes('ورود به تنظیمات یک فضای کاری'), 'the admin can step into a workspace to enter its own keys');
+} else {
+  console.log('INFO  admin hub step skipped (start the server with ADMIN_EMAILS to include it)');
+}
 
 console.log(failures === 0 ? '\nALL PASS' : `\n${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);

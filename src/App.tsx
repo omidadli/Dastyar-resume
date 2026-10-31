@@ -51,11 +51,21 @@ const Dashboard = lazyPage(() => import('./pages/Dashboard'));
 const Jobs = lazyPage(() => import('./pages/Jobs'));
 const JobNew = lazyPage(() => import('./pages/JobNew'));
 const JobDetail = lazyPage(() => import('./pages/JobDetail'));
+const InterviewKit = lazyPage(() => import('./pages/InterviewKit'));
 const Candidates = lazyPage(() => import('./pages/Candidates'));
 const CandidatePage = lazyPage(() => import('./pages/CandidatePage'));
 const Compare = lazyPage(() => import('./pages/Compare'));
 const Talent = lazyPage(() => import('./pages/Talent'));
 const Reports = lazyPage(() => import('./pages/Reports'));
+const TeamReport = lazyPage(() => import('./pages/TeamReport'));
+const CostReport = lazyPage(() => import('./pages/CostReport'));
+const Sourcing = lazyPage(() => import('./pages/Sourcing'));
+const Automation = lazyPage(() => import('./pages/Automation'));
+const Careers = lazyPage(() => import('./pages/Careers'));
+const Offer = lazyPage(() => import('./pages/Offer'));
+const Schedule = lazyPage(() => import('./pages/Schedule'));
+const Survey = lazyPage(() => import('./pages/Survey'));
+const Assessment = lazyPage(() => import('./pages/Assessment'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
@@ -104,6 +114,9 @@ function appPage(pathname: string): React.ReactNode {
   if (pathname === '/app' || pathname === '/app/') return <Dashboard />;
   if (pathname === '/app/jobs') return <Jobs />;
   if (pathname === '/app/jobs/new') return <JobNew />;
+  // The kit is a printable page of its own, before the generic job match.
+  let km = matchPath('/app/jobs/:id/kit', pathname);
+  if (km) return RECORD_ID.test(km.id) ? <InterviewKit key={km.id} id={km.id} /> : <NotFound inApp />;
   let m = matchPath('/app/jobs/:id', pathname);
   // Keyed: moving between two openings (notification, search) starts with fresh filters and panels.
   if (m) return RECORD_ID.test(m.id) ? <JobDetail key={m.id} id={m.id} /> : <NotFound inApp />;
@@ -112,8 +125,13 @@ function appPage(pathname: string): React.ReactNode {
   if (m) return RECORD_ID.test(m.id) ? <CandidatePage key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/compare') return <Compare />;
   if (pathname === '/app/talent') return <Talent />;
+  if (pathname === '/app/sourcing') return <Sourcing />;
+  if (pathname === '/app/automation') return <Automation />;
   m = matchPath('/app/talent/:dept', pathname);
   if (m) return <Talent dept={m.dept} />;
+  // The three reports share a range; the specific paths come before the overview.
+  if (pathname === '/app/reports/team') return <TeamReport />;
+  if (pathname === '/app/reports/cost') return <CostReport />;
   if (pathname === '/app/reports') return <Reports />;
   if (pathname === '/app/settings') return <Settings tab="org" />;
   m = matchPath('/app/settings/:tab', pathname);
@@ -126,6 +144,58 @@ function Routes() {
   const { status } = useAuth();
 
   if (pathname === '/') return <Landing />;
+  // The public career portal: no session, no app shell — a candidate's page.
+  let m = matchPath('/careers/:slug/jobs/:jobId', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Careers slug={m.slug} jobId={m.jobId} />
+      </Suspense>
+    );
+  }
+  // The candidate's offer page, reached from the e-mail: the token is the key.
+  m = matchPath('/offer/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Offer token={m.token} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/schedule/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Schedule token={m.token} />
+      </Suspense>
+    );
+  }
+  // «تجربهٔ کارجو» — the survey the candidate got by e-mail.
+  m = matchPath('/survey/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Survey token={m.token} />
+      </Suspense>
+    );
+  }
+  // «آزمون و ارزیابی» — the test link a candidate got by e-mail.
+  m = matchPath('/assess/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Assessment token={m.token} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/careers/:slug', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Careers slug={m.slug} />
+      </Suspense>
+    );
+  }
   if (pathname === '/admin' || pathname.startsWith('/admin/')) {
     if (status === 'loading') return <FullScreenLoader />;
     return (

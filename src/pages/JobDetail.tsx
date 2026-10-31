@@ -1,15 +1,21 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  CalendarClock,
   CheckCircle2,
   Clock3,
   Columns3,
+  CopyCheck,
   Download,
+  NotebookText,
+  ExternalLink,
   FileStack,
+  Globe,
   ListChecks,
   MoreHorizontal,
   Pause,
   Pencil,
   Play,
+  MailCheck,
   SearchX,
   Sparkles,
   ThumbsDown,
@@ -23,6 +29,8 @@ import {
 import { PageHeader } from '../components/layout/AppShell';
 import { CandidatePanel } from '../components/candidates/CandidatePanel';
 import { CandidateTable } from '../components/candidates/CandidateTable';
+import { PipelineBoard } from '../components/jobs/PipelineBoard';
+import { InterviewList } from '../components/candidates/InterviewModal';
 import { AnalysisProgress } from '../components/jobs/AnalysisProgress';
 import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
@@ -64,9 +72,9 @@ import { candidateName, faDate, faNumber, toPersianDigits } from '../lib/format'
 import { navigate, setQuery, useLocation } from '../lib/router';
 import { useAsync, useDebounced, useMediaQuery } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import type { DecisionFilter, DecisionStatus, Job, MatchFilter, ResumeListItem, ResumeSort } from '../types/screening';
+import type { DecisionFilter, DecisionStatus, Job, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
-type JobTab = 'candidates' | 'criteria';
+type JobTab = 'candidates' | 'board' | 'interviews' | 'criteria';
 
 function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean; onClose: () => void; onSaved: (j: Job) => void }) {
   const [roleTitle, setRoleTitle] = useState(job.roleTitle);
@@ -140,14 +148,52 @@ export default function JobDetail({ id }: { id: string }) {
   const [decision, setDecision] = useState<DecisionFilter>('all');
   const [minYears, setMinYears] = useState(0);
   const [sort, setSort] = useState<ResumeSort>('match');
+  // Duplicates are judged against this department's earlier screenings.
+  const [novelty, setNovelty] = useState<NoveltyFilter>('all');
+  const [interviewVersion, setInterviewVersion] = useState(0);
+  const interviewsQ = useAsync(() => api.interviews.list({ jobId: id }), [id, interviewVersion]);
+  const [reminderBusy, setReminderBusy] = useState(false);
+  /**
+   * The automatic timer sends these hourly; this button exists for the moments a
+   * recruiter wants them out now (and so the result is never a silent guess).
+   */
+  const sendReminders = async () => {
+    setReminderBusy(true);
+    try {
+      const res = await api.interviews.sendReminders();
+      const { sent, due, skipped, failed } = res.reminders;
+      if (sent > 0) toast(`${toPersianDigits(sent)} یادآوری فرستاده شد.`, 'success');
+      else if (failed.length) toast(`ارسال ناموفق بود؛ در «تنظیمات ← اتصال‌ها» صندوق ایمیل را بررسی کنید.`, 'error');
+      else if (due === 0) toast(`جلسه‌ای در ${toPersianDigits(res.hours)} ساعت آینده نیست.`, 'info');
+      else toast(`${toPersianDigits(skipped.length)} جلسه یادآوری نشد (بدون ایمیل کارجو یا بدون صندوق ایمیل).`, 'info');
+      setInterviewVersion((v) => v + 1);
+    } catch (err: any) {
+      toast(err?.message || 'ارسال یادآوری ممکن نشد.', 'error');
+    } finally {
+      setReminderBusy(false);
+    }
+  };
+  const interviews = useMemo(() => (interviewsQ.data?.items || []).filter((i) => i.status !== 'cancelled'), [interviewsQ.data]);
+  const cancelInterview = async (interviewId: string) => {
+    try {
+      const res = await api.interviews.cancel(interviewId);
+      if (res.calendarError) toast(res.calendarError, 'error');
+      else toast('جلسه لغو شد.');
+      setInterviewVersion((v) => v + 1);
+      emitChange('activity');
+    } catch (e: any) {
+      toast(e?.message || 'لغو جلسه ممکن نشد.', 'error');
+    }
+  };
+
   const [qInput, setQInput] = useState('');
   const q = useDebounced(qInput, 250);
   const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [match, decision, minYears, sort, q]);
+  useEffect(() => setPage(1), [match, decision, minYears, sort, q, novelty]);
 
   const listQ = useAsync(
-    (signal) => api.resumes.list({ jobId: id, match, decision, minYears: minYears || undefined, sort, q, page, pageSize: 10 }, { signal }),
-    [id, match, decision, minYears, sort, q, page]
+    (signal) => api.resumes.list({ jobId: id, match, decision, minYears: minYears || undefined, sort, novelty, q, page, pageSize: 10 }, { signal }),
+    [id, match, decision, minYears, sort, novelty, q, page]
   );
   const items = listQ.data?.items || [];
   const counts = listQ.data?.counts;
@@ -270,6 +316,10 @@ export default function JobDetail({ id }: { id: string }) {
 
   // Upload / job actions
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [publishBusy, setPublishBusy] = useState(false);
+  // The board is its own read (columns + light cards) and refreshes after a move.
+  const [boardVersion, setBoardVersion] = useState(0);
+  const boardQ = useAsync(() => api.jobs.board(id), [id, boardVersion, tab === 'board']);
   const [uploadFiles, setUploadFiles] = useState<File[]>([]);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -377,6 +427,43 @@ export default function JobDetail({ id }: { id: string }) {
   }
 
   const s = job.stats;
+  /** «پورتال شغلی» — publishing is one explicit switch, with its link in hand. */
+  const togglePublish = async () => {
+    if (!job) return;
+    setPublishBusy(true);
+    try {
+      const next = !job.isPublic;
+      const res = await api.careers.publish(job.id, next);
+      jobQ.setData((d) => (d ? { ...d, job: { ...d.job, ...res.job } } : d));
+      if (next) {
+        const settings = await api.careers.settings();
+        toast(
+          `آگهی منتشر شد. نشانی صفحه: ${settings.careers.url.replace(/^https?:\/\//, '')}/careers/…`,
+          'success',
+          { label: 'کپی نشانی', onClick: () => void navigator.clipboard?.writeText(`${location.origin}/careers/${settings.careers.slug}/jobs/${job.id}`) },
+          8000
+        );
+      } else {
+        toast('آگهی از پورتال شغلی برداشته شد؛ صفحهٔ عمومی دیگر نمایش داده نمی‌شود.', 'info');
+      }
+      emitChange('jobs');
+    } catch (err: any) {
+      toast(err?.message || 'تغییر وضعیت انتشار ممکن نشد.', 'error');
+    } finally {
+      setPublishBusy(false);
+    }
+  };
+
+  /** Opens the public page exactly as a candidate sees it. */
+  const openPublicPage = async () => {
+    try {
+      const settings = await api.careers.settings();
+      window.open(`${location.origin}/careers/${settings.careers.slug}/jobs/${job?.id}`, '_blank', 'noopener');
+    } catch (err: any) {
+      toast(err?.message || 'نشانی پورتال خوانده نشد.', 'error');
+    }
+  };
+
   const closed = job.status === 'closed';
   const panelOpen = Boolean(selected);
   const sidePanel = selected && (
@@ -385,6 +472,7 @@ export default function JobDetail({ id }: { id: string }) {
       record={selected}
       jobTitle={job.roleTitle}
       criteria={job.understanding.criteria}
+      stages={job.stages}
       onChange={updateItem}
       onDeleted={() => {
         const goneId = selected.id;
@@ -405,6 +493,11 @@ export default function JobDetail({ id }: { id: string }) {
           <span className="inline-flex flex-wrap items-center gap-2.5">
             {job.roleTitle}
             <JobStatusPill status={job.status} />
+            {job.isPublic && (
+              <Chip tone="brand" icon={Globe} title="این آگهی در پورتال شغلی عمومی دیده می‌شود">
+                منتشرشده
+              </Chip>
+            )}
             {job.criteriaSource === 'template' && (
               <Chip tone="outline" icon={FileStack} title="معیارهای این فرصت از الگوی آماده دپارتمان ساخته شده است">
                 الگوی آماده
@@ -415,17 +508,46 @@ export default function JobDetail({ id }: { id: string }) {
         subtitle={subtitle}
         actions={
           <>
+            <ButtonLink to={`/app/jobs/${job.id}/kit`} variant="secondary" icon={NotebookText} className="max-sm:hidden">
+              کیت مصاحبه
+            </ButtonLink>
             <Button icon={UploadCloud} onClick={() => setUploadOpen(true)} disabled={closed || running} title={closed ? 'فرصت بسته است' : undefined}>
               افزودن رزومه
             </Button>
             <Button variant="secondary" icon={Download} onClick={doExport} loading={exporting} disabled={!s.total} className="max-sm:hidden">
               خروجی اکسل
             </Button>
+            <Button
+              variant={job.isPublic ? 'soft' : 'secondary'}
+              icon={Globe}
+              loading={publishBusy}
+              onClick={() => void togglePublish()}
+              disabled={closed}
+              title={job.isPublic ? 'آگهی در پورتال شغلی منتشر است؛ برای برداشتن کلیک کنید' : 'انتشار در پورتال شغلی عمومی'}
+              className="max-lg:hidden"
+            >
+              {job.isPublic ? 'منتشرشده در پورتال' : 'انتشار در پورتال'}
+            </Button>
             <Menu
               align="end"
               width={220}
               items={[
                 { label: 'ویرایش اطلاعات', icon: Pencil, onClick: () => setEditOpen(true) },
+                {
+                  label: job.isPublic ? 'برداشتن از پورتال شغلی' : 'انتشار در پورتال شغلی',
+                  icon: Globe,
+                  onClick: () => void togglePublish(),
+                  disabled: closed || publishBusy,
+                },
+                ...(job.isPublic
+                  ? [
+                      {
+                        label: 'باز کردن صفحهٔ عمومی',
+                        icon: ExternalLink,
+                        onClick: () => void openPublicPage(),
+                      },
+                    ]
+                  : []),
                 { label: exporting ? 'در حال ساخت فایل اکسل…' : 'خروجی اکسل', icon: Download, onClick: () => void doExport(), disabled: !s.total || exporting },
                 'divider',
                 job.status !== 'open'
@@ -465,9 +587,81 @@ export default function JobDetail({ id }: { id: string }) {
         onChange={setTab}
         items={[
           { id: 'candidates', label: 'کاندیداها', count: s.total },
+          { id: 'board', label: 'تختهٔ جذب', icon: Columns3, count: s.total },
+          { id: 'interviews', label: 'جلسه‌های مصاحبه', icon: CalendarClock, count: interviews.length || undefined },
           { id: 'criteria', label: 'معیارها و پرسش‌نامه', icon: ListChecks },
         ]}
       />
+
+      {tab === 'board' && (
+        <Card>
+          <CardHeader
+            icon={Columns3}
+            title="تختهٔ جذب"
+            subtitle="همان کاندیداها، در ستون‌های مرحلهٔ استخدام. با «بعدی» یا منوی هر کارت جابه‌جا کنید؛ هر جابه‌جایی در فعالیت‌ها ثبت می‌شود."
+            action={
+              <div className="flex items-center gap-2">
+                <Button variant="ghost" size="sm" onClick={() => setBoardVersion((v) => v + 1)}>
+                  تازه‌سازی
+                </Button>
+              </div>
+            }
+          />
+          <PipelineBoard
+            board={boardQ.data}
+            loading={boardQ.loading && !boardQ.data}
+            onRefresh={() => setBoardVersion((v) => v + 1)}
+            canMove={!closed}
+            onOpen={async (card) => {
+              try {
+                const res = await api.resumes.get(card.id);
+                setSelected(res.record);
+                setQuery({ c: card.id }, { replace: false });
+              } catch {
+                toast('این رزومه باز نشد؛ ممکن است حذف شده باشد.', 'error');
+              }
+            }}
+          />
+        </Card>
+      )}
+
+      {tab === 'interviews' && (
+        <Card>
+          <CardHeader
+            icon={CalendarClock}
+            title="جلسه‌های مصاحبه"
+            subtitle="جلسه‌هایی که از داخل هویدا برای کاندیداهای این فرصت شغلی تعیین شده‌اند."
+            action={
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={MailCheck}
+                  loading={reminderBusy}
+                  onClick={() => void sendReminders()}
+                  title="یادآوری یک روز قبل از هر جلسه، از صندوق ایمیل همین فضای کاری"
+                >
+                  ارسال یادآوری‌های سررسید
+                </Button>
+                <ButtonLink to={`/app/candidates?job=${id}`} variant="secondary" size="sm" icon={Users}>
+                  انتخاب کاندیدا
+                </ButtonLink>
+              </div>
+            }
+          />
+          {interviewsQ.loading ? (
+            <Skeleton className="h-20" />
+          ) : interviews.length === 0 ? (
+            <EmptyState
+              icon={CalendarClock}
+              title="هنوز جلسه‌ای تعیین نشده است"
+              description="از پنل هر کاندیدا دکمهٔ «تعیین جلسهٔ مصاحبه» را بزنید؛ تاریخ، ساعت، مصاحبه‌گر و لینک جلسه در یک فرم ثبت می‌شود."
+            />
+          ) : (
+            <InterviewList items={interviews} onCancel={(iid) => void cancelInterview(iid)} />
+          )}
+        </Card>
+      )}
 
       {tab === 'criteria' && (
         <div className="grid lg:grid-cols-2 gap-5">
@@ -522,6 +716,19 @@ export default function JobDetail({ id }: { id: string }) {
                   />
                   <Select
                     compact
+                    aria-label="وضعیت تکرار"
+                    title="نسبت به رزومه‌هایی که پیش‌تر در همین دپارتمان غربال شده‌اند"
+                    value={novelty}
+                    onChange={(e) => setNovelty(e.target.value as NoveltyFilter)}
+                    options={[
+                      { value: 'all', label: `همه (${toPersianDigits(counts?.novel ?? 0)} تازه، ${toPersianDigits(counts?.duplicate ?? 0)} تکراری)` },
+                      { value: 'new', label: `فقط تازه‌ها (${toPersianDigits(counts?.novel ?? 0)})` },
+                      { value: 'duplicate', label: `فقط تکراری‌ها (${toPersianDigits(counts?.duplicate ?? 0)})` },
+                      { value: 'unknown', label: `نامشخص (${toPersianDigits(counts?.unknownNovelty ?? 0)})` },
+                    ]}
+                  />
+                  <Select
+                    compact
                     aria-label="سابقه کار"
                     value={String(minYears)}
                     onChange={(e) => setMinYears(Number(e.target.value))}
@@ -553,6 +760,20 @@ export default function JobDetail({ id }: { id: string }) {
                 items={MATCH_FILTERS.map((m) => ({ id: m.id, label: m.label, count: counts ? counts[m.id === 'all' ? 'all' : m.id] : undefined }))}
               />
             </div>
+
+            {/* Screening against this department's own history: say it out loud. */}
+            {novelty === 'all' && (counts?.duplicate ?? 0) > 0 && (
+              <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-2.5 bg-review-soft border-b border-review/20">
+                <CopyCheck className="w-4 h-4 text-review-ink shrink-0" strokeWidth={2} />
+                <span className="text-[12.5px] text-review-ink font-medium">
+                  {toPersianDigits(counts?.duplicate ?? 0)} رزومه در غربالگری‌های قبلی «{job?.departmentName}» ثبت شده بود؛
+                  {toPersianDigits(counts?.novel ?? 0)} رزومه تازه است.
+                </span>
+                <Button size="sm" variant="secondary" className="mr-auto" onClick={() => setNovelty('duplicate')}>
+                  نمایش تکراری‌ها
+                </Button>
+              </div>
+            )}
 
             {sel.size > 0 && (
               <div className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-2.5 bg-brand-tint border-b border-brand/15 animate-fade-in">

@@ -5,24 +5,36 @@ import {
   ArchiveX,
   BadgeCheck,
   Briefcase,
+  CalendarClock,
   CheckCircle2,
+  ClipboardList,
   Clock3,
   Columns3,
   Copy,
   Download,
+  Eye,
+  NotebookText,
+  EyeOff,
   ExternalLink,
+  FileSignature,
   FileText,
   GraduationCap,
+  Heart,
   History,
+  Info,
   Lightbulb,
+  Link2,
+  Loader2,
   Mail,
   MapPin,
   MessageSquareText,
   MoreHorizontal,
   Phone,
+  Smartphone,
   RefreshCw,
   ScanSearch,
   ShieldAlert,
+  ShieldCheck,
   ThumbsDown,
   ThumbsUp,
   Trash2,
@@ -32,6 +44,8 @@ import {
 } from 'lucide-react';
 import type { Criterion, DecisionStatus, EvidencePoint, ResumeListItem } from '../../types/screening';
 import { api, openResumeFile } from '../../lib/api';
+import { useCan } from '../../lib/auth';
+import { navigate } from '../../lib/router';
 import { emitChange } from '../../lib/events';
 import { copyText } from '../../lib/clipboard';
 import { isInCompare, removeFromCompare, toggleCompare, useCompare } from '../../lib/compare';
@@ -41,6 +55,7 @@ import { DECISION_META, matchMeta } from '../../lib/match';
 import {
   Button,
   ButtonLink,
+  Select,
   Callout,
   Chip,
   ConfidenceBadge,
@@ -49,12 +64,24 @@ import {
   IconButton,
   MatchPill,
   Menu,
+  Modal,
+  NoveltyPill,
   Monogram,
   ScoreBadge,
   Tabs,
+  TextInput,
   toast,
 } from '../ui';
 import { MessageModal, RejectModal, TalentModal } from './CandidateModals';
+import { ScorecardSection } from './Scorecard';
+import { SmsModal } from './SmsModal';
+import { OfferModal } from './OfferModal';
+import { SchedulingModal } from './SchedulingModal';
+import { CommentsSection } from './Comments';
+import { SurveyModal } from './SurveyModal';
+import { AssessmentModal } from './AssessmentModal';
+import { InterviewModal } from './InterviewModal';
+import type { PipelineStage } from '../../types/pipeline';
 
 type PanelTab = 'summary' | 'skills' | 'experience' | 'more';
 
@@ -62,6 +89,8 @@ export interface CandidatePanelProps {
   record: ResumeListItem;
   jobTitle?: string;
   criteria?: Criterion[];
+  /** The opening's board columns, when the parent knows them. */
+  stages?: PipelineStage[];
   onChange: (r: ResumeListItem) => void;
   onDeleted?: (id: string) => void;
   onClose?: () => void;
@@ -258,23 +287,82 @@ export function DecisionBar({ record, onChange, compact, short }: { record: Resu
 
 // ------------------------------------------------------------------ panel ----
 
-export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted, onClose, variant = 'panel' }: CandidatePanelProps) {
+export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, onDeleted, onClose, variant = 'panel' }: CandidatePanelProps) {
   const [tab, setTab] = useState<PanelTab>('summary');
   const [messageOpen, setMessageOpen] = useState(false);
+  const [interviewOpen, setInterviewOpen] = useState(false);
+  const [interviews, setInterviews] = useState<Array<{ id: string; startsAtISO: string; status: string; meetLink: string | null }>>([]);
   const [talentOpen, setTalentOpen] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [eraseOpen, setEraseOpen] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
+  const canAdmin = useCan('admin');
+  const [stageBusy, setStageBusy] = useState(false);
+  const [smsOpen, setSmsOpen] = useState(false);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [surveyOpen, setSurveyOpen] = useState(false);
+  const [assessmentOpen, setAssessmentOpen] = useState(false);
+  /** «آشکارسازی هویت» — blind mode is on and this copy hides the person. */
+  const [revealOpen, setRevealOpen] = useState(false);
+  const [revealReason, setRevealReason] = useState('');
+  const [revealing, setRevealing] = useState(false);
   const [rerunning, setRerunning] = useState<'standard' | 'deep' | null>(null);
   useCompare(); // re-render when the tray changes
   const inCompare = isInCompare(record.id);
   const meta = matchMeta(record.category);
   const name = candidateName(record);
+  const hidden = Boolean(record.blindHidden);
+
+  /** The one door out of blind mode: the server records who, whom and why. */
+  const reveal = async () => {
+    setRevealing(true);
+    try {
+      const res = await api.resumes.reveal(record.id, revealReason.trim() || 'بدون توضیح');
+      onChange(res.record);
+      setRevealOpen(false);
+      setRevealReason('');
+      toast('هویت آشکار شد و در فعالیت‌های تیم ثبت شد.', 'info');
+    } catch (e: any) {
+      toast(e?.message || 'آشکارسازی ممکن نشد.', 'error');
+    } finally {
+      setRevealing(false);
+    }
+  };
   const insufficient = meta.level === 'insufficient';
 
   useEffect(() => setTab('summary'), [record.id]);
 
+  /** Moving a candidate is one small, logged action — never a silent drag. */
+  const moveStage = async (stageId: string) => {
+    if (stageId === (record.stageId || stages?.[0]?.id)) return;
+    setStageBusy(true);
+    try {
+      const res = await api.resumes.stage(record.id, stageId);
+      onChange(res.record);
+      emitChange('resumes');
+      emitChange('activity');
+      toast(`به ستون «${res.stage.name}» منتقل شد.`);
+    } catch (err: any) {
+      toast(err?.message || 'تغییر ستون ممکن نشد.', 'error');
+    } finally {
+      setStageBusy(false);
+    }
+  };
+
+
   // Opened outside its job page (رزومه‌ها، بانک استعداد): fetch the opening's
   // criteria so weights and «الزامی» marks still show.
   const [fetchedCriteria, setFetchedCriteria] = useState<Criterion[] | undefined>(undefined);
+  const loadInterviews = () =>
+    api.interviews
+      .list({ resumeId: record.id })
+      .then((r) => setInterviews(r.items.filter((i) => i.status !== 'cancelled')))
+      .catch(() => setInterviews([]));
+  useEffect(() => {
+    void loadInterviews();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record.id]);
   useEffect(() => {
     if (criteria) return;
     let alive = true;
@@ -318,6 +406,49 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
       toast('از بانک استعداد خارج شد.');
     } catch (e: any) {
       toast(e?.message || 'انجام نشد.', 'error');
+    }
+  };
+
+  /**
+   * DSAR — «همهٔ داده‌های من» as one file, and the irreversible erasure.
+   * Both are admin-only; the server refuses anything without an explicit confirm.
+   */
+  const exportData = async () => {
+    setPrivacyBusy(true);
+    try {
+      const data = await api.resumes.exportData(record.id);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `candidate-${record.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast('پروندهٔ کامل داده‌های این کارجو دانلود شد.', 'success');
+    } catch (e: any) {
+      toast(e?.message || 'خروجی گرفتن ممکن نشد.', 'error');
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
+
+  const doErase = async () => {
+    setPrivacyBusy(true);
+    try {
+      const res = await api.resumes.erase(record.id);
+      const total = Object.values(res.erased).reduce((a, b) => a + b, 0);
+      removeFromCompare(record.id);
+      emitChange('resumes', record.jobId);
+      emitChange('activity');
+      toast(`${toPersianDigits(total)} رکورد و فایل این کارجو برای همیشه پاک شد.`, 'info');
+      setEraseOpen(false);
+      onDeleted?.(record.id);
+    } catch (e: any) {
+      toast(e?.message || 'پاک‌سازی ممکن نشد.', 'error');
+    } finally {
+      setPrivacyBusy(false);
     }
   };
 
@@ -379,6 +510,7 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
         </div>
         <div className="flex flex-wrap items-center gap-2 mt-3.5">
           <MatchPill category={record.category} />
+          <NoveltyPill novelty={record.novelty} duplicateOf={record.duplicateOf} size="md" />
           <EngineBadge engine={record.engine} />
           <ConfidenceBadge confidence={record.confidence} />
           {record.inBank && <Chip tone="brand" icon={Archive}>بانک استعداد</Chip>}
@@ -388,7 +520,108 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
             </Chip>
           )}
         </div>
+        {hidden && (
+          <Callout
+            tone="info"
+            icon={EyeOff}
+            className="mt-4"
+            title="این کارجو بی‌نام نمایش داده می‌شود"
+            action={
+              <Button size="sm" variant="secondary" icon={Eye} onClick={() => setRevealOpen(true)}>
+                آشکارسازی هویت
+              </Button>
+            }
+          >
+            «غربالگری بی‌طرف» روشن است: نام، ایمیل، تلفن و فایل پنهان شده‌اند و تا آشکارسازی، پیام و مصاحبه و پیشنهاد برای این کارجو
+            بسته است. امتیاز و شاهدها کامل دیده می‌شوند.
+          </Callout>
+        )}
+        {record.novelty === 'duplicate' && record.duplicateOf && (
+          <Callout
+            tone="warning"
+            className="mt-4"
+            icon={Copy}
+            title="این رزومه تکراری است"
+            action={
+              <ButtonLink to={`/app/candidates/${record.duplicateOf.resumeId}`} variant="secondary" size="sm" icon={ExternalLink}>
+                رزومهٔ قبلی
+              </ButtonLink>
+            }
+          >
+            همین رزومه پیش‌تر در «{record.duplicateOf.roleTitle || 'همین دپارتمان'}» ({faDate(record.duplicateOf.createdAtISO)}) ثبت شده بود
+            {record.duplicateOf.reason === 'file'
+              ? ' با فایل یکسان'
+              : record.duplicateOf.reason === 'text'
+              ? ' با متن یکسان'
+              : record.duplicateOf.reason === 'email'
+              ? ' با ایمیل یکسان'
+              : ' با شماره تماس یکسان'}
+            . برای جلوگیری از بررسی دوباره، آن رزومه را باز کنید.
+          </Callout>
+        )}
+        {record.novelty === 'unknown' && (
+          <Callout tone="info" className="mt-4" icon={Info} title="امکان تطبیق تکرار نبود">
+            از این رزومه فایل، متن یا راه ارتباطی معتبری استخراج نشد؛ بنابراین نه «جدید» و نه «تکراری» برچسب خورده است.
+          </Callout>
+        )}
+        {record.source?.kind === 'linkedin' && (
+          <div className="mt-3 rounded-[10px] border border-line-2 bg-canvas px-3 py-2">
+            <p className="text-[12px] font-semibold text-ink-2 flex flex-wrap items-center gap-1.5">
+              <Link2 className="w-3.5 h-3.5" />
+              افزوده‌شده از جست‌وجوی LinkedIn
+              {record.source.openToWork && <Chip tone="brand">Open to work</Chip>}
+            </p>
+            <p className="text-[11.5px] text-ink-3 mt-0.5 leading-relaxed" dir="auto">
+              {[record.source.headline, record.source.company, record.source.location].filter(Boolean).join(' · ') || '—'}
+            </p>
+            {record.source.profileUrl && (
+              <a
+                href={record.source.profileUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-brand-ink mt-1 hover:underline"
+              >
+                مشاهدهٔ پروفایل لینکدین <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-2 mt-4">
+          <Button
+            size="sm"
+            icon={CalendarClock}
+            onClick={() => setInterviewOpen(true)}
+            className="flex-1"
+            disabled={hidden}
+            title={hidden ? 'برای دعوت، اول هویت را آشکار کنید.' : undefined}
+          >
+            تعیین جلسهٔ مصاحبه
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={MessageSquareText}
+            onClick={() => setMessageOpen(true)}
+            disabled={hidden}
+            title={hidden ? 'برای نوشتن پیام، اول هویت را آشکار کنید.' : undefined}
+          >
+            پیام
+          </Button>
+        </div>
+        {interviews.length > 0 && (
+          <div className="mt-3 rounded-[10px] border border-brand/20 bg-brand-tint px-3 py-2">
+            <p className="text-[12px] font-semibold text-brand-stronger flex items-center gap-1.5">
+              <CalendarClock className="w-3.5 h-3.5" /> جلسهٔ مصاحبه
+            </p>
+            {interviews.map((it) => (
+              <p key={it.id} className="text-[12px] text-brand-stronger mt-0.5">
+                {faDate(it.startsAtISO)}
+                {it.meetLink ? ' · آنلاین (Meet)' : ''}
+              </p>
+            ))}
+          </div>
+        )}
+        <div className="flex items-center gap-2 mt-2">
           <Button variant={inCompare ? 'soft' : 'secondary'} size="sm" icon={Columns3} onClick={compareClick} className="flex-1">
             {inCompare ? 'در فهرست مقایسه' : 'افزودن به مقایسه'}
           </Button>
@@ -401,11 +634,12 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
             align="end"
             width={232}
             items={[
-              { label: 'ارسال پیام', icon: MessageSquareText, onClick: () => setMessageOpen(true) },
+              { label: 'ارسال پیام', icon: MessageSquareText, onClick: () => setMessageOpen(true), disabled: hidden, hint: hidden ? 'اول آشکارسازی' : undefined },
+              { label: 'کیت مصاحبه', icon: NotebookText, onClick: () => navigate(`/app/jobs/${record.jobId}/kit?c=${record.id}`), hint: 'سؤال‌های همین رزومه' },
               record.inBank
                 ? { label: 'خروج از بانک استعداد', icon: ArchiveX, onClick: () => void removeTalent() }
                 : { label: 'افزودن به بانک استعداد', icon: Archive, onClick: () => setTalentOpen(true) },
-              { label: 'دانلود فایل اصلی', icon: Download, onClick: () => void download(), disabled: !record.filePath },
+              { label: 'دانلود فایل اصلی', icon: Download, onClick: () => void download(), disabled: hidden || !record.filePath, hint: hidden ? 'بی‌نام' : undefined },
               'divider',
               { label: 'تحلیل دوباره', icon: RefreshCw, onClick: () => void rerun('standard'), disabled: rerunning !== null },
               { label: 'بازبینی دقیق', icon: ScanSearch, onClick: () => void rerun('deep'), hint: 'کندتر', disabled: rerunning !== null },
@@ -617,18 +851,77 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
 
         {tab === 'more' && (
           <div className="flex flex-col gap-6">
+            {stages && stages.length > 1 && (
+              <section>
+                <SectionTitle icon={Columns3}>ستون جذب</SectionTitle>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Select
+                    aria-label="ستون جذب"
+                    value={record.stageId || stages[0].id}
+                    onChange={(e) => void moveStage(e.target.value)}
+                    options={stages.map((st) => ({ value: st.id, label: st.name }))}
+                    disabled={stageBusy}
+                  />
+                  {stageBusy && <Loader2 className="w-4 h-4 animate-spin text-ink-3" />}
+                </div>
+                <p className="text-[11.5px] text-ink-4 mt-1.5">هر جابه‌جایی در فعالیت‌های تیم ثبت می‌شود.</p>
+              </section>
+            )}
             <section>
               <SectionTitle icon={Phone}>اطلاعات تماس</SectionTitle>
               <ContactRow icon={Phone} value={record.contact?.phone} href={telHref(record.contact?.phone)} />
               <ContactRow icon={Mail} value={record.contact?.email} href={record.contact?.email ? `mailto:${record.contact.email}` : undefined} />
               <div className="mt-3">
-                <Button size="sm" variant="secondary" icon={MessageSquareText} onClick={() => setMessageOpen(true)}>
-                  {record.messageStatus === 'sent' ? 'پیام دیگر' : 'نوشتن پیام'}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button size="sm" variant="secondary" icon={MessageSquareText} onClick={() => setMessageOpen(true)} disabled={hidden}>
+                    {record.messageStatus === 'sent' ? 'پیام دیگر' : 'نوشتن پیام'}
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={Smartphone} onClick={() => setSmsOpen(true)} disabled={hidden || !record.contact?.phone}>
+                    ارسال پیامک
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={CalendarClock} onClick={() => setScheduleOpen(true)} disabled={hidden}>
+                    انتخاب زمان مصاحبه
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={FileSignature} onClick={() => setOfferOpen(true)} disabled={hidden}>
+                    پیشنهاد شغلی
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={ClipboardList} onClick={() => setAssessmentOpen(true)} disabled={hidden}>
+                    آزمون و ارزیابی
+                  </Button>
+                  <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)} disabled={hidden}>
+                    نظرسنجی تجربه
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    icon={NotebookText}
+                    onClick={() => navigate(`/app/jobs/${record.jobId}/kit?c=${record.id}`)}
+                  >
+                    کیت مصاحبه
+                  </Button>
+                </div>
                 {record.messageStatus === 'sent' && (
                   <span className="text-[12px] text-ink-3 mr-3">آخرین پیام: {record.lastMessagedAtJalali}</span>
                 )}
               </div>
+            </section>
+            <ScorecardSection resumeId={record.id} criteria={criteria || []} compact />
+            <CommentsSection resumeId={record.id} />
+            <section>
+              <SectionTitle icon={ShieldCheck}>دادهٔ شخصی کارجو</SectionTitle>
+              <p className="text-[12px] text-ink-3 leading-relaxed mb-2.5">
+                اگر کارجو خواسته بداند چه داده‌ای از او نگه می‌دارید، همهٔ آن را در یک فایل بگیرید. «پاک‌سازی کامل» رکورد، فایل، یادداشت‌ها،
+                مصاحبه‌ها، پیام‌ها و کارت‌های ارزیابی را حذف می‌کند و برگشت‌پذیر نیست.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" variant="secondary" icon={Download} onClick={() => void exportData()} loading={privacyBusy} disabled={!canAdmin}>
+                  دریافت همهٔ داده‌ها
+                </Button>
+                <Button size="sm" variant="ghost" icon={Trash2} onClick={() => setEraseOpen(true)} disabled={!canAdmin || privacyBusy}>
+                  پاک‌سازی کامل داده
+                </Button>
+              </div>
+              {!canAdmin && <p className="text-[11.5px] text-ink-4 mt-1.5">فقط مدیر فضای کاری می‌تواند دادهٔ شخصی را صادر یا پاک کند.</p>}
             </section>
             <section>
               <SectionTitle icon={FileText}>فایل رزومه</SectionTitle>
@@ -721,7 +1014,59 @@ export function CandidatePanel({ record, jobTitle, criteria, onChange, onDeleted
       </div>
 
       {messageOpen && <MessageModal record={record} onClose={() => setMessageOpen(false)} onSent={onChange} />}
+      {smsOpen && <SmsModal record={record} onClose={() => setSmsOpen(false)} />}
+      {offerOpen && <OfferModal record={record} jobTitle={jobTitle} onClose={() => setOfferOpen(false)} />}
+      {scheduleOpen && <SchedulingModal record={record} jobTitle={jobTitle} onClose={() => setScheduleOpen(false)} />}
+      {interviewOpen && (
+        <InterviewModal
+          record={record}
+          jobId={record.jobId}
+          jobTitle={jobTitle || record.roleTitle || record.departmentName}
+          onClose={() => setInterviewOpen(false)}
+          onScheduled={(_it, updated) => {
+            if (updated) onChange?.(updated);
+            void loadInterviews();
+          }}
+        />
+      )}
       {talentOpen && <TalentModal record={record} onClose={() => setTalentOpen(false)} onSaved={onChange} />}
+      <SurveyModal record={surveyOpen ? record : null} jobTitle={jobTitle} onClose={() => setSurveyOpen(false)} />
+      <AssessmentModal record={assessmentOpen ? record : null} jobTitle={jobTitle} onClose={() => setAssessmentOpen(false)} />
+      <ConfirmDialog
+        open={eraseOpen}
+        onClose={() => setEraseOpen(false)}
+        onConfirm={() => void doErase()}
+        title="همهٔ داده‌های این کارجو پاک شود؟"
+        description="رکورد، فایل رزومه، یادداشت‌ها، مصاحبه‌ها، پیشنهاد، پیام‌ها و کارت‌های ارزیابی حذف می‌شوند. این کار برگشت‌پذیر نیست؛ پیش از ادامه خروجی بگیرید."
+        confirmLabel="پاک‌سازی کامل"
+      />
+      <Modal
+        open={revealOpen}
+        onClose={() => setRevealOpen(false)}
+        icon={<Eye className="w-5 h-5 text-brand-strong" />}
+        title="آشکارسازی هویت کارجو"
+        description="از این لحظه نام، راه تماس و فایل این کارجو دیده می‌شود. این کار با نام شما در فعالیت‌های تیم ثبت می‌شود."
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRevealOpen(false)}>
+              انصراف
+            </Button>
+            <Button icon={Eye} onClick={reveal} loading={revealing}>
+              آشکار کن
+            </Button>
+          </>
+        }
+      >
+        <TextInput
+          label="دلیل آشکارسازی"
+          optional
+          placeholder="مثلاً: برای هماهنگی مصاحبهٔ نهایی"
+          value={revealReason}
+          onChange={(e) => setRevealReason(e.target.value)}
+          maxLength={200}
+          hint="یک جمله کافی است؛ همین در تاریخچه می‌ماند."
+        />
+      </Modal>
       <ConfirmDialog
         open={confirmDelete}
         onClose={() => setConfirmDelete(false)}

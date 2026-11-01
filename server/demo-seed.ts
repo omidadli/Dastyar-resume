@@ -22,6 +22,7 @@ import type { InterviewFeedback } from '../src/types/pipeline';
 import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
 import { createPlan } from './onboarding';
+import { memberCode } from './referrals';
 
 // ---------------------------------------------------------------------------
 // A tiny, dependency-free PDF writer (single page, Helvetica, ASCII text).
@@ -808,6 +809,139 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
     } catch {
       // A demo must never fail to load because of one optional page.
     }
+  }
+
+  // «پورتال شغلی»: two openings are live in the demo, so the public page, the
+  // apply form and the job-board kit's own apply link are real on day one.
+  for (const [idx, title] of ['کارشناس پشتیبانی شبکه و سیستم‌ها', 'کارشناس جذب و استخدام'].entries()) {
+    const job = db.listJobs(org.id).find((j) => j.roleTitle === title);
+    if (!job) continue;
+    db.updateJob(org.id, job.id, {
+      isPublic: true,
+      publishedAtISO: daysAgo(9 - idx * 4).toISOString(),
+    });
+  }
+
+  // «کارتابل تأیید» — a demo that lands on an empty inbox teaches nothing. One
+  // draft offer is waiting for the demo user (then the HR manager), and one
+  // referral reward is owed for a hire that already happened. Both are the kind
+  // of decision a human really makes here; nothing is sent by approving them.
+  db.updateOrg(org.id, {
+    offerApproval: {
+      enabled: true,
+      steps: [
+        { id: 'apv_hr', label: 'تأیید منابع انسانی', approverId: people.you.id },
+        { id: 'apv_mgr', label: 'تأیید مدیرعامل', approverId: people.maryam.id },
+      ],
+    },
+  });
+
+  const demoPeopleForApprovals = Array.from(peopleByName.values());
+  const stageKindOf = (p: { jobId: string; rec: ResumeRecord }): string =>
+    db.stagesOf(db.getJob(org.id, p.jobId)).find((st) => st.id === p.rec.stageId)?.kind || 'applied';
+  const offerTarget =
+    demoPeopleForApprovals.find((p) => stageKindOf(p) === 'offer') ||
+    demoPeopleForApprovals.find((p) => stageKindOf(p) === 'interview') ||
+    demoPeopleForApprovals[0];
+  if (offerTarget) {
+    const at = daysAgo(1, -4);
+    const job = db.getJob(org.id, offerTarget.jobId);
+    db.saveOffer({
+      id: db.uid('off'),
+      orgId: org.id,
+      token: crypto.randomBytes(18).toString('base64url'),
+      version: 1,
+      supersedesId: null,
+      supersededById: null,
+      jobId: offerTarget.jobId,
+      resumeId: offerTarget.rec.id,
+      candidateName: offerTarget.rec.candidateName || offerTarget.rec.fileName,
+      candidateEmail: offerTarget.rec.contact?.email || null,
+      jobTitle: offerTarget.jobTitle,
+      departmentName: job?.departmentName || '',
+      status: 'draft',
+      terms: {
+        title: offerTarget.jobTitle,
+        salaryAmount: 42_000_000,
+        salaryPeriod: 'monthly',
+        benefitsNote: 'بیمهٔ تکمیلی، ناهار، ۲ روز دورکاری در هفته',
+        startDate: formatJalaliDate(tehranJalaliOf(daysAgo(-14)), false),
+        location: job?.location || 'تهران',
+        employmentType: 'تمام‌وقت',
+        probationMonths: 3,
+        notes: 'پاداش عملکرد پایان سال بر اساس ارزیابی مدیر.',
+      },
+      message: `سلام ${offerTarget.rec.candidateName || ''}،\nخوشحالیم که پیشنهاد همکاری با «${org.name}» را برایت می‌فرستیم. جزئیات کامل در لینک زیر آمده است.`,
+      createdByName: people.maryam.name,
+      createdAtISO: at.toISOString(),
+      createdAtJalali: formatJalaliDate(tehranJalaliOf(at), true),
+      sentAtISO: null,
+      sentAtJalali: null,
+      respondedAtISO: null,
+      respondedAtJalali: null,
+      signatureName: null,
+      signatureNote: null,
+      approvals: [
+        {
+          id: 'apv_hr',
+          label: 'تأیید منابع انسانی',
+          approverId: people.you.id,
+          approverName: people.you.name,
+          status: 'pending',
+          decidedAtISO: null,
+          decidedAtJalali: null,
+          note: null,
+        },
+        {
+          id: 'apv_mgr',
+          label: 'تأیید مدیرعامل',
+          approverId: people.maryam.id,
+          approverName: people.maryam.name,
+          status: 'pending',
+          decidedAtISO: null,
+          decidedAtJalali: null,
+          note: null,
+        },
+      ],
+      updatedAtISO: at.toISOString(),
+    });
+  }
+
+  const program = db.getReferralProgram(org.id);
+  db.saveReferralProgram(org.id, {
+    ...program,
+    enabled: true,
+    rewardAmount: 5_000_000,
+    trigger: 'hire',
+    membersOnly: true,
+  });
+  const hiredTarget = demoPeopleForApprovals.find((p) => stageKindOf(p) === 'hired');
+  if (hiredTarget) {
+    const at = daysAgo(3, -2);
+    db.saveReferral({
+      id: db.uid('ref'),
+      orgId: org.id,
+      jobId: hiredTarget.jobId,
+      jobTitle: hiredTarget.jobTitle,
+      resumeId: hiredTarget.rec.id,
+      candidateName: hiredTarget.rec.candidateName || hiredTarget.rec.fileName,
+      referrerUserId: people.hossein.id,
+      referrerName: people.hossein.name,
+      code: memberCode(people.hossein.id),
+      outcome: 'hired',
+      rewardAmount: 5_000_000,
+      rewardStatus: 'pending',
+      submittedAtISO: daysAgo(26).toISOString(),
+      submittedAtJalali: formatJalaliDate(tehranJalaliOf(daysAgo(26)), true),
+      decidedAtISO: at.toISOString(),
+      decidedAtJalali: formatJalaliDate(tehranJalaliOf(at), true),
+      decidedByName: people.maryam.name,
+      paidAtISO: null,
+      paidAtJalali: null,
+      paidByName: null,
+      heardFrom: 'معرفی همکار',
+      note: '',
+    });
   }
 
   // «هزینهٔ هر استخدام»: a small, believable budget. Money is only ever what a

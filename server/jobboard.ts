@@ -27,6 +27,7 @@ import {
   type PublicationStatus,
 } from '../src/types/jobboard';
 import type { Job } from '../src/types/screening';
+import { EMPLOYMENT_LABELS } from '../src/lib/match';
 import type { OrgPublic } from '../src/types/app';
 
 const BOARD_IDS = new Set(JOB_BOARDS.map((b) => b.id));
@@ -92,7 +93,7 @@ export function kitFor(org: OrgPublic, job: Job, board: JobBoardId, origin: stri
     '',
     job.departmentName ? `دپارتمان: ${job.departmentName}` : '',
     job.location ? `محل کار: ${job.location}` : '',
-    job.employmentType ? `نوع همکاری: ${job.employmentType}` : '',
+    job.employmentType ? `نوع همکاری: ${EMPLOYMENT_LABELS[job.employmentType] || job.employmentType}` : '',
     job.applyByJalali ? `مهلت درخواست: ${job.applyByJalali}` : '',
     '',
     (job.extraNotes || job.understanding?.plainExplanation || '').trim(),

@@ -35,8 +35,9 @@ export class RoomError extends Error {
 const HOUR = 3_600_000;
 const SIGNAL_CAP = 400;
 const PAYLOAD_CAP = 24_000;
+const CHAT_CAP = 2_000;
 const PRESENCE_WINDOW_MS = 12_000;
-const KINDS: SignalKind[] = ['offer', 'answer', 'ice', 'bye'];
+const KINDS: SignalKind[] = ['offer', 'answer', 'ice', 'chat', 'screen', 'bye'];
 
 /** In-memory only: signals and presence are not part of the snapshot. */
 const signals = new Map<string, RoomSignal[]>();
@@ -73,6 +74,10 @@ export function appendSignal(roomId: string, role: RoomRole, kindRaw: unknown, p
   const payload = typeof payloadRaw === 'string' ? payloadRaw : '';
   if (!payload) throw new RoomError('بدنهٔ پیام اتاق خالی است.', 400, 'BAD_SIGNAL_PAYLOAD');
   if (payload.length > PAYLOAD_CAP) throw new RoomError('پیام اتاق بیش از حد بزرگ است.', 413, 'SIGNAL_TOO_LARGE');
+  // A chat line is a sentence, not a file: the room is not a place to send CVs.
+  if (kind === 'chat' && payload.length > CHAT_CAP) {
+    throw new RoomError('متن پیام بیش از حد بلند است؛ کوتاه‌تر بنویسید.', 413, 'CHAT_TOO_LONG');
+  }
   const list = signals.get(roomId) || [];
   const row: RoomSignal = {
     seq: (list[list.length - 1]?.seq || 0) + 1,

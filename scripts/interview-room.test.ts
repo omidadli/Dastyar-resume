@@ -198,6 +198,31 @@ async function main() {
     const huge = 'x'.repeat(30_000);
     assert((await call('POST', `/api/rooms/public/${token}/signal`, null, { kind: 'ice', payload: huge })).status === 413, 'an oversized payload is refused');
 
+    // -------------------------------------------------------- chat & screen ---
+    const chatLine = await call('POST', `/api/rooms/${room.id}/signal`, A, { kind: 'chat', payload: JSON.stringify({ text: 'دو دقیقه صبر کنید، سند را باز می‌کنم.' }) });
+    assert(chatLine.status === 201 && chatLine.json.signal.kind === 'chat', 'the host can send a chat line', `${chatLine.status}`);
+    const candChat = await call('GET', `/api/rooms/public/${token}/signals?since=${afterIce.json.seq}`);
+    const chatItem = candChat.json.items.find((x: any) => x.kind === 'chat');
+    assert(Boolean(chatItem), 'the candidate receives it');
+    assert(JSON.parse(chatItem.payload).text.includes('سند'), 'with the text intact');
+    assert((await call('POST', `/api/rooms/public/${token}/signal`, null, { kind: 'chat', payload: JSON.stringify({ text: 'ممنون' }) })).status === 201, 'and can answer in the same channel');
+    const tooLong = await call('POST', `/api/rooms/public/${token}/signal`, null, { kind: 'chat', payload: JSON.stringify({ text: 'x'.repeat(2100) }) });
+    assert(tooLong.status === 413 && tooLong.json.code === 'CHAT_TOO_LONG', 'a very long chat line is refused', `${tooLong.status}`);
+
+    const screenOn = await call('POST', `/api/rooms/public/${token}/signal`, null, { kind: 'screen', payload: 'started' });
+    assert(screenOn.status === 201, 'the candidate can announce a screen share', String(screenOn.status));
+    const hostSeesScreen = await call('GET', `/api/rooms/${room.id}/signals?since=${chatItem.seq}`, A);
+    assert(hostSeesScreen.json.items.some((x: any) => x.kind === 'screen' && x.payload === 'started'), 'the host learns the screen is being shared');
+
+    // A screen share can add a track, which means a second offer/answer round.
+    const reOffer = await call('POST', `/api/rooms/${room.id}/signal`, A, { kind: 'offer', payload: 'v=0\r\no=- 2 2 IN IP4 127.0.0.1\r\n' });
+    assert(reOffer.status === 201 && reOffer.json.signal.seq > screenOn.json.signal.seq, 'a second offer is accepted mid-call', String(reOffer.json.signal.seq));
+    const reAnswer = await call('POST', `/api/rooms/public/${token}/signal`, null, { kind: 'answer', payload: 'v=0\r\na=renegotiated\r\n' });
+    assert(reAnswer.status === 201, 'and answered');
+    const both = await call('GET', `/api/rooms/${room.id}/signals?since=0`, A);
+    const offers = both.json.items.filter((x: any) => x.kind === 'offer');
+    assert(offers.length >= 2 && offers[offers.length - 1].payload.includes('o=- 2 2'), 'every negotiation round stays in order', String(offers.length));
+
     // ---------------------------------------------------------------- closing ---
     const closed = await call('POST', `/api/rooms/${room.id}/close`, A, {});
     assert(closed.status === 200 && closed.json.room.status === 'closed', 'HR closes the room', String(closed.status));
@@ -245,6 +270,7 @@ async function main() {
     const snap = JSON.parse(fs.readFileSync(path.join(DATA, 'hovida-store.json'), 'utf-8'));
     assert(Array.isArray(snap.rooms) && snap.rooms.length === 0, 'the erased candidate’s rooms are gone from disk too', JSON.stringify(snap.rooms));
     assert(!JSON.stringify(snap).includes('a=answer'), 'the signalling messages are never written to disk');
+    assert(!JSON.stringify(snap).includes('سند را باز می‌کنم'), 'and neither is anything said in the chat');
 
     log = '';
     child = spawn(process.execPath, [dist], { env, stdio: ['ignore', 'pipe', 'pipe'] });

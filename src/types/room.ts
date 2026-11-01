@@ -10,8 +10,29 @@
 /** Who is speaking. Decided by the server, never by the browser. */
 export type RoomRole = 'host' | 'candidate';
 
-/** The only four things a browser may send through the room. */
-export type SignalKind = 'offer' | 'answer' | 'ice' | 'bye';
+/**
+ * The only things a browser may send through the room:
+ *   • `offer`/`answer`/`ice` — finding each other (and re-negotiating when a
+ *     screen share starts or stops);
+ *   • `chat` — a line of text typed during the call (never stored);
+ *   • `screen` — «screen started» / «screen stopped», so the other side's label
+ *     is honest;
+ *   • `bye` — the call is over.
+ */
+export type SignalKind = 'offer' | 'answer' | 'ice' | 'chat' | 'screen' | 'bye';
+
+/** A chat line as the page renders it. Ephemeral: it dies with the call. */
+export interface RoomChatLine {
+  seq: number;
+  from: RoomRole;
+  text: string;
+  atISO: string;
+}
+
+/** The body of a `chat` signal. */
+export interface RoomChatPayload {
+  text: string;
+}
 
 export interface RoomSignal {
   seq: number;

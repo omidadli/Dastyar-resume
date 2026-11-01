@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { CalendarClock, Mic, MicOff, PhoneOff, ShieldOff, Users, Video, VideoOff, Wifi, WifiOff } from 'lucide-react';
+import { CalendarClock, MessageSquare, Mic, MicOff, MonitorUp, PhoneOff, Send, ShieldOff, Square, Users, Video, VideoOff, Wifi, WifiOff } from 'lucide-react';
 import { HovidaLogo } from '../components/brand/Logo';
-import { Button, Callout, Chip, Spinner, toast } from '../components/ui';
+import { Button, Callout, Chip, IconButton, Spinner, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
+import { toPersianDigits } from '../lib/format';
 import { useTitle } from '../lib/useTitle';
-import type { InterviewRoom as HostRoom, PublicRoom, RoomPoll, RoomSignal } from '../types/room';
+import type { InterviewRoom as HostRoom, PublicRoom, RoomChatLine, RoomPoll, RoomSignal } from '../types/room';
 
 type Phase = 'loading' | 'missing' | 'lobby' | 'connecting' | 'live' | 'ended';
 type Role = 'host' | 'candidate';
@@ -32,6 +33,11 @@ export default function InterviewRoom({ token }: { token: string }) {
   const [camOn, setCamOn] = useState(true);
   const [peerName, setPeerName] = useState('');
   const [elapsed, setElapsed] = useState(0);
+  const [chat, setChat] = useState<RoomChatLine[]>([]);
+  const [draft, setDraft] = useState('');
+  const [chatOpen, setChatOpen] = useState(true);
+  const [screenOn, setScreenOn] = useState(false);
+  const [peerScreen, setPeerScreen] = useState(false);
 
   const localRef = useRef<HTMLVideoElement | null>(null);
   const remoteRef = useRef<HTMLVideoElement | null>(null);
@@ -40,8 +46,10 @@ export default function InterviewRoom({ token }: { token: string }) {
   const cursorRef = useRef(0);
   const roleRef = useRef<Role>('candidate');
   const activeRef = useRef(false);
-  const offeredRef = useRef(false);
   const peerSeenRef = useRef(false);
+  /** «Perfect negotiation»: only one side may be mid-offer at a time. */
+  const makingOfferRef = useRef(false);
+  const screenTrackRef = useRef<MediaStreamTrack | null>(null);
   const timerRef = useRef<number | null>(null);
   const pollRef = useRef<number | null>(null);
 
@@ -98,7 +106,10 @@ export default function InterviewRoom({ token }: { token: string }) {
   const hangUp = useCallback(
     (announce: boolean) => {
       activeRef.current = false;
-      offeredRef.current = false;
+      makingOfferRef.current = false;
+      screenTrackRef.current?.stop();
+      screenTrackRef.current = null;
+      setScreenOn(false);
       if (timerRef.current) window.clearInterval(timerRef.current);
       timerRef.current = null;
       if (pollRef.current) window.clearTimeout(pollRef.current);
@@ -136,7 +147,28 @@ export default function InterviewRoom({ token }: { token: string }) {
         hangUp(false);
         return;
       }
+      if (signal.kind === 'chat') {
+        // A line of text, carried as a signal: it lives and dies with the call.
+        const text = (() => {
+          try {
+            return String(JSON.parse(signal.payload)?.text || '').slice(0, 2000);
+          } catch {
+            return '';
+          }
+        })();
+        if (text) setChat((prev) => [...prev, { seq: signal.seq, from: signal.from, text, atISO: signal.atISO }]);
+        return;
+      }
+      if (signal.kind === 'screen') {
+        setPeerScreen(signal.payload === 'started');
+        return;
+      }
       if (signal.kind === 'offer') {
+        // Glare: the candidate is the polite side and accepts the host's offer;
+        // the host ignores an offer while its own is in flight (it will retry).
+        const polite = roleRef.current === 'candidate';
+        const collision = makingOfferRef.current || pc.signalingState === 'have-local-offer';
+        if (collision && !polite) return;
         await pc.setRemoteDescription({ type: 'offer', sdp: signal.payload });
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -195,13 +227,6 @@ export default function InterviewRoom({ token }: { token: string }) {
           } else if (peerSeenRef.current) {
             setNetState('waiting');
           }
-          // The host is the offerer: one offer per call, sent when the other side shows up.
-          if (roleRef.current === 'host' && other && !offeredRef.current) {
-            offeredRef.current = true;
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            await send('offer', offer.sdp || '');
-          }
         }
         if (activeRef.current) pollRef.current = window.setTimeout(() => void tick(), 1100);
       };
@@ -239,6 +264,19 @@ export default function InterviewRoom({ token }: { token: string }) {
     pc.onicecandidate = (ev) => {
       if (ev.candidate) void send('ice', JSON.stringify(ev.candidate));
     };
+    // The browser tells us when the call needs (re)negotiating — the first
+    // connect, and again if a screen share adds a track. One code path.
+    pc.onnegotiationneeded = async () => {
+      try {
+        makingOfferRef.current = true;
+        await pc.setLocalDescription();
+        await send('offer', pc.localDescription?.sdp || '');
+      } catch {
+        // A failed negotiation is retried by the browser on the next change.
+      } finally {
+        makingOfferRef.current = false;
+      }
+    };
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
       if (s === 'connected') {
@@ -270,6 +308,64 @@ export default function InterviewRoom({ token }: { token: string }) {
     const next = !camOn;
     tracks.forEach((t) => (t.enabled = next));
     setCamOn(next);
+  };
+
+  /**
+   * «اشتراک صفحه» — the same video sender swaps its track, so no renegotiation
+   * is needed when a camera already exists; if there is no video at all, the
+   * browser's `negotiationneeded` handles it. The other side is told, so its
+   * label stops lying.
+   */
+  const shareScreen = async () => {
+    if (!pcRef.current) return;
+    try {
+      const display = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      const track = display.getVideoTracks()[0];
+      if (!track) return;
+      screenTrackRef.current = track;
+      const sender = pcRef.current.getSenders().find((x) => x.track?.kind === 'video');
+      if (sender) {
+        await sender.replaceTrack(track);
+      } else {
+        pcRef.current.addTrack(track, display);
+      }
+      track.onended = () => {
+        void stopScreen();
+      };
+      setScreenOn(true);
+      await send('screen', 'started');
+    } catch (err: any) {
+      toast(
+        err?.name === 'NotAllowedError' ? 'اشتراک صفحه لغو شد.' : 'اشتراک صفحه ممکن نشد؛ مرورگر اجازه نداد.',
+        'error'
+      );
+    }
+  };
+
+  const stopScreen = async () => {
+    const track = screenTrackRef.current;
+    screenTrackRef.current = null;
+    track?.stop();
+    const cam = localStream.current?.getVideoTracks()[0] || null;
+    const sender = pcRef.current?.getSenders().find((x) => x.track?.kind === 'video' || x.track === null);
+    try {
+      if (cam && sender) await sender.replaceTrack(cam);
+      else if (sender && !cam) await sender.replaceTrack(null);
+    } catch {
+      // Losing the swap is cosmetic: the call itself stays up.
+    }
+    setScreenOn(false);
+    await send('screen', 'stopped');
+  };
+
+  const sendChat = async () => {
+    const text = draft.trim().slice(0, 2000);
+    if (!text) return;
+    setDraft('');
+    // Shown at once from the local side; the server order is what the other
+    // side sees, so the two lists can differ by a second, never by content.
+    setChat((prev) => [...prev, { seq: -Date.now(), from: roleRef.current, text, atISO: new Date().toISOString() }]);
+    await send('chat', JSON.stringify({ text }));
   };
 
   const end = async () => {
@@ -403,9 +499,81 @@ export default function InterviewRoom({ token }: { token: string }) {
                   <Button variant="secondary" icon={camOn ? Video : VideoOff} onClick={toggleCam}>
                     {camOn ? 'قطع دوربین' : 'روشن‌کردن دوربین'}
                   </Button>
+                  <Button
+                    variant={screenOn ? 'primary' : 'secondary'}
+                    icon={screenOn ? Square : MonitorUp}
+                    onClick={() => void (screenOn ? stopScreen() : shareScreen())}
+                  >
+                    {screenOn ? 'پایان اشتراک صفحه' : 'اشتراک صفحه'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    icon={MessageSquare}
+                    onClick={() => setChatOpen((v) => !v)}
+                    aria-pressed={chatOpen}
+                  >
+                    پیام‌ها{chat.length ? ` (${toPersianDigits(chat.length)})` : ''}
+                  </Button>
                   <Button variant="ghost" icon={PhoneOff} onClick={() => void end()}>
                     {role === 'host' ? 'پایان و بستن اتاق' : 'خروج از تماس'}
                   </Button>
+                </div>
+              )}
+
+              {phase === 'live' && (peerScreen || screenOn) && (
+                <Chip tone="outline">
+                  {screenOn ? 'شما در حال اشتراک صفحه‌اید' : ''}
+                  {screenOn && peerScreen ? ' — ' : ''}
+                  {peerScreen ? 'طرف مقابل صفحهٔ خود را نشان می‌دهد' : ''}
+                </Chip>
+              )}
+
+              {phase === 'live' && chatOpen && (
+                <div className="hv-card p-4 flex flex-col gap-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[12.5px] font-bold text-ink">پیام‌های کنار تماس</p>
+                    <span className="text-[11px] text-ink-4">ذخیره نمی‌شود؛ با پایان تماس پاک می‌شود</span>
+                  </div>
+                  <div className="max-h-[220px] overflow-y-auto flex flex-col gap-1.5" aria-live="polite">
+                    {chat.length === 0 && (
+                      <p className="text-[12px] text-ink-4">هنوز پیامی رد و بدل نشده است.</p>
+                    )}
+                    {chat.map((line) => {
+                      const mine = line.from === roleRef.current;
+                      return (
+                        <div key={line.seq} className={`flex ${mine ? 'justify-start' : 'justify-end'}`}>
+                          <div
+                            className={`max-w-[80%] rounded-[12px] px-3 py-1.5 text-[12.5px] leading-relaxed ${
+                              mine ? 'bg-brand-tint text-ink' : 'bg-canvas-2 text-ink-2'
+                            }`}
+                          >
+                            <span className="block text-[10.5px] text-ink-4 mb-0.5">
+                              {mine ? 'شما' : line.from === 'host' ? 'مصاحبه‌گر' : 'کارجو'}
+                            </span>
+                            {line.text}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <form
+                    className="flex items-end gap-2"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void sendChat();
+                    }}
+                  >
+                    <div className="flex-1">
+                      <TextInput
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        placeholder="یک جمله بنویسید و Enter بزنید"
+                        maxLength={2000}
+                        aria-label="متن پیام"
+                      />
+                    </div>
+                    <IconButton icon={Send} label="فرستادن پیام" type="submit" disabled={!draft.trim()} />
+                  </form>
                 </div>
               )}
 

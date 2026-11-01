@@ -433,7 +433,7 @@ GET  /api/rooms/public/:token          → { room, state }        (بدون نش
 POST /api/rooms/public/:token/signal   body: { kind, payload }  (from = candidate)
 ```
 
-فقط `offer`/`answer`/`ice`/`bye` پذیرفته می‌شود و نقش را سرور تعیین می‌کند: توکن عمومی
+فقط `offer`/`answer`/`ice`/`chat`/`screen`/`bye` پذیرفته می‌شود (چت حداکثر ۲٬۰۰۰ نویسه و هیچ‌جا ذخیره نمی‌شود) و نقش را سرور تعیین می‌کند: توکن عمومی
 هرگز نمی‌تواند پیام میزبان بفرستد. تصویر و صدا از سرور عبور نمی‌کند و هیچ پیامی روی
 دیسک نوشته نمی‌شود. جزئیات و محدودیت شبکه: [`INTERVIEW-ROOM.md`](INTERVIEW-ROOM.md).
 

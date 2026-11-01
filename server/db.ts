@@ -204,6 +204,8 @@ export interface StoreSnapshot {
   hrisConfigs?: Record<string, HrisConfigRow>;
   /** The last few payroll handoffs, for the page. */
   hrisPushes?: HrisPushRow[];
+  /** «انتشار در جاب‌بورد» — where a human actually posted each opening. */
+  publications?: PublicationRow[];
   referrals?: ReferralRow[];
 }
 
@@ -368,6 +370,26 @@ export interface HrisPushRow {
   byName: string | null;
 }
 
+/**
+ * «انتشار در جاب‌بورد» — one row per human act of posting an opening on a board.
+ * It is a record of what happened, not a queue of things to send: HOVIDA has no
+ * write API into Iranian job boards, and says so on the page.
+ */
+export interface PublicationRow {
+  id: string;
+  orgId: string;
+  jobId: string;
+  board: string;
+  status: string;
+  url: string | null;
+  note: string;
+  postedAtISO: string;
+  postedAtJalali: string;
+  postedByUserId: string | null;
+  postedByName: string;
+  closedAtISO: string | null;
+}
+
 /** A «رونویسی گفتار» row: the text plus where the file lives. */
 export type TranscriptRow = Omit<Transcript, 'audioUrl'> & { orgId: string; filePath: string | null };
 
@@ -456,6 +478,8 @@ const referralPrograms = new Map<string, ReferralProgram>();
 const referrals = new Map<string, ReferralRow>();
 const hrisConfigs = new Map<string, HrisConfigRow>();
 const hrisPushes = new Map<string, HrisPushRow>();
+/** «انتشار در جاب‌بورد» — one row per human act of posting an opening. */
+const publications = new Map<string, PublicationRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -520,6 +544,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.referrals?.forEach((x) => referrals.set(x.id, x));
   for (const [k, v] of Object.entries(snap.hrisConfigs || {})) hrisConfigs.set(k, v);
   snap.hrisPushes?.forEach((x) => hrisPushes.set(x.id, x));
+  snap.publications?.forEach((x) => publications.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -566,6 +591,7 @@ function clearMemory() {
   referralPrograms.clear();
   hrisConfigs.clear();
   hrisPushes.clear();
+  publications.clear();
   referrals.clear();
   activity = [];
   platformBlob = null;
@@ -702,6 +728,7 @@ function snapshot(): StoreSnapshot {
     referrals: Array.from(referrals.values()),
     hrisConfigs: Object.fromEntries(hrisConfigs),
     hrisPushes: Array.from(hrisPushes.values()),
+    publications: Array.from(publications.values()),
   };
 }
 
@@ -2154,6 +2181,35 @@ export function saveHrisConfig(row: HrisConfigRow): HrisConfigRow {
 
 export function dropHrisConfig(orgId: string) {
   if (hrisConfigs.delete(orgId)) scheduleSave();
+}
+
+// --------------------------------------------------- «انتشار در جاب‌بورد» ----
+
+/** Newest first. A page list, capped so a long-lived workspace stays small. */
+export function listPublications(orgId: string, jobId?: string): PublicationRow[] {
+  return Array.from(publications.values())
+    .filter((p) => p.orgId === orgId && (!jobId || p.jobId === jobId))
+    .sort((a, b) => b.postedAtISO.localeCompare(a.postedAtISO))
+    .slice(0, 300);
+}
+
+export function getPublication(orgId: string, id: string): PublicationRow | null {
+  const row = publications.get(id);
+  return row && row.orgId === orgId ? row : null;
+}
+
+export function savePublication(row: PublicationRow): PublicationRow {
+  publications.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deletePublication(orgId: string, id: string): boolean {
+  const row = publications.get(id);
+  if (!row || row.orgId !== orgId) return false;
+  publications.delete(id);
+  scheduleSave();
+  return true;
 }
 
 /** Newest first, capped — this is a page log, not an audit trail. */
@@ -4026,6 +4082,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       : undefined,
   hrisPushes: Array.isArray(raw.hrisPushes)
       ? raw.hrisPushes.filter((x: any) => x && isStr(x.id) && isStr(x.orgId) && isStr(x.atISO))
+      : undefined,
+    publications: Array.isArray(raw.publications)
+      ? raw.publications.filter((x: any) => x && isStr(x.id) && isStr(x.orgId) && isStr(x.jobId) && isStr(x.board))
       : undefined,
     aiStats: undefined,
   };

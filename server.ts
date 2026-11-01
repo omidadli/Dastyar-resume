@@ -38,6 +38,7 @@ import { referralRoutes } from './server/routes/referrals';
 import { hrisRoutes } from './server/routes/hris';
 import { roomRoutes, roomsPublicRoutes } from './server/routes/rooms';
 import { inboxRoutes } from './server/routes/inbox';
+import { jobBoardRoutes } from './server/routes/jobboard';
 import { scimRoutes } from './server/routes/scim';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
@@ -163,6 +164,7 @@ async function startServer() {
   app.use('/api', hrisRoutes()); // «انتقال به حقوق و دستمزد»: roster, CSV, signed push
   app.use('/api', roomRoutes()); // «اتاق مصاحبهٔ زنده»: the host's side of the call
   app.use('/api', inboxRoutes()); // «کارتابل تأیید»: everything waiting on a human
+  app.use('/api', jobBoardRoutes()); // «انتشار در جاب‌بورد»: the ad copy + where it went
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------

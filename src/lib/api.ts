@@ -46,6 +46,7 @@ import type { HrisPushResult, HrisRoster } from '../types/hris';
 import type { InterviewRoom, PublicRoom, RoomPoll, SignalKind } from '../types/room';
 import type { InboxView } from '../types/inbox';
 import type { TurnStatusPublic } from '../types/room';
+import type { JobBoardId, JobPublication, PublicationsView, PublicationKit } from '../types/jobboard';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
   AutomationOverview,
@@ -675,6 +676,17 @@ export const api = {
     cancel: (id: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/cancel`, {}),
     remove: (id: string) => del<void>(`/api/onboarding/${encodeURIComponent(id)}`),
     exportUrl: '/api/onboarding/export',
+  },
+  /** «انتشار در جاب‌بورد» — the paste-ready ad and the record of where it went. */
+  publications: {
+    list: (jobId: string) => get<PublicationsView>(`/api/jobs/${encodeURIComponent(jobId)}/publications`),
+    kit: (jobId: string, board: JobBoardId) =>
+      get<{ kit: PublicationKit }>(`/api/jobs/${encodeURIComponent(jobId)}/publication-kit?board=${encodeURIComponent(board)}`),
+    record: (jobId: string, body: { board: JobBoardId; url?: string; note?: string; status?: string }) =>
+      post<{ item: JobPublication; view: PublicationsView }>(`/api/jobs/${encodeURIComponent(jobId)}/publications`, body),
+    update: (id: string, body: { status?: string; url?: string; note?: string }) =>
+      patch<{ item: JobPublication; view: PublicationsView | null }>(`/api/publications/${encodeURIComponent(id)}`, body),
+    remove: (id: string) => del<{ view: PublicationsView | null }>(`/api/publications/${encodeURIComponent(id)}`),
   },
   /** «کارتابل تأیید» — what is waiting on a human, and the two safe decisions. */
   inbox: {

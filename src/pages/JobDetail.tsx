@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Globe2,
   CalendarClock,
   CheckCircle2,
   Clock3,
@@ -36,6 +37,7 @@ import { AnalysisProgress } from '../components/jobs/AnalysisProgress';
 import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
 import { JobAccessModal } from '../components/jobs/JobAccessModal';
+import { PublicationCard } from '../components/jobs/PublicationCard';
 import {
   Button,
   ButtonLink,
@@ -76,7 +78,7 @@ import { useAsync, useDebounced, useMediaQuery } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { DecisionFilter, DecisionStatus, Job, JobAccessPayload, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
-type JobTab = 'candidates' | 'board' | 'interviews' | 'criteria';
+type JobTab = 'candidates' | 'board' | 'interviews' | 'criteria' | 'publish';
 
 function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean; onClose: () => void; onSaved: (j: Job) => void }) {
   const [roleTitle, setRoleTitle] = useState(job.roleTitle);
@@ -659,6 +661,7 @@ export default function JobDetail({ id }: { id: string }) {
           { id: 'board', label: 'تختهٔ جذب', icon: Columns3, count: s.total },
           { id: 'interviews', label: 'جلسه‌های مصاحبه', icon: CalendarClock, count: interviews.length || undefined },
           { id: 'criteria', label: 'معیارها و پرسش‌نامه', icon: ListChecks },
+          { id: 'publish', label: 'انتشار', icon: Globe2 },
         ]}
       />
 
@@ -731,6 +734,8 @@ export default function JobDetail({ id }: { id: string }) {
           )}
         </Card>
       )}
+
+      {tab === 'publish' && <PublicationCard jobId={id} isPublic={Boolean(job.isPublic)} />}
 
       {tab === 'criteria' && (
         <div className="grid lg:grid-cols-2 gap-5">

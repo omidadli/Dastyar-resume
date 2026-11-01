@@ -20,6 +20,7 @@ import crypto from 'crypto';
 import * as db from './db';
 import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
+import { iceServersFor, relayNote, turnStatus } from './turn';
 import type { PublicRoom, RoomPoll, RoomPresence, RoomRole, RoomSignal, SignalKind } from '../src/types/room';
 
 export class RoomError extends Error {
@@ -191,27 +192,12 @@ export function publicRoomOf(row: db.InterviewRoomRow): PublicRoom {
     status: row.status,
     scheduledStartJalali: row.scheduledStartJalali,
     expiresAtJalali: row.expiresAtJalali,
-    iceServers: iceServers(),
-    relayNote:
-      'این تماس مستقیم بین دو مرورگر است (WebRTC)؛ تصویر و صدا از سرور هویدا عبور نمی‌کند و ضبط نمی‌شود. اگر شبکهٔ سازمان شما اتصال مستقیم را ببندد، ممکن است تماس برقرار نشود — در آن صورت از تماس تلفنی یا Meet استفاده کنید.',
+    // The candidate gets ephemeral credentials too; a relay never sees a
+    // permanent secret in a page that a stranger opened.
+    iceServers: iceServersFor(row.orgId, 'candidate'),
+    relayConfigured: turnStatus(row.orgId).configured,
+    relayNote: relayNote(org),
   };
-}
-
-/**
- * STUN is enough for most home and mobile networks. `ROOM_ICE_SERVERS` lets a
- * workspace point at its own server (including a TURN relay it pays for).
- */
-export function iceServers(): { urls: string | string[] }[] {
-  const raw = process.env.ROOM_ICE_SERVERS;
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length) return parsed.slice(0, 4);
-    } catch {
-      // A malformed value must not break the page: fall through to the default.
-    }
-  }
-  return [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 }
 
 /** A room can be found by token from the candidate side, with no session. */

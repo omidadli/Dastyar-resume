@@ -27,6 +27,7 @@ import {
   stateOf,
   touchPresence,
 } from '../room';
+import { iceServersFor, relayNote, turnStatus } from '../turn';
 import { h, str } from './util';
 
 function fail(res: express.Response, err: unknown) {
@@ -159,7 +160,11 @@ export function roomRoutes() {
       if (!row || row.orgId !== org.id) return res.status(404).json({ error: 'اتاق پیدا نشد.', code: 'ROOM_NOT_FOUND' });
       if (blockedByJobId(req, res, row.jobId)) return;
       if (blockedByBlind(org, res)) return;
-      res.json({ room: listRoomsFor(org.id, { interviewId: row.interviewId || undefined }).find((r) => r.id === row.id) || null });
+      res.json({
+        room: listRoomsFor(org.id, { interviewId: row.interviewId || undefined }).find((r) => r.id === row.id) || null,
+        // The host's own ephemeral relay credentials (never the candidate's).
+        ice: { servers: iceServersFor(org.id, 'host'), relayConfigured: turnStatus(org.id).configured, note: relayNote(org) },
+      });
     })
   );
 

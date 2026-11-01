@@ -1,3 +1,4 @@
+import type { TurnStatusPublic } from './room';
 /**
  * HOVIDA («هویدا») — types for the three outside connections:
  *   1. sourcing (LinkedIn-compatible provider)  → find specialists who are open to work
@@ -220,6 +221,8 @@ export interface IntegrationsStatus {
   calendar: CalendarStatusPublic;
   sms: SmsSettingsPublic;
   chat: ChatStatusPublic;
+  /** The workspace's own TURN relay, so a strict network cannot block a call. */
+  turn: TurnStatusPublic;
 }
 
 // ------------------------------------------------------------------- SMS ----

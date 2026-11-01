@@ -248,6 +248,24 @@ export interface OrgSecrets {
     lastError: string | null;
   };
   /**
+   * «رلهٔ TURN» — the workspace's own relay server (coturn or any TURN service
+   * it pays for). Without it a call on a strict corporate network cannot
+   * connect; with it, media is relayed through a machine the customer controls.
+   * Two shapes are supported: a shared secret (ephemeral, HMAC-signed
+   * credentials — the coturn default) or a fixed username/password.
+   */
+  turn?: {
+    urls: string;
+    usernameEnc: string | null;
+    credentialEnc: string | null;
+    /** coturn `static-auth-secret`; when set it wins over user/password. */
+    secretEnc: string | null;
+    /** How long an ephemeral credential lives. */
+    ttlMin: number;
+    updatedAtISO: string | null;
+    updatedByName: string | null;
+  };
+  /**
    * «ورود سازمانی (SSO)» — OIDC configuration. The client secret is encrypted
    * like every other credential and never leaves the server.
    */

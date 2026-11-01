@@ -451,6 +451,21 @@ async function main() {
 
     smtp.server.close();
 
+    // ---------------------------------------------- «رلهٔ TURN» settings ----
+    // The workspace's own relay: stored encrypted, never echoed, admin-only.
+    const turnOff = await call('GET', '/api/integrations/status', A);
+    assert(turnOff.json?.turn?.configured === false, 'no relay is configured before anyone connects one');
+    const turnSaved = await call('PUT', '/api/integrations/turn', A, {
+      urls: 'turn:relay.example.ir:3478',
+      secret: 'turn-shared-secret-123456',
+      ttlMin: 45,
+    });
+    assert(turnSaved.status === 200 && turnSaved.json.turn.mode === 'secret', 'the relay is saved in shared-secret mode', `${turnSaved.status}`);
+    assert(!JSON.stringify(turnSaved.json).includes('turn-shared-secret-123456'), 'and the shared secret is not echoed back');
+    const afterTurn = await call('GET', '/api/integrations/status', A);
+    assert(afterTurn.json.turn.ttlMin === 45 && afterTurn.json.turn.urls.length === 1, 'the status reports what will be handed to the browser', JSON.stringify(afterTurn.json.turn));
+    assert((await call('GET', '/api/integrations/status', B)).json.turn.configured === false, 'another workspace has no relay of its own');
+
     // ------------------------------------------------------- persistence ----
     child.kill('SIGTERM');
     await new Promise((r) => child.once('exit', r));
@@ -458,6 +473,7 @@ async function main() {
     assert((snap.interviews || []).length >= 1 && (snap.sourcing || []).length >= 2, 'searches and interviews are in the snapshot');
     assert(!JSON.stringify(snap).includes('test-linkedin-token'), 'the provider token is never written to the snapshot');
     assert(!JSON.stringify(snap).includes('smtp-secret-123'), 'the SMTP password is never written in clear');
+    assert(!JSON.stringify(snap).includes('turn-shared-secret-123456'), 'nor is the TURN shared secret');
     assert(Boolean(snap.orgSecrets), 'the per-workspace secret slot exists');
   } finally {
     if (!child.killed) child.kill('SIGKILL');

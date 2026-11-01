@@ -38,6 +38,8 @@ export default function InterviewRoom({ token }: { token: string }) {
   const [chatOpen, setChatOpen] = useState(true);
   const [screenOn, setScreenOn] = useState(false);
   const [peerScreen, setPeerScreen] = useState(false);
+  /** The workspace's own relay credentials for this side (host sees its own). */
+  const [iceOverride, setIceOverride] = useState<{ servers: PublicRoom['iceServers']; relayConfigured: boolean; note: string } | null>(null);
 
   const localRef = useRef<HTMLVideoElement | null>(null);
   const remoteRef = useRef<HTMLVideoElement | null>(null);
@@ -78,6 +80,7 @@ export default function InterviewRoom({ token }: { token: string }) {
         setRole('host');
         roleRef.current = 'host';
         setPeerName(r.room.candidateName);
+        if (r.ice) setIceOverride(r.ice);
       })
       .catch(() => {
         // No session (or another workspace): this is the candidate side.
@@ -255,7 +258,9 @@ export default function InterviewRoom({ token }: { token: string }) {
     setMicOn(stream.getAudioTracks().length > 0);
     setCamOn(stream.getVideoTracks().length > 0);
 
-    const pc = new RTCPeerConnection({ iceServers: meta?.iceServers || [] });
+    // Host and candidate each get their own credentials; the relay never sees a
+    // permanent secret in a page a stranger opened.
+    const pc = new RTCPeerConnection({ iceServers: iceOverride?.servers || meta?.iceServers || [] });
     pcRef.current = pc;
     stream.getTracks().forEach((t) => pc.addTrack(t, stream));
     pc.ontrack = (ev) => {
@@ -425,6 +430,11 @@ export default function InterviewRoom({ token }: { token: string }) {
                     {meta.scheduledStartJalali}
                   </span>
                 )}
+                {(iceOverride?.relayConfigured ?? meta.relayConfigured) ? (
+                  <Chip tone="brand">رلهٔ TURN سازمان وصل است</Chip>
+                ) : (
+                  <Chip tone="outline">تماس مستقیم (بدون رله)</Chip>
+                )}
               </div>
 
               {phase === 'ended' && (
@@ -577,9 +587,9 @@ export default function InterviewRoom({ token }: { token: string }) {
                 </div>
               )}
 
-              {meta.relayNote && (
+              {(iceOverride?.note || meta.relayNote) && (
                 <p className="text-[11.5px] text-ink-4 leading-relaxed">
-                  {meta.relayNote} اعتبار این اتاق تا {meta.expiresAtJalali} است.
+                  {iceOverride?.note || meta.relayNote} اعتبار این اتاق تا {meta.expiresAtJalali} است.
                 </p>
               )}
             </>

@@ -45,6 +45,7 @@ import type { JobOffer, OfferApprovalConfig, OfferDecisionInput, OfferStatus, Of
 import type { HrisPushResult, HrisRoster } from '../types/hris';
 import type { InterviewRoom, PublicRoom, RoomPoll, SignalKind } from '../types/room';
 import type { InboxView } from '../types/inbox';
+import type { TurnStatusPublic } from '../types/room';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
   AutomationOverview,
@@ -524,6 +525,10 @@ export const api = {
       replyTo?: string | null;
     }) => put<{ email: EmailSettingsPublic }>('/api/integrations/email', b, { timeoutMs: 60_000 }),
     disconnectEmail: () => del<{ email: EmailSettingsPublic }>('/api/integrations/email'),
+    /** «رلهٔ TURN» — the customer's own relay server for live calls. */
+    saveTurn: (body: { urls: string; username?: string; credential?: string; secret?: string; ttlMin?: number }) =>
+      put<{ turn: TurnStatusPublic }>('/api/integrations/turn', body),
+    disconnectTurn: () => del<{ turn: TurnStatusPublic }>('/api/integrations/turn'),
     testEmail: () => post<{ ok: boolean; error: string | null }>('/api/integrations/email/test', {}, { timeoutMs: 60_000 }),
     sendEmail: (b: { resumeId?: string | null; to?: string; subject: string; body: string }) =>
       post<{ email: SentEmail; record: ResumeListItem | null }>('/api/integrations/email/send', b, { timeoutMs: 60_000 }),
@@ -684,7 +689,11 @@ export const api = {
     create: (interviewId: string) =>
       post<{ room: InterviewRoom; reused: boolean }>(`/api/interviews/${encodeURIComponent(interviewId)}/room`, {}),
     list: (q: { interviewId?: string; jobId?: string; resumeId?: string } = {}) => get<{ items: InterviewRoom[] }>(`/api/rooms${qs(q)}`),
-    byToken: (token: string) => get<{ room: InterviewRoom | null }>(`/api/rooms/by-token/${encodeURIComponent(token)}`),
+    byToken: (token: string) =>
+      get<{
+        room: InterviewRoom | null;
+        ice?: { servers: PublicRoom['iceServers']; relayConfigured: boolean; note: string };
+      }>(`/api/rooms/by-token/${encodeURIComponent(token)}`),
     close: (id: string) => post<{ room: InterviewRoom }>(`/api/rooms/${encodeURIComponent(id)}/close`, {}),
     hostSignals: (id: string, since: number) => get<RoomPoll>(`/api/rooms/${encodeURIComponent(id)}/signals?since=${since}`),
     hostSignal: (id: string, kind: SignalKind, payload: string) =>

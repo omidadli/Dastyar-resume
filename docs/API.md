@@ -433,6 +433,11 @@ GET  /api/rooms/public/:token          → { room, state }        (بدون نش
 POST /api/rooms/public/:token/signal   body: { kind, payload }  (from = candidate)
 ```
 
+`GET /api/rooms/by-token/:token` هم `ice: { servers, relayConfigured, note }` می‌دهد و رلهٔ
+TURN سازمان با `PUT /api/integrations/turn` وصل می‌شود (`body: { urls, secret }` یا
+`{ urls, username, credential, ttlMin }`؛ `DELETE` قطعش می‌کند). هر تماس گذرواژهٔ موقت
+می‌گیرد و کلید مشترک هرگز به مرورگر نمی‌رود.
+
 فقط `offer`/`answer`/`ice`/`chat`/`screen`/`bye` پذیرفته می‌شود (چت حداکثر ۲٬۰۰۰ نویسه و هیچ‌جا ذخیره نمی‌شود) و نقش را سرور تعیین می‌کند: توکن عمومی
 هرگز نمی‌تواند پیام میزبان بفرستد. تصویر و صدا از سرور عبور نمی‌کند و هیچ پیامی روی
 دیسک نوشته نمی‌شود. جزئیات و محدودیت شبکه: [`INTERVIEW-ROOM.md`](INTERVIEW-ROOM.md).

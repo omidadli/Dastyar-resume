@@ -83,10 +83,30 @@ export interface PublicRoom {
   status: 'open' | 'closed';
   scheduledStartJalali: string | null;
   expiresAtJalali: string;
-  /** STUN servers the browser may use; TURN relay is not provided. */
-  iceServers: { urls: string | string[] }[];
+  /**
+   * ICE servers the browser may use. STUN always; TURN **only** when the
+   * workspace connected its own relay (settings › connections › TURN).
+   */
+  iceServers: { urls: string | string[]; username?: string; credential?: string }[];
+  /** True when a relay the customer controls is in the list above. */
+  relayConfigured: boolean;
   /** Said on screen, in Persian, so nobody has to guess. */
   relayNote: string;
+}
+
+/** «رلهٔ TURN» — what the settings card may know about the workspace's relay. */
+export interface TurnStatusPublic {
+  configured: boolean;
+  urls: string[];
+  /** «secret» = ephemeral HMAC credentials, «static» = fixed user/password. */
+  mode: 'secret' | 'static' | 'none';
+  ttlMin: number;
+  username: string | null;
+  /** Never the password itself — only whether one is stored. */
+  hasCredential: boolean;
+  updatedAtISO: string | null;
+  updatedByName: string | null;
+  note: string;
 }
 
 export interface RoomPoll {

@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Trash2,
   Users,
+  Radio,
 } from 'lucide-react';
 import { Button, Callout, Card, CardHeader, Chip, ConfirmDialog, Select, Switch, TextArea, TextInput, toast } from '../../components/ui';
 import { api } from '../../lib/api';
@@ -23,6 +24,7 @@ import { copyText } from '../../lib/clipboard';
 import { useAsync } from '../../lib/useAsync';
 import { SsoCard } from '../../components/settings/SsoCard';
 import type { ChatProvider, ChatStatusPublic, EmailSettingsPublic, SmsProvider, SmsSettingsPublic } from '../../types/integrations';
+import type { TurnStatusPublic } from '../../types/room';
 import { CHAT_EVENT_LABEL } from '../../types/integrations';
 
 const HOST_PRESETS: { id: string; label: string; host: string; port: number; secure: boolean; hint: string }[] = [
@@ -870,6 +872,181 @@ function SourcingCard({ configured, providerLabel, endpointHost, setupHint, docP
   );
 }
 
+
+/**
+ * «رلهٔ TURN» — the one part of a live call this product cannot supply itself:
+ * a relay both browsers can reach when a corporate network blocks direct
+ * connections. The customer runs coturn (or pays for a TURN service); HOVIDA
+ * reads the settings and hands each side its own ephemeral credentials.
+ */
+function TurnCard() {
+  const can = useCan('admin');
+  const status = useAsync(() => api.integrations.status(), []);
+  const [turn, setTurn] = useState<TurnStatusPublic | undefined>(status.data?.turn);
+  const [urls, setUrls] = useState('');
+  const [mode, setMode] = useState<'secret' | 'static'>('secret');
+  const [secret, setSecret] = useState('');
+  const [username, setUsername] = useState('');
+  const [credential, setCredential] = useState('');
+  const [ttlMin, setTtlMin] = useState(60);
+  const [saving, setSaving] = useState(false);
+  const [confirmOff, setConfirmOff] = useState(false);
+
+  useEffect(() => setTurn(status.data?.turn), [status.data?.turn]);
+  useEffect(() => {
+    if (!turn) return;
+    setUrls(turn.urls.join(', '));
+    setMode(turn.mode === 'static' ? 'static' : 'secret');
+    setTtlMin(turn.ttlMin || 60);
+  }, [turn?.urls?.join(','), turn?.mode, turn?.ttlMin]);
+
+  const configured = Boolean(turn?.configured);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      const res = await api.integrations.saveTurn({
+        urls,
+        secret: mode === 'secret' ? secret || undefined : undefined,
+        username: mode === 'static' ? username || undefined : undefined,
+        credential: mode === 'static' ? credential || undefined : undefined,
+        ttlMin,
+      });
+      setTurn(res.turn);
+      setSecret('');
+      setCredential('');
+      toast('رلهٔ TURN ذخیره شد؛ از تماس بعدی، مرورگر نشانی‌های رله را می‌گیرد.');
+    } catch (err: any) {
+      toast(err?.message || 'ذخیرهٔ تنظیمات رله ممکن نشد.', 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const disconnect = async () => {
+    try {
+      const res = await api.integrations.disconnectTurn();
+      setTurn(res.turn);
+      toast('رله قطع شد؛ تماس‌ها دوباره مستقیم می‌شوند.', 'info');
+    } catch (err: any) {
+      toast(err?.message || 'قطع رله ممکن نشد.', 'error');
+    } finally {
+      setConfirmOff(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader
+        icon={Radio}
+        title="رلهٔ TURN برای تماس زنده"
+        subtitle="سرور خودتان، تا شبکهٔ شرکتی تماس را نبندد"
+        action={configured ? <Chip tone="brand" icon={CheckCircle2}>وصل</Chip> : <Chip tone="neutral">وصل نشده</Chip>}
+      />
+      <div className="space-y-3">
+        <p className="text-[12.5px] text-ink-3 leading-relaxed">
+          تماس زندهٔ هویدا مستقیم بین دو مرورگر است و تصویر و صدا از سرور ما عبور نمی‌کند. روی شبکه‌ای که اتصال مستقیم را
+          می‌بندد (NAT متقارن یا فایروال شرکتی)، به یک رله نیاز است. هویدا رلهٔ عمومی ندارد؛ رلهٔ خودتان (coturn یا سرویس
+          پولی TURN) را این‌جا وصل کنید و بگذارید مرورگر نشانی‌هایش را بگیرد.
+        </p>
+        <TextInput
+          label="نشانی رله"
+          value={urls}
+          onChange={(e) => setUrls(e.target.value)}
+          latin
+          placeholder="turn:turn.example.ir:3478"
+          hint="با turn: یا turns: شروع شود؛ چند نشانی را با کاما جدا کنید (حداکثر چهار)."
+          disabled={!can || saving}
+        />
+        <Select
+          label="نوع اعتبارنامه"
+          value={mode}
+          onChange={(e) => setMode(e.target.value as 'secret' | 'static')}
+          options={[
+            { value: 'secret', label: 'کلید مشترک — گذرواژهٔ موقت برای هر تماس (پیشنهادی)' },
+            { value: 'static', label: 'نام کاربری و گذرواژهٔ ثابت' },
+          ]}
+          disabled={!can || saving}
+        />
+        {mode === 'secret' ? (
+          <>
+            <TextInput
+              label={turn?.mode === 'secret' ? 'کلید مشترک (برای تغییر وارد کنید)' : 'کلید مشترک (static-auth-secret)'}
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              latin
+              type="password"
+              hint="رمزنگاری‌شده ذخیره می‌شود و هرگز به مرورگر برنمی‌گردد؛ گذرواژهٔ هر تماس با HMAC از همین کلید ساخته می‌شود."
+              disabled={!can || saving}
+            />
+            <TextInput
+              label="مدت اعتبار گذرواژهٔ موقت (دقیقه)"
+              value={String(ttlMin)}
+              onChange={(e) => setTtlMin(Number(e.target.value.replace(/[^\d]/g, '')) || 60)}
+              latin
+              hint="بین ۵ و ۱۴۴۰ دقیقه؛ کوتاه‌تر امن‌تر است و فقط برای همان تماس کافی است."
+              disabled={!can || saving}
+            />
+          </>
+        ) : (
+          <>
+            <TextInput
+              label="نام کاربری"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              latin
+              disabled={!can || saving}
+            />
+            <TextInput
+              label={turn?.hasCredential ? 'گذرواژه (برای تغییر وارد کنید)' : 'گذرواژه'}
+              value={credential}
+              onChange={(e) => setCredential(e.target.value)}
+              latin
+              type="password"
+              hint="گذرواژهٔ ثابت در هر تماس به مرورگر می‌رود؛ اگر ممکن است کلید مشترک را انتخاب کنید."
+              disabled={!can || saving}
+            />
+          </>
+        )}
+        {turn?.note && <p className="text-[12px] text-ink-3 leading-relaxed">{turn.note}</p>}
+        {turn?.updatedByName && (
+          <p className="text-[11.5px] text-ink-4">
+            آخرین تغییر: {turn.updatedByName}
+            {turn.updatedAtISO ? ` — ${faDate(turn.updatedAtISO)}` : ''}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button icon={Save} onClick={() => void save()} loading={saving} disabled={!can || saving || !urls.trim()}>
+            ذخیره
+          </Button>
+          {configured && (
+            <Button variant="ghost" icon={Trash2} onClick={() => setConfirmOff(true)} disabled={!can || saving}>
+              قطع رله
+            </Button>
+          )}
+          <a
+            href="https://github.com/coturn/coturn"
+            target="_blank"
+            rel="noreferrer"
+            className="text-[12px] text-brand-ink inline-flex items-center gap-1"
+          >
+            راهنمای coturn
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+      </div>
+      <ConfirmDialog
+        open={confirmOff}
+        onClose={() => setConfirmOff(false)}
+        onConfirm={() => void disconnect()}
+        title="رلهٔ TURN قطع شود؟"
+        description="اتاق‌های بعدی فقط STUN می‌گیرند؛ روی شبکهٔ شرکتی ممکن است تماس برقرار نشود، اما هیچ داده‌ای از دست نمی‌رود."
+        confirmLabel="قطع کن"
+      />
+    </Card>
+  );
+}
+
 export function IntegrationsTab() {
   const status = useAsync(() => api.integrations.status(), []);
   const data = status.data;
@@ -879,6 +1056,7 @@ export function IntegrationsTab() {
         <EmailCard />
         <SmsCard />
         <ChatCard />
+        <TurnCard />
         <CareersCard />
         <SsoCard />
         <SourcingCard

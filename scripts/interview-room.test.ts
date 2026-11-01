@@ -245,6 +245,62 @@ async function main() {
     const hostLookup = await call('GET', `/api/rooms/by-token/${token}`, A);
     assert(hostLookup.status === 200 && hostLookup.json.room?.id === room.id, 'the host finds the room by token (same page, other side)');
 
+    // ------------------------------------------------------------ turn relay ---
+    // The relay is the customer's own server; with nothing configured the page
+    // says «direct only» instead of pretending the call works everywhere.
+    const status0 = await call('GET', '/api/integrations/status', A);
+    assert(status0.json.turn?.configured === false && status0.json.turn?.mode === 'none', 'no relay is configured by default');
+    const directRoom = await call('GET', `/api/rooms/public/${token}`);
+    assert(
+      (directRoom.json.room.iceServers as any[]).every((s) => !s.username),
+      'so the browser only gets STUN servers',
+      JSON.stringify(directRoom.json.room.iceServers)
+    );
+    assert(directRoom.json.room.relayConfigured === false, 'and the page knows there is no relay');
+
+    const saved = await call('PUT', '/api/integrations/turn', A, {
+      urls: 'turn:relay.example.ir:3478, turns:relay.example.ir:5349',
+      secret: 'shared-secret-0123456789',
+      ttlMin: 30,
+    });
+    assert(saved.status === 200 && saved.json.turn.configured === true, 'the admin connects the workspace relay', `${saved.status} ${JSON.stringify(saved.json?.error || '')}`);
+    assert(saved.json.turn.mode === 'secret' && saved.json.turn.urls.length === 2, 'in shared-secret mode with both addresses', JSON.stringify(saved.json.turn.urls));
+    assert(!JSON.stringify(saved.json).includes('shared-secret-0123456789'), 'and the shared secret never travels back to the browser');
+
+    const relayRoom = await call('GET', `/api/rooms/public/${token}`);
+    const relayServers = relayRoom.json.room.iceServers as any[];
+    const turnEntry = relayServers.find((s) => s.username);
+    assert(relayRoom.json.room.relayConfigured === true, 'the room now says a relay exists');
+    assert(Boolean(turnEntry && turnEntry.credential), 'the candidate gets an ephemeral credential', JSON.stringify(relayServers.map((s) => s.urls)));
+    assert(String(turnEntry.username).endsWith(':candidate'), 'labelled for the candidate side', String(turnEntry.username));
+    assert(!String(turnEntry.credential).includes('shared-secret'), 'which is derived, not the secret itself');
+    const hostIce = (await call('GET', `/api/rooms/by-token/${token}`, A)).json.ice;
+    assert(hostIce?.relayConfigured === true, 'the host sees the same relay');
+    assert(String(hostIce.servers.find((x: any) => x.username)?.username).endsWith(':host'), 'with its own label', JSON.stringify(hostIce.servers.map((x: any) => x.username)));
+
+    assert((await call('PUT', '/api/integrations/turn', A, { urls: 'http://not-a-turn', secret: 'x' })).status === 400, 'a non-TURN address is refused');
+    assert((await call('PUT', '/api/integrations/turn', A, { urls: 'turn:relay.example.ir:3478' })).status === 400, 'so is a relay with no credential at all');
+
+    const fixed = await call('PUT', '/api/integrations/turn', A, {
+      urls: 'turn:relay.example.ir:3478',
+      username: 'hovida',
+      credential: 'relay-password-123',
+    });
+    assert(fixed.json.turn.mode === 'static' && fixed.json.turn.username === 'hovida', 'a fixed user/password is the other shape', JSON.stringify(fixed.json.turn));
+    const fixedIce = ((await call('GET', `/api/rooms/public/${token}`)).json.room.iceServers as any[]).find((s) => s.username);
+    assert(fixedIce?.credential === 'relay-password-123', 'and reaches the page as typed', JSON.stringify(fixedIce));
+
+    await call('POST', '/api/org/members', A, { name: 'عضو', email: 'member@example.com', password: 'Password12345', role: 'member' });
+    const M = (await call('POST', '/api/auth/login', null, { email: 'member@example.com', password: 'Password12345' })).json.token as string;
+    assert((await call('PUT', '/api/integrations/turn', M, { urls: 'turn:x:3478', secret: 'y' })).status === 403, 'only an admin may change the relay');
+    assert((await call('GET', '/api/integrations/status', B)).json.turn?.configured === false, 'another workspace is unaffected');
+
+    assert((await call('DELETE', '/api/integrations/turn', A)).json.turn.configured === false, 'the relay can be removed');
+    assert(
+      ((await call('GET', `/api/rooms/public/${token}`)).json.room.iceServers as any[]).every((s) => !s.username),
+      'and the room falls back to direct-only honestly'
+    );
+
     // Blind mode: a live call means faces, so the whole thing is closed to HR.
     await call('PATCH', '/api/org', A, { blindScreening: true });
     assert((await call('POST', `/api/interviews/${interview.id}/room`, A, {})).status === 409, 'blind mode refuses to open a camera room');

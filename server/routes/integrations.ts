@@ -14,6 +14,7 @@ import * as db from '../db';
 import { actorOf, ctxOf, requireRole } from '../auth';
 import { blindOn, blockedByBlind, knownNames, maskText } from '../blind';
 import { visibleJobIds } from '../job-access';
+import { clearTurn, saveTurn, turnStatus } from '../turn';
 import { h, str } from './util';
 import { evaluateResume } from '../ai/screening';
 import { EmailNotConfiguredError, emailStatus, friendlySmtpError, isEmailConfigured, prepareEmailSettings, sendMail, verifyEmail } from '../mailer';
@@ -214,6 +215,9 @@ export function integrationRoutes(): express.Router {
       email: emailStatusFor(org.id),
       sms: smsStatusFor(org.id),
       chat: chatStatus(secrets),
+      // «رلهٔ TURN»: the one part of a live call a self-hosted product cannot
+      // supply — the customer runs it, we hand the browser the right servers.
+      turn: turnStatus(org.id),
       calendar: {
         ...calendarStatus(secrets, redirectUriFor(originOf(req))),
         configured: Boolean(googleClient()),
@@ -447,6 +451,48 @@ export function integrationRoutes(): express.Router {
       res.json({ email: emailStatusFor(org.id) });
     })
   );
+
+  // -------------------------------------------------------- «رلهٔ TURN» ----
+  // The relay is the customer's own server (coturn or a paid TURN service).
+  // Nothing here pretends HOVIDA has a global relay network.
+  r.put(
+    '/integrations/turn',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      try {
+        const status = saveTurn(
+          org.id,
+          {
+            urls: typeof req.body?.urls === 'string' ? req.body.urls : '',
+            username: typeof req.body?.username === 'string' ? req.body.username : '',
+            credential: typeof req.body?.credential === 'string' ? req.body.credential : '',
+            secret: typeof req.body?.secret === 'string' ? req.body.secret : '',
+            ttlMin: Number(req.body?.ttlMin) || undefined,
+          },
+          { id: user.id, name: user.name }
+        );
+        db.logActivity(
+          org.id,
+          actorOf(req) || { id: user.id, name: user.name },
+          'settings.changed',
+          status.configured
+            ? `رلهٔ TURN را برای تماس زنده وصل کرد (${status.mode === 'secret' ? 'گذرواژهٔ موقت' : 'کاربر ثابت'})`
+            : 'تنظیمات رلهٔ TURN را برداشت'
+        );
+        res.json({ turn: status });
+      } catch (err: any) {
+        res.status(err?.status || 400).json({ error: err?.message || 'ذخیرهٔ تنظیمات رله ممکن نشد.', code: err?.code });
+      }
+    })
+  );
+
+  r.delete('/integrations/turn', requireRole('admin'), (req, res) => {
+    const { org } = ctxOf(req);
+    const status = clearTurn(org.id);
+    db.logActivity(org.id, actorOf(req), 'settings.changed', 'رلهٔ TURN را قطع کرد؛ تماس‌ها مستقیم می‌شوند');
+    res.json({ turn: status });
+  });
 
   r.delete('/integrations/email', requireRole('admin'), (req, res) => {
     const { org } = ctxOf(req);

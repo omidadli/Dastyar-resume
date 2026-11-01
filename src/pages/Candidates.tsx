@@ -12,7 +12,7 @@ import { MATCH_FILTERS } from '../lib/match';
 import { setQuery, useLocation } from '../lib/router';
 import { useAsync, useDebounced } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import type { DecisionFilter, MatchFilter, ResumeListItem, ResumeSort } from '../types/screening';
+import type { DecisionFilter, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
 type Tab = 'pending' | 'all' | 'approved' | 'review' | 'rejected';
 const TAB_TO_DECISION: Record<Tab, DecisionFilter> = { pending: 'pending', all: 'all', approved: 'approved', review: 'review', rejected: 'rejected' };
@@ -28,11 +28,14 @@ export default function Candidates() {
   const [dept, setDept] = useState('');
   const [range, setRange] = useState('all');
   const [match, setMatch] = useState<MatchFilter>('all');
+  // «جدید»/«تکراری» نسبت به سابقهٔ همین دپارتمان — از ?novelty= تا لینک‌ها حفظ شوند.
+  const noveltyParam = query.get('novelty');
+  const novelty: NoveltyFilter = noveltyParam === 'new' || noveltyParam === 'duplicate' || noveltyParam === 'unknown' ? noveltyParam : 'all';
   const [sort, setSort] = useState<ResumeSort>(() => (tab === 'approved' || tab === 'rejected' || tab === 'review' ? 'decided' : 'match'));
   const [qInput, setQInput] = useState('');
   const q = useDebounced(qInput, 250);
   const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [tab, jobId, dept, range, match, sort, q]);
+  useEffect(() => setPage(1), [tab, jobId, dept, range, match, sort, q, novelty]);
   useEffect(() => {
     if (tab === 'approved' || tab === 'rejected' || tab === 'review') setSort('decided');
     else setSort('match');
@@ -54,6 +57,7 @@ export default function Candidates() {
           match: tab === 'pending' ? 'all' : match,
           // «۷ روز اخیر» = today and the 6 days before it (the filter is inclusive).
           fromJalali: range === 'all' ? undefined : jalaliDaysAgo(Number(range) - 1),
+          novelty,
           sort,
           q,
           page,
@@ -61,7 +65,7 @@ export default function Candidates() {
         },
         { signal }
       ),
-    [tab, jobId, dept, range, match, sort, q, page]
+    [tab, jobId, dept, range, match, sort, q, page, novelty]
   );
   useOnChange(['resumes'], () => listQ.refresh());
   // The server clamps an out-of-range page (the last page emptied by a
@@ -116,6 +120,19 @@ export default function Candidates() {
                 value={dept}
                 onChange={(e) => setDept(e.target.value)}
                 options={[{ value: '', label: 'همه دپارتمان‌ها' }, ...(org?.departments || []).map((d) => ({ value: d.id, label: d.name }))]}
+              />
+              <Select
+                compact
+                aria-label="وضعیت تکرار"
+                title="رزومه‌های تازه در برابر رزومه‌هایی که در همین دپارتمان پیش‌تر ثبت شده‌اند"
+                value={novelty}
+                onChange={(e) => setQuery({ novelty: e.target.value === 'all' ? null : e.target.value })}
+                options={[
+                  { value: 'all', label: 'تازه و تکراری' },
+                  { value: 'new', label: 'فقط تازه‌ها' },
+                  { value: 'duplicate', label: 'فقط تکراری‌ها' },
+                  { value: 'unknown', label: 'نامشخص' },
+                ]}
               />
               <Select
                 compact

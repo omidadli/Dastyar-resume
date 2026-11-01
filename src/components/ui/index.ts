@@ -1,6 +1,6 @@
 export { Button, ButtonLink, IconButton } from './Button';
 export type { ButtonVariant } from './Button';
-export { MatchPill, DecisionPill, JobStatusPill, Chip, EngineBadge, ConfidenceBadge, CountBadge } from './Pills';
+export { MatchPill, DecisionPill, JobStatusPill, NoveltyPill, Chip, EngineBadge, ConfidenceBadge, CountBadge } from './Pills';
 export { MatchMeter, ScoreBadge, DistributionBar } from './MatchMeter';
 export { Monogram } from './Monogram';
 export { Tabs, Segmented } from './Tabs';

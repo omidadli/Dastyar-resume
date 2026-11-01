@@ -3,6 +3,9 @@
 // Used by both the React client and the Express server.
 // ================================================================
 
+import type { PipelineStage } from './pipeline';
+import type { EeoAnswer } from './eeo';
+
 export type Recommendation = 'INTERVIEW' | 'REVIEW' | 'REJECT';
 /**
  * Internal AI category codes. They are never shown raw in the UI: the client
@@ -191,6 +194,16 @@ export interface JobStats {
   avgScore: number;
 }
 
+/** Who may open an opening: everybody in the workspace, or a named list. */
+export type JobAccessMode = 'everyone' | 'restricted';
+
+/** What the «دسترسی» dialog needs: the rule, the chosen people and the team. */
+export interface JobAccessPayload {
+  accessMode: JobAccessMode;
+  allowedUserIds: string[];
+  members: { id: string; name: string; email: string; role: 'owner' | 'admin' | 'member'; isCreator: boolean }[];
+}
+
 export interface Job {
   id: string;
   orgId: string | null;
@@ -207,6 +220,35 @@ export interface Job {
   criteriaSource: CriteriaSource;
   status: JobStatus;
   analysisStatus: AnalysisStatus;
+  /**
+   * «نسخهٔ انگلیسی آگهی» — what the bilingual portal shows to an English reader.
+   * Empty means the posting is Persian-only and the portal says so; HOVIDA never
+   * puts a machine translation in the employer's mouth.
+   */
+  titleEn?: string | null;
+  descriptionEn?: string | null;
+  /** Listed on the public career portal (`/careers/<slug>`). */
+  isPublic?: boolean;
+  publishedAtISO?: string | null;
+  /**
+   * «مهلت درخواست» — end of the stated Jalali day, in ISO. After it the opening
+   * is no longer advertised (and `JobPosting.validThrough` says the same thing),
+   * so a candidate never applies to a listing that quietly expired.
+   */
+  applyByISO?: string | null;
+  /** The same deadline as the recruiter typed it (۱۴۰۴/۰۸/۱۲), for display. */
+  applyByJalali?: string | null;
+  /**
+   * «دسترسی به این آگهی» — `everyone` (default) is how every other hiring tool
+   * starts. `restricted` hides the opening, its candidates and their files from
+   * members who are not on `allowedUserIds`; admins and the creator always see
+   * it. Confidential searches (a CFO, a founder's replacement) are the reason.
+   */
+  accessMode?: JobAccessMode;
+  /** Only meaningful with `accessMode: 'restricted'`. Members, never outside users. */
+  allowedUserIds?: string[];
+  /** The board's columns for this opening (defaults applied when absent). */
+  stages?: PipelineStage[];
   stats: JobStats;
   createdAtJalali: string;
   createdAtISO: string;
@@ -229,6 +271,27 @@ export interface AnalysisHistoryEntry {
   mode?: AnalysisMode;
 }
 
+/** Where a candidate came from — set for sourced profiles, null for uploads. */
+export interface ResumeSource {
+  /**
+   * Where the candidate came from: `careers` = the public career portal,
+   * `referral` = a colleague's referral link, `linkedin` = a sourced profile or
+   * a CSV export.
+   */
+  kind: 'linkedin' | 'careers' | 'referral';
+  profileUrl: string;
+  headline: string;
+  company: string | null;
+  location: string;
+  openToWork: boolean;
+  /** The sourcing search that found this profile. */
+  searchId: string | null;
+  /** For `referral`: the colleague the candidate names (free text, never resolved). */
+  referrer?: string | null;
+  /** «چطور با ما آشنا شدید؟» — kept as answered, for the source-of-hire report. */
+  heardFrom?: string | null;
+}
+
 export interface ResumeRecord {
   id: string;
   jobId: string;
@@ -238,9 +301,13 @@ export interface ResumeRecord {
   departmentName: string;
   roleTitle: string | null;
   fileName: string;
+  /** SHA-256 of the uploaded file — one of the duplicate signals. */
+  fileHash?: string | null;
   filePath: string | null;
   fileSize: number | null;
   extractedText: string;
+  /** Present when the candidate was added from a sourcing search. */
+  source?: ResumeSource | null;
   unjudgeableReason: string | null;
   errorMessage: string | null;
 
@@ -267,6 +334,14 @@ export interface ResumeRecord {
   rankInCategory: number | null;
   analysisHistory: AnalysisHistoryEntry[];
 
+  /**
+   * Duplicate screening: compared only against earlier resumes of the same
+   * workspace and department («اولین غربالگری»). `unknown` = no identifying
+   * signal yet (e.g. unreadable file), so neither «تکراری» nor «جدید».
+   */
+  novelty?: ResumeNovelty;
+  duplicateOf?: DuplicateLink | null;
+
   /** Talent pool («بانک استعداد») */
   inBank: boolean;
   bankDepartmentId: string | null;
@@ -274,6 +349,16 @@ export interface ResumeRecord {
   bankTags: string[];
   addedToBankAtJalali: string | null;
   addedToBankAtISO: string | null;
+
+  /** Which column of the pipeline board this candidate sits in. */
+  stageId?: string | null;
+
+  /**
+   * «برابری فرصت‌ها» — the candidate's own, voluntary answer. It is **never**
+   * sent to a member: it is stripped from every candidate payload and appears
+   * only as a suppressed aggregate in the EEO report. Screening never reads it.
+   */
+  eeo?: EeoAnswer | null;
 
   messageStatus: 'none' | 'sent';
   lastMessagedAtJalali: string | null;
@@ -289,6 +374,14 @@ export interface ResumeRecord {
   createdAtISO: string;
   createdAtJalali: string;
   updatedAtISO: string;
+  /** Set when the retention policy stripped the personal data but kept the numbers. */
+  anonymizedAtISO?: string | null;
+  /**
+   * The server removed the identity from this copy because «غربالگری بی‌طرف»
+   * is on. The record on disk still has it; `POST /resumes/:id/reveal` returns
+   * it once, and writes the reveal to the workspace history.
+   */
+  blindHidden?: boolean;
 }
 
 /** Lightweight list shape: the extracted resume text stays on the server. */
@@ -302,12 +395,26 @@ export interface PagedResult<T> {
   totalPages: number;
 }
 
+export type ResumeNovelty = 'new' | 'duplicate' | 'unknown';
+export type DuplicateReason = 'file' | 'text' | 'email' | 'phone';
+export type NoveltyFilter = 'all' | 'new' | 'duplicate' | 'unknown';
+
+export interface DuplicateLink {
+  resumeId: string;
+  jobId: string;
+  roleTitle: string | null;
+  createdAtISO: string;
+  reason: DuplicateReason;
+}
+
 export type MatchFilter = 'all' | 'high' | 'review' | 'low' | 'insufficient';
 export type DecisionFilter = 'all' | 'undecided' | 'pending' | 'approved' | 'rejected' | 'review';
 export type ResumeSort = 'match' | 'newest' | 'oldest' | 'experience' | 'name' | 'decided';
 
 export interface ResumeQuery {
   jobId?: string;
+  /** Narrowing for job-level access: only résumés of these openings. */
+  jobIds?: string[];
   match?: MatchFilter;
   decision?: DecisionFilter;
   q?: string;
@@ -317,12 +424,17 @@ export interface ResumeQuery {
   fromJalali?: string;
   toJalali?: string;
   sort?: ResumeSort;
+  /** «جدید»، «تکراری» یا فاقد اطلاعات کافی برای تطبیق. */
+  novelty?: NoveltyFilter;
   page?: number;
   pageSize?: number;
 }
 
 export interface ResumeCounts {
   all: number;
+  novel: number;
+  duplicate: number;
+  unknownNovelty: number;
   high: number;
   review: number;
   low: number;

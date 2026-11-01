@@ -1,6 +1,6 @@
 import express from 'express';
 import * as db from '../db';
-import { actorOf, ctxOf, hasRole } from '../auth';
+import { actorOf, ctxOf, hasRole, requireRole } from '../auth';
 import { buildTemplateUnderstanding, calibrate, evaluateResume, repairUnderstanding, understandJob } from '../ai/screening';
 import type { AiFile } from '../ai/provider';
 import { ingestDocument, labelForFileName } from '../ingest';
@@ -9,7 +9,11 @@ import { assessText } from '../../src/lib/officeText';
 import type { CandidateEvaluation, EmploymentType, EvaluationMeta, JobStatus, Recommendation, ScreeningAnswers } from '../../src/types/screening';
 import type { Department } from '../../src/types/app';
 import { matchesSearch } from '../../src/lib/normalizeFa';
+import { tehranIsoFromJalali } from '../tehran-time';
 import { h, oneOf, str } from './util';
+import { bankSummary, buildInterviewKit } from '../interview-kit';
+import { accessPayload, blockedByJob, canSeeJob, visibleJobIds, visibleJobs } from '../job-access';
+import type { JobAccessMode } from '../../src/types/screening';
 
 const EMPLOYMENT: EmploymentType[] = ['full-time', 'part-time', 'contract', 'remote', 'hybrid', 'internship'];
 const STATUS_LABEL: Record<JobStatus, string> = { open: 'باز', paused: 'متوقف', closed: 'بسته‌شده' };
@@ -47,7 +51,9 @@ export function jobRoutes(): express.Router {
     const { org } = ctxOf(req);
     const status = oneOf(req.query.status, ['all', 'open', 'paused', 'closed'] as const, 'all');
     const q = str(req.query.q, 100);
-    const all = db.listJobs(org.id).filter((j) => !q || matchesSearch([j.roleTitle, j.departmentName, j.location], q));
+    // Only the openings this person may open — the count above the list must
+    // never advertise a job the list itself hides.
+    const all = visibleJobs(org.id, ctxOf(req).user).filter((j) => !q || matchesSearch([j.roleTitle, j.departmentName, j.location], q));
     res.json({
       items: all.filter((j) => status === 'all' || j.status === status).map(db.toJobSummary),
       counts: {
@@ -117,24 +123,64 @@ export function jobRoutes(): express.Router {
     const { org } = ctxOf(req);
     const job = db.getJob(org.id, req.params.id);
     if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
-    res.json({ job });
+    if (blockedByJob(req, res, job)) return;
+    if (blockedByJob(req, res, job)) return;
+    res.json({ job, access: accessPayload(org.id, job) });
+  });
+
+  /**
+   * «کیت مصاحبه» — composed on every request from the job's own criteria (and
+   * the chosen candidate's résumé), so it is never stale.
+   */
+  r.get('/jobs/:id/interview-kit', (req, res) => {
+    const { org } = ctxOf(req);
+    const job = db.getJob(org.id, req.params.id);
+    if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    if (blockedByJob(req, res, job)) return;
+    const resumeId = str(req.query.resumeId, 80);
+    const rec = resumeId ? db.getResume(org.id, resumeId) : null;
+    if (resumeId && !rec) return res.status(404).json({ error: 'رزومه یافت نشد.' });
+    if (rec && rec.jobId !== job.id) return res.status(400).json({ error: 'این کارجو به این فرصت شغلی مربوط نیست.' });
+    res.json({ kit: buildInterviewKit({ org, job, candidate: rec }) });
+  });
+
+  /** What the bank covers — the settings/docs page reads this instead of a static list. */
+  r.get('/interview-kit/bank', (_req, res) => {
+    res.json(bankSummary());
   });
 
   r.patch('/jobs/:id', (req, res) => {
     const { org } = ctxOf(req);
     const job = db.getJob(org.id, req.params.id);
     if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    if (blockedByJob(req, res, job)) return;
     const prevStatus = job.status;
     if (typeof req.body?.roleTitle === 'string' && str(req.body.roleTitle, 120).length < 2) {
       return res.status(400).json({ error: 'عنوان فرصت شغلی را وارد کنید.', field: 'roleTitle' });
     }
     const status = req.body?.status ? oneOf<JobStatus>(req.body.status, ['open', 'paused', 'closed'], job.status) : undefined;
+    // «مهلت درخواست»: the recruiter types a Jalali date; an empty value clears
+    // it. The deadline means the end of that Tehran day, not 00:00.
+    let deadline: { applyByISO: string | null; applyByJalali: string | null } | null = null;
+    if (req.body?.applyBy !== undefined) {
+      const raw = str(req.body.applyBy, 20).trim();
+      if (!raw) deadline = { applyByISO: null, applyByJalali: null };
+      else {
+        const iso = tehranIsoFromJalali(raw, '23:59');
+        if (!iso) return res.status(400).json({ error: 'مهلت درخواست باید یک تاریخ شمسی معتبر باشد (مثال: ۱۴۰۴/۰۸/۱۲).', field: 'applyBy' });
+        deadline = { applyByISO: iso, applyByJalali: raw.replace(/[^0-9/]/g, '') };
+      }
+    }
     const updated = db.updateJob(org.id, job.id, {
+      ...(deadline || {}),
       ...(typeof req.body?.roleTitle === 'string' ? { roleTitle: str(req.body.roleTitle, 120) } : {}),
       ...(typeof req.body?.extraNotes === 'string' ? { extraNotes: str(req.body.extraNotes, 3000) } : {}),
       ...(typeof req.body?.location === 'string' ? { location: str(req.body.location, 80) } : {}),
       ...(req.body?.employmentType !== undefined ? { employmentType: employmentOf(req.body.employmentType) } : {}),
       ...(status ? { status } : {}),
+      // «نسخهٔ انگلیسی»: empty clears it, so the portal falls back honestly.
+      ...(req.body?.titleEn !== undefined ? { titleEn: str(req.body.titleEn, 160) } : {}),
+      ...(req.body?.descriptionEn !== undefined ? { descriptionEn: str(req.body.descriptionEn, 4000) } : {}),
     });
     if (updated && status && status !== prevStatus) {
       db.logActivity(org.id, actorOf(req), 'job.status', `وضعیت «${updated.roleTitle}» را به «${STATUS_LABEL[status]}» تغییر داد`, { jobId: job.id });
@@ -142,10 +188,46 @@ export function jobRoutes(): express.Router {
     res.json({ job: updated });
   });
 
+  /**
+   * «دسترسی به این آگهی» — narrower than a role: roles are workspace-wide, this
+   * is per opening. Only an admin may hand out or take back access; a member who
+   * was granted the opening can read it, not re-share it.
+   */
+  r.put('/jobs/:id/access', requireRole('admin'), (req, res) => {
+    const { org } = ctxOf(req);
+    const job = db.getJob(org.id, req.params.id);
+    if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    const mode: JobAccessMode = req.body?.accessMode === 'restricted' ? 'restricted' : 'everyone';
+    const memberIds = new Set(db.listMembers(org.id).map((m) => m.id));
+    const raw: unknown[] = Array.isArray(req.body?.allowedUserIds) ? req.body.allowedUserIds : [];
+    // Only real members of this workspace, deduplicated, capped like the UI.
+    const allowed = Array.from(new Set(raw.filter((id): id is string => typeof id === 'string' && memberIds.has(id)))).slice(0, 200);
+    if (mode === 'restricted' && !allowed.length) {
+      return res.status(400).json({
+        error: 'برای محدودکردن دسترسی، دست‌کم یک نفر را انتخاب کنید؛ در غیر این صورت آگهی را روی «همهٔ اعضا» بگذارید.',
+        code: 'ACCESS_MEMBERS_REQUIRED',
+      });
+    }
+    const updated = db.updateJob(org.id, job.id, { accessMode: mode, allowedUserIds: mode === 'restricted' ? allowed : [] });
+    if (!updated) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    const names = db.listMembers(org.id).filter((m) => allowed.includes(m.id)).map((m) => m.name);
+    db.logActivity(
+      org.id,
+      actorOf(req),
+      'job.access',
+      mode === 'restricted'
+        ? `دسترسی آگهی «${updated.roleTitle}» را به ${names.length.toLocaleString('fa-IR')} نفر محدود کرد`
+        : `آگهی «${updated.roleTitle}» را برای همهٔ اعضای فضای کاری باز کرد`,
+      { jobId: job.id }
+    );
+    res.json({ job: updated, access: accessPayload(org.id, updated) });
+  });
+
   r.delete('/jobs/:id', (req, res) => {
     const { org, user } = ctxOf(req);
     const job = db.getJob(org.id, req.params.id);
     if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    if (blockedByJob(req, res, job)) return;
     if (!hasRole(user.role, 'admin') && job.createdBy !== user.id) {
       return res.status(403).json({ error: 'فقط سازنده این فرصت شغلی یا مدیر فضای کاری می‌تواند آن را حذف کند.' });
     }
@@ -159,6 +241,7 @@ export function jobRoutes(): express.Router {
     const { org } = ctxOf(req);
     const job = db.getJob(org.id, req.params.id);
     if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    if (blockedByJob(req, res, job)) return;
     const state = oneOf(req.body?.state, ['start', 'cancel'] as const, 'start');
     db.updateJob(org.id, job.id, { analysisStatus: state === 'start' ? 'processing' : 'cancelled' });
     res.json({ job: db.getJob(org.id, job.id) });
@@ -170,6 +253,7 @@ export function jobRoutes(): express.Router {
       const { org, user } = ctxOf(req);
       const job = db.getJob(org.id, req.params.id);
       if (!job) return res.status(404).json({ error: 'این فرصت شغلی حذف شده است.', code: 'JOB_NOT_FOUND' });
+      if (blockedByJob(req, res, job)) return;
       if (job.status === 'closed') {
         return res
           .status(409)

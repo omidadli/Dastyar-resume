@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Building2, CheckCircle2, Mail, Sparkles, UserRound } from 'lucide-react';
+import { ArrowLeft, Building2, CheckCircle2, KeyRound, Mail, ShieldCheck, Sparkles, UserRound, Workflow } from 'lucide-react';
 import { HovidaLogo, HovidaMark } from '../components/brand/Logo';
 import { Button, Callout, TextInput } from '../components/ui';
 import { api, ApiError } from '../lib/api';
+import type { AuthPayload } from '../types/app';
 import { useAuth } from '../lib/auth';
 import { usePublicConfig } from '../lib/config';
 import { Link, navigate, useLocation } from '../lib/router';
@@ -26,7 +27,7 @@ function AuthLayout({ children, title, subtitle }: { children: React.ReactNode; 
           </div>
         </main>
         <footer>
-          <p className="text-[12px] text-ink-4 text-center">هویدا • تحلیل دقیق‌تر، تصمیم بهتر</p>
+          <p className="text-[12px] text-ink-4 text-center">هویدا، تحلیل دقیق‌تر، تصمیم بهتر</p>
         </footer>
       </div>
       <aside aria-label="درباره هویدا" className="hidden lg:flex relative overflow-hidden bg-brand-soft items-center justify-center p-12">
@@ -75,6 +76,88 @@ function DemoButton() {
   );
 }
 
+const SSO_NOTICE: Record<string, { text: string; tone: 'warning' | 'danger' }> = {
+  none: { text: 'برای این ایمیل، ورود سازمانی روی هیچ فضای کاری تنظیم نشده است؛ با رمز عبور وارد شوید.', tone: 'warning' },
+  misconfigured: { text: 'ورود سازمانی این سازمان ناقص تنظیم شده است؛ با مدیر فضای کاری تماس بگیرید.', tone: 'danger' },
+  provider: { text: 'سرویس ورود سازمانی پاسخ نداد؛ کمی بعد دوباره تلاش کنید یا با رمز وارد شوید.', tone: 'danger' },
+  expired: { text: 'این ورود منقضی شده است (بیش از ده دقیقه). یک‌بار دیگر روی «ورود سازمانی» بزنید.', tone: 'warning' },
+  off: { text: 'ورود سازمانی این فضای کاری خاموش شده است.', tone: 'warning' },
+  cancelled: { text: 'ورود سازمانی لغو شد.', tone: 'warning' },
+  code: { text: 'سرویس سازمانی کد ورود را برنگرداند؛ دوباره تلاش کنید.', tone: 'danger' },
+  denied: { text: 'این حساب اجازهٔ ورود به این فضای کاری را ندارد (ایمیل تأییدنشده، دامنهٔ دیگر، یا عضویت نداشتن).', tone: 'danger' },
+  failed: { text: 'ورود سازمانی کامل نشد؛ دوباره تلاش کنید یا با رمز عبور وارد شوید.', tone: 'danger' },
+};
+
+/** «ورود سازمانی»: the browser leaves for the provider, so this is a plain navigation. */
+function SsoBox({ initialEmail }: { initialEmail: string }) {
+  const { query } = useLocation();
+  const [email, setEmail] = useState(initialEmail);
+  const [looking, setLooking] = useState(false);
+  const [found, setFound] = useState<{ orgName: string | null } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const reason = query.get('sso');
+  const notice = reason ? SSO_NOTICE[reason] : null;
+
+  const start = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const em = email.trim();
+    if (!em) return setError('ایمیل کاری سازمانی خود را وارد کنید.');
+    setError(null);
+    setLooking(true);
+    try {
+      const res = await api.auth.ssoLookup(em);
+      if (!res.available) {
+        setFound(null);
+        setError('برای این ایمیل، ورود سازمانی تنظیم نشده است؛ با رمز عبور وارد شوید.');
+        return;
+      }
+      setFound({ orgName: res.orgName });
+      const next = query.get('next');
+      // A real navigation: the provider's page takes over from here.
+      window.location.assign(`/api/auth/sso/start?email=${encodeURIComponent(em)}${next && next.startsWith('/app') ? `&next=${encodeURIComponent(next)}` : ''}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'بررسی ورود سازمانی ممکن نشد.');
+    } finally {
+      setLooking(false);
+    }
+  };
+
+  return (
+    <div className="mt-7">
+      {notice && (
+        <Callout tone={notice.tone} className="mb-4">
+          {notice.text}
+        </Callout>
+      )}
+      <div className="flex items-center gap-3 mb-4 text-[12px] text-ink-4">
+        <span className="flex-1 h-px bg-line" />
+        ورود سازمانی
+        <span className="flex-1 h-px bg-line" />
+      </div>
+      <form onSubmit={start} className="flex flex-col gap-3">
+        <TextInput
+          label="ایمیل سازمانی"
+          name="sso-email"
+          type="email"
+          icon={Workflow}
+          latin
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="name@company.ir"
+          hint="اگر سازمان شما ورود با Google Workspace یا Microsoft را فعال کرده باشد، اینجا به صفحهٔ سازمان می‌روید."
+        />
+        {error && <p className="text-[12.5px] text-low-ink font-medium" role="alert">{error}</p>}
+        {found?.orgName && !error && (
+          <p className="text-[12.5px] text-brand-ink font-medium">در حال رفتن به صفحهٔ ورود «{found.orgName}»…</p>
+        )}
+        <Button type="submit" variant="secondary" size="lg" block loading={looking} icon={Workflow}>
+          ادامه با حساب سازمانی
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 export function LoginPage() {
   useTitle('ورود');
   const { signIn, notice, noticeTone, clearNotice } = useAuth();
@@ -83,6 +166,38 @@ export function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /** Set once the password is right and the account has «ورود دومرحله‌ای» on. */
+  const [challenge, setChallenge] = useState<{ token: string; hint: string; email: string } | null>(null);
+  const [code, setCode] = useState('');
+  const [useRecovery, setUseRecovery] = useState(false);
+
+  const finish = (payload: AuthPayload) => {
+    clearNotice();
+    signIn(payload);
+    const next = query.get('next');
+    navigate(next && next.startsWith('/app') ? next : '/app', { replace: true });
+  };
+
+  const verify = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!challenge) return;
+    const value = code.trim();
+    if (!value) {
+      setError(useRecovery ? 'یکی از کدهای بازیابی را وارد کنید.' : 'کد ۶ رقمی را وارد کنید.');
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      finish(await api.auth.twoFactor({ challenge: challenge.token, [useRecovery ? 'recoveryCode' : 'code']: value }));
+    } catch (err: any) {
+      setError(err instanceof ApiError ? err.message : 'تأیید کد ممکن نشد.');
+      // An expired challenge cannot be retried: send the person back to the password.
+      if (err instanceof ApiError && /منقضی/.test(err.message)) setChallenge(null);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -103,16 +218,77 @@ export function LoginPage() {
     setLoading(true);
     try {
       const payload = await api.auth.login({ email: em, password: pw });
-      clearNotice();
-      signIn(payload);
-      const next = query.get('next');
-      navigate(next && next.startsWith('/app') ? next : '/app', { replace: true });
+      if ('twoFactorRequired' in payload) {
+        setChallenge({ token: payload.challenge, hint: payload.hint, email: em });
+        setCode('');
+        setUseRecovery(false);
+        return;
+      }
+      finish(payload);
     } catch (err: any) {
       setError(err instanceof ApiError ? err.message : 'ورود ممکن نشد.');
     } finally {
       setLoading(false);
     }
   };
+
+  if (challenge) {
+    return (
+      <AuthLayout
+        title="تأیید دومرحله‌ای"
+        subtitle={
+          <>
+            رمز <span className="hv-latin font-semibold">{challenge.email}</span> درست بود. برای کامل‌شدن ورود،{' '}
+            {useRecovery ? 'یکی از کدهای بازیابی' : 'کد ۶ رقمی برنامهٔ احراز هویت'} را وارد کنید.
+          </>
+        }
+      >
+        <form onSubmit={verify} className="flex flex-col gap-4" noValidate>
+          <TextInput
+            label={useRecovery ? 'کد بازیابی' : 'کد تأیید'}
+            name={useRecovery ? 'recoveryCode' : 'code'}
+            icon={useRecovery ? KeyRound : ShieldCheck}
+            latin
+            inputMode={useRecovery ? 'text' : 'numeric'}
+            autoComplete="one-time-code"
+            autoFocus
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder={useRecovery ? 'ABCD-EFGH' : '۱۲۳۴۵۶'}
+            hint={useRecovery ? 'هر کد بازیابی فقط یک‌بار کار می‌کند.' : challenge.hint}
+          />
+          {error && <Callout tone="danger">{error}</Callout>}
+          <Button type="submit" size="lg" block loading={loading} iconEnd={ArrowLeft}>
+            تأیید و ورود
+          </Button>
+          <div className="flex items-center justify-between text-[13px]">
+            <button
+              type="button"
+              className="font-bold text-brand-ink hover:underline"
+              onClick={() => {
+                setUseRecovery((v) => !v);
+                setCode('');
+                setError(null);
+              }}
+            >
+              {useRecovery ? 'کد برنامهٔ احراز هویت را دارم' : 'به گوشی‌ام دسترسی ندارم'}
+            </button>
+            <button
+              type="button"
+              className="text-ink-3 hover:underline"
+              onClick={() => {
+                setChallenge(null);
+                setCode('');
+                setError(null);
+              }}
+            >
+              بازگشت
+            </button>
+          </div>
+        </form>
+      </AuthLayout>
+    );
+  }
 
   return (
     <AuthLayout
@@ -139,6 +315,7 @@ export function LoginPage() {
           ورود
         </Button>
       </form>
+      <SsoBox initialEmail={email} />
       <DemoButton />
     </AuthLayout>
   );

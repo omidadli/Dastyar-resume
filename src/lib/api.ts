@@ -4,6 +4,8 @@ import type {
   DraftMessage,
   EmploymentType,
   Job,
+  JobAccessMode,
+  JobAccessPayload,
   JobStats,
   JobSummary,
   JobUnderstanding,
@@ -15,6 +17,10 @@ import type {
   ResumeRecord,
   ScreeningAnswers,
 } from '../types/screening';
+import type { InterviewKit } from '../types/interview-kit';
+import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
+import type { EeoReport } from '../types/eeo';
+import type { SsoCheck, SsoLookup, SsoSaveInput, SsoStatus } from '../types/sso';
 import type {
   ActivityFeed,
   AiStatus,
@@ -24,6 +30,8 @@ import type {
   MeResponse,
   OrgPublic,
   ReportRange,
+  TwoFactorChallenge,
+  TwoFactorStatus,
   ReportsData,
   Role,
   SearchResults,
@@ -31,8 +39,58 @@ import type {
   TeamMember,
   UserPublic,
 } from '../types/app';
+import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PortalLang, PublicCareersPage, PublicJobDetail } from '../types/careers';
+import type { CandidateComment, InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
+import type { JobOffer, OfferApprovalConfig, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
+import type { HrisPushResult, HrisRoster } from '../types/hris';
+import type { InterviewRoom, PublicRoom, RoomPoll, SignalKind } from '../types/room';
+import type { InboxView } from '../types/inbox';
+import type { TurnStatusPublic } from '../types/room';
+import type { JobBoardId, JobPublication, PublicationsView, PublicationKit } from '../types/jobboard';
+import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
+import type {
+  AutomationOverview,
+  AutomationPreviewItem,
+  AutomationProposal,
+  AutomationRunResult,
+  AutomationSettings,
+} from '../types/automation';
+import type {
+  ApiKeyPublic,
+  CreatedApiKey,
+  DeveloperOverview,
+  ScimStatus,
+  WebhookDeliveryPublic,
+  WebhookEndpointPublic,
+  WebhookTestResult,
+} from '../types/developer';
+import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '../types/retention';
+import type { ReferralProgramInput, ReferralsPayload } from '../types/referrals';
+import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
+import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
+import type { PublicVideoInvite, VideoInvite, VideoOverview, VideoSettings } from '../types/video';
+import type { Transcript, TranscriptStatusPayload } from '../types/transcript';
+import type { OnboardingOverview, OnboardingPlan } from '../types/onboarding';
+import type { MeetingSummary } from '../types/summary';
+import type { PublicStatus, StatusLink } from '../types/status';
+import type {
+  CalendarStatusPublic,
+  EmailSettingsPublic,
+  SentSms,
+  SmsSettingsPublic,
+  ChatStatusPublic,
+  IntegrationsStatus,
+  InterviewRecord,
+  SentEmail,
+  SourcingBrief,
+  SourcingCsvPreview,
+  SourcingCsvSummary,
+  SourcingProfile,
+  SourcingSearch,
+} from '../types/integrations';
 import type {
   AdminMe,
+  ConnectionsHealth,
   AdminOrgRow,
   AdminOverview,
   AdminUserRow,
@@ -44,10 +102,13 @@ import type {
   BackupSummary,
   BehaviorConfig,
   BehaviorPayload,
+  ConnectionsPayload,
+  GoogleConnectionInput,
   KeyStrategy,
   LabResult,
   PublicConfig,
   RestoreStatus,
+  SourcingConnectionInput,
   SystemSettings,
 } from '../types/admin';
 
@@ -237,7 +298,22 @@ export const api = {
     config: () => get<PublicConfig>('/api/auth/config', { timeoutMs: 10_000, anonymous: true }),
     signup: (b: { orgName: string; name: string; email: string; password: string }) =>
       post<AuthPayload>('/api/auth/signup', b, { anonymous: true }),
-    login: (b: { email: string; password: string }) => post<AuthPayload>('/api/auth/login', b, { anonymous: true }),
+    login: (b: { email: string; password: string }) =>
+      post<AuthPayload | TwoFactorChallenge>('/api/auth/login', b, { anonymous: true }),
+    /** Step two: a challenge plus a code (or a recovery code) becomes a session. */
+    twoFactor: (b: { challenge: string; code?: string; recoveryCode?: string }) =>
+      post<AuthPayload>('/api/auth/2fa', b, { anonymous: true }),
+    twoFactorStatus: () => get<TwoFactorStatus>('/api/auth/2fa'),
+    /** «ورود سازمانی»: does this e-mail domain belong to a workspace with SSO? */
+    ssoLookup: (email: string) =>
+      get<SsoLookup>(`/api/auth/sso/lookup?email=${encodeURIComponent(email)}`, { anonymous: true, timeoutMs: 10_000 }),
+    twoFactorSetup: (b: { password: string }) =>
+      post<{ secret: string; otpauth: string; qr: string; recoveryCodes: string[] }>('/api/auth/2fa/setup', b),
+    twoFactorEnable: (b: { code: string }) =>
+      post<TwoFactorStatus & { recoveryLeft: number }>('/api/auth/2fa/enable', b),
+    twoFactorDisable: (b: { password: string; code: string }) => post<TwoFactorStatus>('/api/auth/2fa/disable', b),
+    twoFactorRecovery: (b: { code: string }) =>
+      post<{ recoveryCodes: string[] } & TwoFactorStatus>('/api/auth/2fa/recovery', b),
     demo: () => post<AuthPayload>('/api/auth/demo', {}, { timeoutMs: 45_000, anonymous: true }),
     logout: () => post<{ ok: boolean }>('/api/auth/logout'),
     me: () => get<MeResponse>('/api/auth/me', { timeoutMs: 15_000 }),
@@ -246,19 +322,43 @@ export const api = {
   },
   org: {
     get: () => get<{ org: OrgPublic; members: TeamMember[] }>('/api/org'),
-    update: (b: { name?: string; messageSignature?: string }) => patch<{ org: OrgPublic }>('/api/org', b),
+    update: (b: {
+      name?: string;
+      messageSignature?: string;
+      blindScreening?: boolean;
+      offerApproval?: OfferApprovalConfig;
+      eeo?: { enabled: boolean; threshold: number };
+    }) =>
+      patch<{ org: OrgPublic }>('/api/org', b),
     setDepartments: (departments: Array<Partial<Department> & { name: string; hint: string }>) =>
       put<{ org: OrgPublic }>('/api/org/departments', { departments }),
     addMember: (b: { name: string; email: string; title: string; role: Role; password: string }) =>
       post<{ member: TeamMember; members: TeamMember[] }>('/api/org/members', b),
     updateMember: (id: string, role: Role) => patch<{ members: TeamMember[] }>(`/api/org/members/${id}`, { role }),
     removeMember: (id: string) => del<{ members: TeamMember[] }>(`/api/org/members/${id}`),
+    /** «قفل‌شده‌ام»: an admin clears a member's second factor after a lost phone. */
+    resetMemberTwoFactor: (id: string) => post<{ members: TeamMember[] }>(`/api/org/members/${id}/2fa-reset`, {}),
+    /** «تعیین رمز» — the password is returned only when the server generated it. */
+    setMemberPassword: (id: string, password?: string) =>
+      post<{ password?: string; members: TeamMember[] }>(`/api/org/members/${id}/password`, password ? { password } : {}),
+    retention: () =>
+      get<{ policy: RetentionPolicy; preview: { days: number; action: RetentionPolicy['action']; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } }>(
+        '/api/org/retention'
+      ),
+    saveRetention: (b: { days: number; action: RetentionPolicy['action'] }) =>
+      put<{ policy: RetentionPolicy; preview: { days: number; action: RetentionPolicy['action']; items: Array<{ id: string; name: string; roleTitle: string; updatedAtISO: string }> } }>(
+        '/api/org/retention',
+        b
+      ),
+    runRetention: (b: { days?: number; dryRun?: boolean }) =>
+      post<{ result: RetentionRunResult; policy: RetentionPolicy }>('/api/org/retention/run', b, { timeoutMs: 120_000 }),
   },
   ai: {
     status: () => get<AiStatus>('/api/ai/status'),
     test: () => post<{ ok: boolean; latencyMs: number; error: string | null; status: AiStatus }>('/api/ai/test', {}, { timeoutMs: 45_000 }),
   },
   jobs: {
+    board: (id: string) => get<PipelineBoard>(`/api/jobs/${id}/board`),
     list: (p: { status?: string; q?: string } = {}) =>
       get<{ items: JobSummary[]; counts: { all: number; open: number; paused: number; closed: number } }>(`/api/jobs${qs(p)}`),
     understand: (b: JobInput, opts?: RequestOptions) =>
@@ -267,8 +367,15 @@ export const api = {
       post<{ understanding: JobUnderstanding; source: CriteriaSource }>('/api/jobs/template', b),
     create: (b: JobInput & { understanding: JobUnderstanding; answers: ScreeningAnswers; criteriaSource: CriteriaSource }) =>
       post<{ job: Job }>('/api/jobs', b),
-    get: (id: string, opts?: RequestOptions) => get<{ job: Job }>(`/api/jobs/${id}`, opts),
-    update: (id: string, b: Partial<JobInput> & { status?: Job['status'] }) => patch<{ job: Job }>(`/api/jobs/${id}`, b),
+    get: (id: string, opts?: RequestOptions) => get<{ job: Job; access?: JobAccessPayload }>(`/api/jobs/${id}`, opts),
+    /** «دسترسی به این آگهی» — admins only. */
+    setAccess: (id: string, b: { accessMode: JobAccessMode; allowedUserIds: string[] }) =>
+      put<{ job: Job; access: JobAccessPayload }>(`/api/jobs/${id}/access`, b),
+    /** «کیت مصاحبه» — composed from the job's criteria, plus this candidate's résumé. */
+    interviewKit: (id: string, resumeId?: string) =>
+      get<{ kit: InterviewKit }>(`/api/jobs/${id}/interview-kit${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
+    update: (id: string, b: Partial<JobInput> & { status?: Job['status']; applyBy?: string; titleEn?: string; descriptionEn?: string; accessMode?: JobAccessMode; allowedUserIds?: string[] }) =>
+      patch<{ job: Job }>(`/api/jobs/${id}`, b),
     remove: (id: string) => del<{ ok: boolean }>(`/api/jobs/${id}`),
     analysis: (id: string, state: 'start' | 'cancel', opts?: RequestOptions) =>
       post<{ job: Job }>(`/api/jobs/${id}/analysis`, { state }, opts),
@@ -281,6 +388,69 @@ export const api = {
       }),
     calibrate: (id: string, count: number, opts?: RequestOptions) =>
       post<{ job: Job; adjusted: number }>(`/api/jobs/${id}/calibrate`, { count }, { timeoutMs: 60_000, ...opts }),
+  },
+  careers: {
+    /** Public: the workspace's published openings (no session needed). */
+    page: (slug: string) => get<PublicCareersPage>(`/api/careers/${encodeURIComponent(slug)}`),
+    job: (slug: string, jobId: string) =>
+      get<{ job: PublicJobDetail; org: { name: string; about: string } }>(`/api/careers/${encodeURIComponent(slug)}/jobs/${encodeURIComponent(jobId)}`),
+    apply: (slug: string, jobId: string, b: CareerApplicationInput) =>
+      post<CareerApplicationResult>(`/api/careers/${encodeURIComponent(slug)}/jobs/${encodeURIComponent(jobId)}/apply`, b, { timeoutMs: 120_000 }),
+    settings: () => get<{ careers: CareerSettings }>('/api/careers/settings'),
+    saveSettings: (b: { slug: string; about: string; languages?: PortalLang[]; defaultLang?: PortalLang }) =>
+      put<{ careers: CareerSettings }>('/api/careers/settings', b),
+    publish: (jobId: string, isPublic: boolean) =>
+      post<{ job: JobSummary }>(`/api/jobs/${encodeURIComponent(jobId)}/publish`, { isPublic }),
+  },
+  comments: {
+    list: (resumeId: string) => get<{ items: CandidateComment[]; members: { id: string; name: string }[] }>(`/api/resumes/${encodeURIComponent(resumeId)}/comments`),
+    add: (resumeId: string, body: string) =>
+      post<{ comment: CandidateComment; items: CandidateComment[]; members: { id: string; name: string }[] }>(
+        `/api/resumes/${encodeURIComponent(resumeId)}/comments`,
+        { body }
+      ),
+    remove: (id: string) => del<{ items: CandidateComment[] }>(`/api/comments/${encodeURIComponent(id)}`),
+  },
+  scheduling: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: SchedulingLink[] }>(`/api/scheduling${qs(p)}`),
+    get: (id: string) => get<{ link: SchedulingLink }>(`/api/scheduling/${encodeURIComponent(id)}`),
+    create: (b: {
+      resumeId: string;
+      slots: { date: string; time: string }[];
+      title?: string;
+      durationMin?: number;
+      notes?: string;
+      interviewerIds?: string[];
+      expiresInDays?: number;
+    }) => post<{ link: SchedulingLink }>('/api/scheduling', b),
+    send: (id: string) => post<{ link: SchedulingLink }>(`/api/scheduling/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ link: SchedulingLink }>(`/api/scheduling/${encodeURIComponent(id)}/cancel`, {}),
+    public: {
+      get: (token: string) => get<{ link: PublicSchedulingLink }>(`/api/scheduling/public/${encodeURIComponent(token)}`),
+      book: (token: string, startsAtISO: string) =>
+        post<{ link: PublicSchedulingLink; interviewId: string }>(`/api/scheduling/public/${encodeURIComponent(token)}/book`, { startsAtISO }, { timeoutMs: 90_000 }),
+    },
+  },
+  offers: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: JobOffer[]; counts: Record<OfferStatus, number> }>(`/api/offers${qs(p)}`),
+    get: (id: string) => get<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}`),
+    create: (b: { resumeId: string; terms: Partial<OfferTerms>; message?: string }) => post<{ offer: JobOffer }>('/api/offers', b),
+    update: (id: string, b: { terms?: Partial<OfferTerms>; message?: string }) => patch<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}`, b),
+    send: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    revise: (id: string, b: { terms?: Partial<OfferTerms>; message?: string } = {}) =>
+      post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/revise`, b),
+    cancel: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/cancel`, {}),
+    /** One step of «گردش تأیید پیشنهاد». */
+    approve: (id: string, decision: 'approved' | 'rejected', note?: string) =>
+      post<{ offer: JobOffer; pending: string | null }>(`/api/offers/${encodeURIComponent(id)}/approval`, { decision, note }),
+    /** Public page — the candidate's side, no session. */
+    public: {
+      get: (token: string) => get<{ offer: PublicOffer }>(`/api/offers/public/${encodeURIComponent(token)}`),
+      accept: (token: string, b: OfferDecisionInput) =>
+        post<{ offer: PublicOffer; already?: boolean }>(`/api/offers/public/${encodeURIComponent(token)}/accept`, b),
+      decline: (token: string, b: OfferDecisionInput) =>
+        post<{ offer: PublicOffer; already?: boolean }>(`/api/offers/public/${encodeURIComponent(token)}/decline`, b),
+    },
   },
   resumes: {
     list: (q: ResumeQuery, opts?: RequestOptions) =>
@@ -296,6 +466,7 @@ export const api = {
           from: q.fromJalali,
           to: q.toJalali,
           sort: q.sort,
+          novelty: q.novelty,
           page: q.page,
           pageSize: q.pageSize,
         })}`,
@@ -315,22 +486,349 @@ export const api = {
     addTalent: (id: string, b: { departmentId: string; note: string; tags: string[] }) =>
       post<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`, b),
     removeTalent: (id: string) => del<{ record: ResumeListItem }>(`/api/resumes/${id}/talent`),
+    /**
+     * «آشکارسازی هویت» — the single door out of blind mode. The server writes
+     * who revealed whom, and why, to the workspace history before answering.
+     */
+    reveal: (id: string, reason: string) => post<{ record: ResumeRecord }>(`/api/resumes/${id}/reveal`, { reason }),
+    /** DSAR: everything we hold about one candidate, as one JSON document. */
+    exportData: (id: string) => get<CandidateDataExport>(`/api/resumes/${id}/export`),
+    /** DSAR: irreversible erasure of every row and the stored file. */
+    erase: (id: string) => post<{ erased: Record<string, number> }>(`/api/resumes/${id}/erase`, { confirm: 'ERASE' }, { timeoutMs: 60_000 }),
     attachFile: (id: string, fileName: string, fileBase64: string) =>
       post<{ ok: boolean }>(`/api/resumes/${id}/file`, { fileName, fileBase64 }, { timeoutMs: 150_000 }),
     fileUrl: (id: string, inline: boolean) => get<FileUrlInfo>(`/api/resumes/${id}/file-url${inline ? '?inline=1' : ''}`),
+    /** «تختهٔ جذب» — move a candidate to another column. */
+    stage: (id: string, stageId: string) =>
+      post<{ record: ResumeListItem; stage: PipelineStage }>(`/api/resumes/${id}/stage`, { stageId }),
+    feedback: (id: string) => get<{ summary: ScorecardSummary; mine: InterviewFeedback | null }>(`/api/resumes/${id}/feedback`),
+    saveFeedback: (id: string, b: {
+      interviewId?: string | null;
+      recommendation: InterviewFeedback['recommendation'];
+      criteria: Array<{ criterionId: string; score: number; note: string }>;
+      notes: string;
+    }) => post<{ summary: ScorecardSummary; mine: InterviewFeedback }>(`/api/resumes/${id}/feedback`, b),
   },
   messages: {
     draft: (resumeId: string, kind: MessageKind, opts?: RequestOptions) =>
       post<DraftMessage>('/api/messages/draft', { resumeId, kind }, { timeoutMs: 40_000, ...opts }),
+  },
+  integrations: {
+    status: () => get<IntegrationsStatus>('/api/integrations/status'),
+    saveEmail: (b: {
+      host: string;
+      port: number;
+      secure: boolean;
+      username: string;
+      password?: string;
+      fromName: string;
+      fromAddress: string;
+      replyTo?: string | null;
+    }) => put<{ email: EmailSettingsPublic }>('/api/integrations/email', b, { timeoutMs: 60_000 }),
+    disconnectEmail: () => del<{ email: EmailSettingsPublic }>('/api/integrations/email'),
+    /** «رلهٔ TURN» — the customer's own relay server for live calls. */
+    saveTurn: (body: { urls: string; username?: string; credential?: string; secret?: string; ttlMin?: number }) =>
+      put<{ turn: TurnStatusPublic }>('/api/integrations/turn', body),
+    disconnectTurn: () => del<{ turn: TurnStatusPublic }>('/api/integrations/turn'),
+    testEmail: () => post<{ ok: boolean; error: string | null }>('/api/integrations/email/test', {}, { timeoutMs: 60_000 }),
+    sendEmail: (b: { resumeId?: string | null; to?: string; subject: string; body: string }) =>
+      post<{ email: SentEmail; record: ResumeListItem | null }>('/api/integrations/email/send', b, { timeoutMs: 60_000 }),
+    emails: (resumeId?: string) => get<{ items: SentEmail[] }>(`/api/integrations/emails${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
+    calendarConnectUrl: () => get<{ url: string; redirectUri: string }>('/api/integrations/calendar/connect-url'),
+    disconnectCalendar: () => del<{ calendar: CalendarStatusPublic }>('/api/integrations/calendar'),
+    saveSms: (b: { provider: 'kavenegar' | 'smsir'; apiKey?: string; sender: string }) =>
+      put<{ sms: SmsSettingsPublic }>('/api/integrations/sms', b, { timeoutMs: 45_000 }),
+    disconnectSms: () => del<{ sms: SmsSettingsPublic }>('/api/integrations/sms'),
+    testSms: () => post<{ ok: boolean; error: string | null }>('/api/integrations/sms/test', {}, { timeoutMs: 45_000 }),
+    sendSms: (b: { resumeId?: string | null; to?: string; text: string }) =>
+      post<{ sms: SentSms }>('/api/integrations/sms/send', b, { timeoutMs: 60_000 }),
+    chatEvents: () => get<{ events: string[] }>('/api/integrations/chat/events'),
+    saveChat: (b: { provider: 'slack' | 'teams' | 'generic'; url?: string; events?: string[] }) =>
+      put<{ chat: ChatStatusPublic }>('/api/integrations/chat', b, { timeoutMs: 45_000 }),
+    testChat: () => post<{ ok: boolean; error: string | null }>('/api/integrations/chat/test', {}, { timeoutMs: 45_000 }),
+    disconnectChat: () => del<{ chat: ChatStatusPublic }>('/api/integrations/chat'),
+    smsLog: (resumeId?: string) => get<{ items: SentSms[] }>(`/api/integrations/sms${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
+  },
+  interviews: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) => get<{ items: InterviewRecord[] }>(`/api/interviews${qs(p)}`),
+    create: (b: {
+      jobId: string;
+      resumeId?: string | null;
+      candidateName?: string;
+      candidateEmail?: string | null;
+      title: string;
+      date: string;
+      time: string;
+      durationMin: number;
+      interviewerIds: string[];
+      location: string;
+      notes: string;
+      withMeet: boolean;
+      sendInvite: boolean;
+    }) => post<{ interview: InterviewRecord; calendarError: string | null; emailError: string | null; record: ResumeListItem | null }>('/api/interviews', b, { timeoutMs: 90_000 }),
+    cancel: (id: string) => del<{ interview: InterviewRecord; calendarError: string | null }>(`/api/interviews/${encodeURIComponent(id)}`),
+    /** «یادآوری»: sends the reminders that are due right now (one day before). */
+    sendReminders: () =>
+      post<{ reminders: { due: number; sent: number; skipped: unknown[]; failed: unknown[]; atISO: string }; hours: number }>(
+        '/api/interviews/reminders',
+        {},
+        { timeoutMs: 60_000 }
+      ),
+    reminderInfo: () => get<{ hours: number; enabled: boolean; dueNow: number }>('/api/interviews/reminders'),
+    icsUrl: (id: string) => `/api/interviews/${encodeURIComponent(id)}/ics`,
+  },
+  automation: {
+    overview: (jobId?: string) => get<AutomationOverview>(`/api/automation${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ''}`),
+    saveSettings: (b: Partial<AutomationSettings>) =>
+      put<{ settings: AutomationSettings; warning: string | null }>('/api/automation/settings', b, { timeoutMs: 45_000 }),
+    preview: (b: { jobId?: string }) =>
+      post<{ enabled: boolean; items: AutomationPreviewItem[] }>('/api/automation/preview', b, { timeoutMs: 45_000 }),
+    run: (b: { jobId?: string }) =>
+      post<AutomationOverview & { result: AutomationRunResult }>('/api/automation/run', b, { timeoutMs: 120_000 }),
+    approve: (id: string, b: { subject?: string; body?: string; date?: string; time?: string; durationMin?: number } = {}) =>
+      post<AutomationOverview & { action: AutomationProposal }>(`/api/automation/${encodeURIComponent(id)}/approve`, b, { timeoutMs: 120_000 }),
+    skip: (id: string, note?: string) =>
+      post<AutomationOverview & { action: AutomationProposal }>(`/api/automation/${encodeURIComponent(id)}/skip`, { note }, { timeoutMs: 45_000 }),
+  },
+  sourcing: {
+    status: () => get<{ sourcing: IntegrationsStatus['sourcing']; docPath: string }>('/api/sourcing/status'),
+    brief: (b: { departmentId: string; jobId?: string | null; prompt: string; roleTitle?: string; openToWorkOnly: boolean }) =>
+      post<{ brief: SourcingBrief }>('/api/sourcing/brief', b, { timeoutMs: 90_000 }),
+    list: () => get<{ items: Array<SourcingSearch & { resultCount: number }> }>('/api/sourcing/searches'),
+    get: (id: string) => get<{ search: SourcingSearch }>(`/api/sourcing/searches/${encodeURIComponent(id)}`),
+    run: (b: { departmentId: string; jobId?: string | null; prompt: string; roleTitle?: string; openToWorkOnly: boolean; limit?: number; brief?: SourcingBrief }) =>
+      post<{ search: SourcingSearch }>('/api/sourcing/searches', b, { timeoutMs: 120_000 }),
+    remove: (id: string) => del<{ ok: boolean }>(`/api/sourcing/searches/${encodeURIComponent(id)}`),
+    /** Reads an uploaded CSV without saving anything (columns + a few names). */
+    csvPreview: (b: { csv: string; separator?: string }) =>
+      post<{ preview: SourcingCsvPreview; profiles: SourcingProfile[] }>('/api/sourcing/csv/preview', b, { timeoutMs: 45_000 }),
+    /** Turns the file into a normal search result (same screening + import path). */
+    csv: (b: { csv: string; fileName?: string; departmentId: string; jobId?: string | null; roleTitle?: string; openToWorkOnly?: boolean }) =>
+      post<{ search: SourcingSearch; summary: SourcingCsvSummary }>('/api/sourcing/csv', b, { timeoutMs: 60_000 }),
+    import: (searchId: string, profileId: string, jobId: string) =>
+      post<{ record: ResumeListItem; alreadyImported: boolean }>(`/api/sourcing/searches/${encodeURIComponent(searchId)}/import`, { profileId, jobId }, { timeoutMs: 180_000 }),
   },
   talent: {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),
     list: (p: { departmentId?: string; q?: string; tags?: string[]; minScore?: number; minYears?: number; sort?: string; page?: number }) =>
       get<PagedResult<ResumeListItem>>(`/api/talent/list${qs({ ...p, tags: p.tags?.length ? p.tags.join(',') : undefined })}`),
   },
+  surveys: {
+    list: (p: { jobId?: string; resumeId?: string } = {}) =>
+      get<{ items: SurveyInvite[]; report: ExperienceReport }>(`/api/surveys${qs(p)}`),
+    create: (b: { resumeId?: string; stage: SurveyStage; candidateName?: string; candidateEmail?: string; jobTitle?: string }) =>
+      post<{ survey: SurveyInvite }>('/api/surveys', b),
+    send: (id: string) => post<{ survey: SurveyInvite; emailed: boolean; emailError: string | null }>(`/api/surveys/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ survey: SurveyInvite }>(`/api/surveys/${encodeURIComponent(id)}/cancel`, {}),
+    report: (range: number | 'all' = 365) => get<{ report: ExperienceReport }>(`/api/surveys/report?range=${range}`),
+    public: {
+      get: (token: string) => get<{ survey: PublicSurvey }>(`/api/survey/public/${encodeURIComponent(token)}`),
+      open: (token: string) => post<{ survey: PublicSurvey }>(`/api/survey/public/${encodeURIComponent(token)}/open`, {}),
+      answer: (token: string, b: SurveySubmitInput) =>
+        post<{ survey: PublicSurvey; thanks: string }>(`/api/survey/public/${encodeURIComponent(token)}/answer`, b),
+    },
+  },
+  assessments: {
+    templates: (jobTitle?: string) =>
+      get<{ templates: AssessmentTemplateSummary[]; suggestedId: string }>(`/api/assessments/templates${jobTitle ? `?jobTitle=${encodeURIComponent(jobTitle)}` : ''}`),
+    list: (p: { jobId?: string; resumeId?: string } = {}) =>
+      get<{ items: AssessmentInvite[]; summary: { total: number; completed: number; pending: number; averageScore: number | null; external: number } }>(
+        `/api/assessments${qs(p)}`
+      ),
+    create: (b: { resumeId: string; templateId: string; jobId?: string }) => post<{ assessment: AssessmentInvite }>('/api/assessments', b),
+    send: (id: string) => post<{ assessment: AssessmentInvite; emailed: boolean }>(`/api/assessments/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ assessment: AssessmentInvite }>(`/api/assessments/${encodeURIComponent(id)}/cancel`, {}),
+    recordResult: (id: string, b: { score?: number | null; dimensions?: { id: string; label: string; score: number }[]; note?: string }) =>
+      post<{ assessment: AssessmentInvite }>(`/api/assessments/${encodeURIComponent(id)}/result`, b),
+    public: {
+      get: (token: string) => get<{ assessment: PublicAssessment; canAnswer: boolean }>(`/api/assessment/public/${encodeURIComponent(token)}`),
+      start: (token: string) => post<{ assessment: PublicAssessment }>(`/api/assessment/public/${encodeURIComponent(token)}/start`, {}),
+      submit: (token: string, answers: Record<string, string | number>) =>
+        post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
+    },
+  },
+  status: {
+    links: (resumeId: string) => get<{ items: StatusLink[] }>(`/api/resumes/${encodeURIComponent(resumeId)}/status-links`),
+    create: (resumeId: string) => post<{ link: StatusLink }>(`/api/resumes/${encodeURIComponent(resumeId)}/status-link`, {}),
+    /** E-mails the link from the workspace mailbox — only when HR presses it. */
+    send: (id: string) => post<{ link: StatusLink }>(`/api/status-links/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    revoke: (id: string) => del<{ link: StatusLink }>(`/api/status-links/${encodeURIComponent(id)}`),
+    /** Public: no session, no headers — the token is the whole key. */
+    public: (token: string) => get<{ status: PublicStatus }>(`/api/status/${encodeURIComponent(token)}`, { anonymous: true }),
+  },
+  onboarding: {
+    overview: () => get<OnboardingOverview>('/api/onboarding'),
+    hired: () =>
+      get<{ items: { id: string; candidateName: string; candidateEmail: string | null; jobTitle: string | null; departmentName: string | null; hiredAtISO: string }[] }>(
+        '/api/onboarding/hired'
+      ),
+    get: (id: string) => get<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}`),
+    create: (b: { resumeId: string; startDateJalali?: string; startDateISO?: string; ownerName?: string; note?: string }) =>
+      post<{ plan: OnboardingPlan }>('/api/onboarding', b),
+    update: (id: string, b: { startDateJalali?: string; ownerName?: string; note?: string }) =>
+      patch<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}`, b),
+    addTask: (id: string, label: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/tasks`, { label }),
+    toggleTask: (id: string, taskId: string) =>
+      post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}/toggle`, {}),
+    removeTask: (id: string, taskId: string) =>
+      del<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/tasks/${encodeURIComponent(taskId)}`),
+    welcome: (id: string) => post<{ plan: OnboardingPlan; emailed: boolean }>(`/api/onboarding/${encodeURIComponent(id)}/welcome`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/cancel`, {}),
+    remove: (id: string) => del<void>(`/api/onboarding/${encodeURIComponent(id)}`),
+    exportUrl: '/api/onboarding/export',
+  },
+  /** «انتشار در جاب‌بورد» — the paste-ready ad and the record of where it went. */
+  publications: {
+    list: (jobId: string) => get<PublicationsView>(`/api/jobs/${encodeURIComponent(jobId)}/publications`),
+    kit: (jobId: string, board: JobBoardId) =>
+      get<{ kit: PublicationKit }>(`/api/jobs/${encodeURIComponent(jobId)}/publication-kit?board=${encodeURIComponent(board)}`),
+    record: (jobId: string, body: { board: JobBoardId; url?: string; note?: string; status?: string }) =>
+      post<{ item: JobPublication; view: PublicationsView }>(`/api/jobs/${encodeURIComponent(jobId)}/publications`, body),
+    update: (id: string, body: { status?: string; url?: string; note?: string }) =>
+      patch<{ item: JobPublication; view: PublicationsView | null }>(`/api/publications/${encodeURIComponent(id)}`, body),
+    remove: (id: string) => del<{ view: PublicationsView | null }>(`/api/publications/${encodeURIComponent(id)}`),
+  },
+  /** «کارتابل تأیید» — what is waiting on a human, and the two safe decisions. */
+  inbox: {
+    list: () => get<InboxView>('/api/inbox'),
+    decideOffer: (offerId: string, decision: 'approved' | 'rejected', note?: string) =>
+      post<{ inbox: InboxView; offerId: string }>(`/api/inbox/offers/${encodeURIComponent(offerId)}/decision`, { decision, note }),
+    approveReferral: (referralId: string, note?: string) =>
+      post<{ inbox: InboxView }>(`/api/inbox/referrals/${encodeURIComponent(referralId)}/approve`, { note }),
+  },
+  /** «اتاق مصاحبهٔ زنده» — signalling only; media never touches the server. */
+  rooms: {
+    create: (interviewId: string) =>
+      post<{ room: InterviewRoom; reused: boolean }>(`/api/interviews/${encodeURIComponent(interviewId)}/room`, {}),
+    list: (q: { interviewId?: string; jobId?: string; resumeId?: string } = {}) => get<{ items: InterviewRoom[] }>(`/api/rooms${qs(q)}`),
+    byToken: (token: string) =>
+      get<{
+        room: InterviewRoom | null;
+        ice?: { servers: PublicRoom['iceServers']; relayConfigured: boolean; note: string };
+      }>(`/api/rooms/by-token/${encodeURIComponent(token)}`),
+    close: (id: string) => post<{ room: InterviewRoom }>(`/api/rooms/${encodeURIComponent(id)}/close`, {}),
+    hostSignals: (id: string, since: number) => get<RoomPoll>(`/api/rooms/${encodeURIComponent(id)}/signals?since=${since}`),
+    hostSignal: (id: string, kind: SignalKind, payload: string) =>
+      post<{ signal: unknown }>(`/api/rooms/${encodeURIComponent(id)}/signal`, { kind, payload }),
+    publicRoom: (token: string) => get<{ room: PublicRoom; state: 'open' | 'closed' }>(`/api/rooms/public/${encodeURIComponent(token)}`, { anonymous: true }),
+    candidateSignals: (token: string, since: number) =>
+      get<RoomPoll>(`/api/rooms/public/${encodeURIComponent(token)}/signals?since=${since}`, { anonymous: true }),
+    candidateSignal: (token: string, kind: SignalKind, payload: string) =>
+      post<{ signal: unknown }>(`/api/rooms/public/${encodeURIComponent(token)}/signal`, { kind, payload }, { anonymous: true }),
+    leave: (token: string) => post<{ ok: boolean }>(`/api/rooms/public/${encodeURIComponent(token)}/leave`, {}, { anonymous: true }),
+  },
+  /** «انتقال به حقوق و دستمزد» — the payroll handoff. */
+  hris: {
+    roster: () => get<HrisRoster>('/api/hris'),
+    mapping: (mapping: Record<string, string>) => patch<{ mapping: Record<string, string>; roster: HrisRoster }>('/api/hris/mapping', { mapping }),
+    endpoint: (b: { url: string; secret?: string }) => put<{ roster: HrisRoster }>('/api/hris/endpoint', b),
+    disconnect: () => del<{ roster: HrisRoster }>('/api/hris/endpoint'),
+    push: () => post<{ push: HrisPushResult; roster: HrisRoster }>('/api/hris/push', {}, { timeoutMs: 60_000 }),
+    exportUrl: '/api/hris/export.csv',
+  },
+  summaries: {
+    list: (q: { resumeId?: string; transcriptId?: string }) => get<{ items: MeetingSummary[] }>(`/api/summaries${qs(q)}`),
+    create: (transcriptId: string) =>
+      post<{ summary: MeetingSummary; fellBack: boolean; note: string | null }>(
+        `/api/transcripts/${encodeURIComponent(transcriptId)}/summary`,
+        {},
+        { timeoutMs: 90_000 }
+      ),
+    remove: (id: string) => del<void>(`/api/summaries/${encodeURIComponent(id)}`),
+  },
+  transcripts: {
+    status: () => get<TranscriptStatusPayload>('/api/transcripts/status'),
+    list: (q: { resumeId?: string; videoInviteId?: string }) => get<{ items: Transcript[] }>(`/api/transcripts${qs(q)}`),
+    get: (id: string) => get<{ transcript: Transcript }>(`/api/transcripts/${encodeURIComponent(id)}`),
+    audio: (b: { resumeId: string; fileName: string; mimeType: string; dataBase64: string; durationSec?: number }) =>
+      post<{ transcript: Transcript; note: string | null }>('/api/transcripts/audio', b, { timeoutMs: 180_000 }),
+    text: (b: { resumeId: string; text: string; title?: string }) => post<{ transcript: Transcript }>('/api/transcripts/text', b),
+    subtitle: (b: { resumeId: string; content: string; fileName?: string }) => post<{ transcript: Transcript }>('/api/transcripts/subtitle', b),
+    video: (inviteId: string, questionId: string) =>
+      post<{ transcript: Transcript; note: string | null }>(
+        `/api/transcripts/video/${encodeURIComponent(inviteId)}/${encodeURIComponent(questionId)}`,
+        {},
+        { timeoutMs: 180_000 }
+      ),
+    update: (id: string, b: { text?: string; title?: string }) => patch<{ transcript: Transcript }>(`/api/transcripts/${encodeURIComponent(id)}`, b),
+    remove: (id: string) => del<void>(`/api/transcripts/${encodeURIComponent(id)}`),
+  },
+  video: {
+    overview: (filter: { jobId?: string; resumeId?: string } = {}) => get<VideoOverview>(`/api/video${qs(filter)}`),
+    settings: (jobId: string) => get<{ settings: VideoSettings }>(`/api/video/settings?jobId=${encodeURIComponent(jobId)}`),
+    saveSettings: (b: { jobId: string } & Partial<VideoSettings>) => put<{ settings: VideoSettings }>('/api/video/settings', b),
+    create: (b: { resumeId: string; jobId?: string }) => post<{ invite: VideoInvite }>('/api/video/invites', b),
+    send: (id: string) => post<{ invite: VideoInvite; emailed: boolean }>(`/api/video/invites/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ invite: VideoInvite }>(`/api/video/invites/${encodeURIComponent(id)}/cancel`, {}),
+    review: (id: string, b: { rating?: number | null; note?: string }) =>
+      post<{ invite: VideoInvite }>(`/api/video/invites/${encodeURIComponent(id)}/review`, b),
+    viewed: (id: string) => post<{ invite: VideoInvite }>(`/api/video/invites/${encodeURIComponent(id)}/viewed`, {}),
+    remove: (id: string) => del<void>(`/api/video/invites/${encodeURIComponent(id)}`),
+    answerUrl: (id: string, questionId: string) =>
+      get<{ url: string; expiresAt: number }>(`/api/video/invites/${encodeURIComponent(id)}/answer/${encodeURIComponent(questionId)}`),
+    public: {
+      get: (token: string) => get<{ invite: PublicVideoInvite }>(`/api/video/public/${encodeURIComponent(token)}`, { anonymous: true }),
+      open: (token: string) => post<{ invite: PublicVideoInvite }>(`/api/video/public/${encodeURIComponent(token)}/open`, {}, { anonymous: true }),
+      answer: (token: string, b: { questionId: string; dataBase64: string; mimeType: string; durationMs: number }) =>
+        post<{ invite: PublicVideoInvite }>(`/api/video/public/${encodeURIComponent(token)}/answer`, b, { anonymous: true, timeoutMs: 120_000 }),
+      submit: (token: string) =>
+        post<{ invite: PublicVideoInvite; thanks: string }>(`/api/video/public/${encodeURIComponent(token)}/submit`, {}, { anonymous: true }),
+    },
+  },
+  referrals: {
+    get: () => get<ReferralsPayload>('/api/referrals'),
+    saveProgram: (b: ReferralProgramInput) => put<ReferralsPayload>('/api/referrals/program', b),
+    approve: (id: string, note = '') => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/approve`, { note }),
+    pay: (id: string) => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/pay`, {}),
+    confirmProbation: (id: string) => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/confirm`, {}),
+    voidReward: (id: string, note = '') => post<ReferralsPayload>(`/api/referrals/${encodeURIComponent(id)}/void`, { note }),
+  },
+  developer: {
+    overview: () => get<DeveloperOverview>('/api/developer/overview'),
+    /** «SCIM» — issue/revoke the provisioning token (shown once on issue). */
+    issueScimToken: () => post<{ token: string; scim: ScimStatus; tokenId: string }>('/api/developer/scim', {}),
+    revokeScimToken: () => del<{ scim: ScimStatus }>('/api/developer/scim'),
+    createKey: (b: { name: string; scopes: string[] }) => post<CreatedApiKey>('/api/developer/keys', b),
+    revokeKey: (id: string) => del<{ keys: ApiKeyPublic[] }>(`/api/developer/keys/${encodeURIComponent(id)}`),
+    addWebhook: (b: { name: string; url: string; events: string[] }) =>
+      post<{ endpoint: WebhookEndpointPublic; test: WebhookTestResult; webhooks: WebhookEndpointPublic[] }>(
+        '/api/developer/webhooks',
+        b,
+        { timeoutMs: 45_000 }
+      ),
+    updateWebhook: (id: string, b: { name?: string; url?: string; events?: string[]; active?: boolean }) =>
+      patch<{ endpoint: WebhookEndpointPublic; webhooks: WebhookEndpointPublic[] }>(
+        `/api/developer/webhooks/${encodeURIComponent(id)}`,
+        b
+      ),
+    removeWebhook: (id: string) => del<{ webhooks: WebhookEndpointPublic[] }>(`/api/developer/webhooks/${encodeURIComponent(id)}`),
+    testWebhook: (id: string) =>
+      post<{ test: WebhookTestResult; endpoint: WebhookEndpointPublic | null; deliveries: WebhookDeliveryPublic[] }>(
+        `/api/developer/webhooks/${encodeURIComponent(id)}/test`,
+        {},
+        { timeoutMs: 45_000 }
+      ),
+    deliveries: (limit = 50) => get<{ deliveries: WebhookDeliveryPublic[] }>(`/api/developer/deliveries?limit=${limit}`),
+  },
+  sso: {
+    status: () => get<{ sso: SsoStatus }>('/api/org/sso'),
+    check: (issuer: string) => post<SsoCheck>('/api/org/sso/check', { issuer }, { timeoutMs: 25_000 }),
+    save: (b: SsoSaveInput) => put<{ sso: SsoStatus }>('/api/org/sso', b, { timeoutMs: 25_000 }),
+    remove: () => del<{ sso: SsoStatus }>('/api/org/sso'),
+  },
   insights: {
     dashboard: () => get<DashboardData>('/api/dashboard'),
     reports: (range: ReportRange) => get<ReportsData>(`/api/reports?range=${range}`),
+    /** «برابری فرصت‌ها» — aggregate only, admin only. */
+    eeoReport: (range: ReportRange) => get<EeoReport>(`/api/reports/eeo?range=${range}`),
+    teamReport: (range: ReportRange) => get<TeamReport>(`/api/reports/team?range=${range}`),
+    costReport: (range: ReportRange) => get<CostReport>(`/api/reports/cost?range=${range}`),
+    addCost: (b: { kind: CostKind; amount: number; atISO?: string | null; jobId?: string | null; note?: string }) =>
+      post<{ entry: CostEntry }>('/api/costs', b),
+    updateCost: (id: string, b: Partial<{ kind: CostKind; amount: number; atISO: string | null; jobId: string | null; note: string }>) =>
+      patch<{ entry: CostEntry }>(`/api/costs/${encodeURIComponent(id)}`, b),
+    deleteCost: (id: string) => del<{ ok: boolean }>(`/api/costs/${encodeURIComponent(id)}`),
+    setCostAssumption: (b: Partial<CostAssumption>) => put<{ assumption: CostAssumption }>('/api/costs/assumption', b),
     search: (q: string, opts?: RequestOptions) => get<SearchResults>(`/api/search?q=${encodeURIComponent(q)}`, opts),
     activity: (limit = 30) => get<ActivityFeed>(`/api/activity?limit=${limit}`),
     markSeen: () => post<{ unread: number }>('/api/activity/seen'),
@@ -361,6 +859,8 @@ export const adminApi = {
   updateUser: (id: string, b: { name?: string; role?: Role; disabled?: boolean; platformAdmin?: boolean }) => patch<{ user: AdminUserRow }>(`/api/admin/users/${id}`, b),
   resetPassword: (id: string) => post<{ tempPassword: string }>(`/api/admin/users/${id}/reset-password`),
   revokeSessions: (id: string) => post<{ user: AdminUserRow }>(`/api/admin/users/${id}/revoke-sessions`),
+  /** The operator's last-resort unlock for a locked-out workspace owner. */
+  resetTwoFactor: (id: string) => post<{ user: AdminUserRow }>(`/api/admin/users/${id}/reset-2fa`),
   deleteUser: (id: string) => del<{ ok: boolean }>(`/api/admin/users/${id}`),
   ai: () => get<AiSettingsPublic>('/api/admin/ai'),
   updateAi: (b: Partial<{ enabled: boolean; strategy: KeyStrategy; useEnvKeys: boolean; temperature: number; fastTimeoutSec: number; deepTimeoutSec: number }>) =>
@@ -390,6 +890,48 @@ export const adminApi = {
     mode?: 'standard' | 'deep';
   }) => post<LabResult>('/api/admin/behavior/lab', b, { timeoutMs: 270_000 }),
   jobs: () => get<{ items: Array<{ id: string; orgId: string | null; orgName: string; title: string; departmentName: string }> }>('/api/admin/jobs'),
+  connections: () => get<ConnectionsPayload>('/api/admin/connections'),
+  saveSourcingConnection: (b: SourcingConnectionInput) => put<ConnectionsPayload>('/api/admin/connections/sourcing', b, { timeoutMs: 60_000 }),
+  testSourcingConnection: () =>
+    post<{ result: { ok: boolean; error: string | null; count: number | null; detail?: string }; connections: ConnectionsPayload }>(
+      '/api/admin/connections/sourcing/test',
+      {},
+      { timeoutMs: 60_000 }
+    ),
+  removeSourcingConnection: () => del<ConnectionsPayload>('/api/admin/connections/sourcing'),
+  /** «همه را بررسی کن» — read-only, free checks of every outside connection. */
+  connectionsHealth: () => post<ConnectionsHealth>('/api/admin/connections/health', {}, { timeoutMs: 90_000 }),
+  saveGoogleConnection: (b: GoogleConnectionInput) =>
+    put<{ connections: ConnectionsPayload; check: { ok: boolean | null; error: string | null } }>('/api/admin/connections/google', b, { timeoutMs: 40_000 }),
+  removeGoogleConnection: () => del<ConnectionsPayload>('/api/admin/connections/google'),
+  /** صندوق ایمیل مشترک سامانه — verified before it is stored. */
+  saveSharedEmail: (b: {
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    password?: string;
+    fromName: string;
+    fromAddress: string;
+    replyTo?: string | null;
+  }) => put<ConnectionsPayload>('/api/admin/connections/email', b, { timeoutMs: 60_000 }),
+  testSharedEmail: () =>
+    post<{ result: { ok: boolean; error: string | null }; connections: ConnectionsPayload }>(
+      '/api/admin/connections/email/test',
+      {},
+      { timeoutMs: 60_000 }
+    ),
+  removeSharedEmail: () => del<ConnectionsPayload>('/api/admin/connections/email'),
+  /** خط پیامک مشترک سامانه — same rules. */
+  saveSharedSms: (b: { provider: 'kavenegar' | 'smsir'; apiKey?: string; sender: string }) =>
+    put<ConnectionsPayload>('/api/admin/connections/sms', b, { timeoutMs: 60_000 }),
+  testSharedSms: () =>
+    post<{ result: { ok: boolean; error: string | null }; connections: ConnectionsPayload }>(
+      '/api/admin/connections/sms/test',
+      {},
+      { timeoutMs: 60_000 }
+    ),
+  removeSharedSms: () => del<ConnectionsPayload>('/api/admin/connections/sms'),
   system: () => get<SystemSettings>('/api/admin/system'),
   updateSystem: (b: Partial<SystemSettings>) => patch<SystemSettings>('/api/admin/system', b),
   audit: (p: { q?: string; limit?: number } = {}) => get<{ items: AuditItem[] }>(`/api/admin/audit${qs(p)}`),

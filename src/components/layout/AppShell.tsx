@@ -8,17 +8,22 @@ import {
   Cpu,
   Home,
   LayoutDashboard,
+  Inbox,
   Library,
   LogOut,
   Megaphone,
   Menu as MenuIcon,
+  PackageCheck,
+  Wallet,
   Plus,
   Search,
   Settings,
   ShieldCheck,
   Sparkles,
+  Video,
   Wrench,
   UserRound,
+  UserSearch,
   Users,
   X,
   type LucideIcon,
@@ -36,6 +41,8 @@ import { CompareTray, useCompareTrayVisible } from './CompareTray';
 import { SkipToMain } from './SkipToMain';
 import { toPersianDigits } from '../../lib/format';
 import { useMediaQuery } from '../../lib/useAsync';
+import { useInstallApp } from '../../lib/pwa';
+import { InstallHelpDialog, installMenuItem } from './InstallApp';
 
 const ROLE_LABEL = { owner: 'مالک فضای کاری', admin: 'مدیر', member: 'عضو تیم' } as const;
 
@@ -48,8 +55,14 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/app', label: 'داشبورد', icon: LayoutDashboard, match: (p) => p === '/app' || p === '/app/' },
+  { to: '/app/approvals', label: 'کارتابل تأیید', icon: Inbox, match: (p) => p.startsWith('/app/approvals') },
   { to: '/app/jobs', label: 'فرصت‌های شغلی', icon: BriefcaseBusiness, match: (p) => p.startsWith('/app/jobs') },
   { to: '/app/candidates', label: 'رزومه‌ها', icon: Users, match: (p) => p.startsWith('/app/candidates') || p.startsWith('/app/compare') },
+  { to: '/app/sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch, match: (p) => p.startsWith('/app/sourcing') },
+  { to: '/app/automation', label: 'اتوماسیون جذب', icon: Sparkles, match: (p) => p.startsWith('/app/automation') },
+  { to: '/app/video', label: 'مصاحبهٔ ویدئویی', icon: Video, match: (p) => p.startsWith('/app/video') },
+  { to: '/app/onboarding', label: 'تحویل پس از استخدام', icon: PackageCheck, match: (p) => p.startsWith('/app/onboarding') },
+  { to: '/app/payroll', label: 'حقوق و دستمزد', icon: Wallet, match: (p) => p.startsWith('/app/payroll') },
   { to: '/app/talent', label: 'بانک استعداد', icon: Library, match: (p) => p.startsWith('/app/talent') },
   { to: '/app/reports', label: 'گزارش‌ها', icon: BarChart3, match: (p) => p.startsWith('/app/reports') },
   { to: '/app/settings', label: 'تنظیمات', icon: Settings, match: (p) => p.startsWith('/app/settings') },
@@ -75,9 +88,13 @@ function AiStatusChip() {
 
 function UserCard() {
   const { user, org, signOut, support } = useAuth();
+  const install = useInstallApp();
+  const [helpOpen, setHelpOpen] = useState(false);
   if (!user || !org) return null;
   const isPlatformAdmin = Boolean(user.platformAdmin) && !support;
+  const installItem = installMenuItem(install, () => setHelpOpen(true));
   return (
+    <>
     <Menu
       align="start"
       side="top"
@@ -92,6 +109,7 @@ function UserCard() {
         { label: 'حساب کاربری', icon: UserRound, onClick: () => navigate('/app/settings/account') },
         { label: 'تنظیمات سازمان', icon: Settings, onClick: () => navigate('/app/settings/org') },
         ...(isPlatformAdmin ? [{ label: 'پنل مدیریت سامانه', icon: ShieldCheck, onClick: () => navigate('/admin') }] : []),
+        ...(installItem ? [installItem] : []),
         'divider',
         { label: 'خروج از حساب', icon: LogOut, tone: 'danger', onClick: () => void signOut() },
       ]}
@@ -111,6 +129,8 @@ function UserCard() {
         </button>
       )}
     />
+    <InstallHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+    </>
   );
 }
 
@@ -226,7 +246,7 @@ function MobileNav({ onMore, moreOpen }: { onMore: () => void; moreOpen: boolean
     {
       label: 'بیشتر',
       icon: MenuIcon,
-      active: ['/app/talent', '/app/reports', '/app/settings'].some((p) => pathname.startsWith(p)),
+      active: ['/app/talent', '/app/sourcing', '/app/reports', '/app/settings'].some((p) => pathname.startsWith(p)),
       onClick: onMore,
     },
   ];
@@ -272,6 +292,9 @@ function MobileNav({ onMore, moreOpen }: { onMore: () => void; moreOpen: boolean
 
 function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { signOut, user, org, support } = useAuth();
+  const install = useInstallApp();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const installItem = installMenuItem(install, () => setHelpOpen(true));
   useLockScroll(open);
   useEscapeLayer(open, onClose);
   useRestoreFocus(open);
@@ -303,6 +326,7 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div className="p-3 grid gap-1">
           {[
             { to: '/app/jobs/new', label: 'ایجاد فرصت شغلی', icon: Plus },
+            { to: '/app/sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch },
             { to: '/app/talent', label: 'بانک استعداد', icon: Library },
             { to: '/app/reports', label: 'گزارش‌ها', icon: BarChart3 },
             { to: '/app/settings', label: 'تنظیمات', icon: Settings },
@@ -313,6 +337,18 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
               {it.label}
             </button>
           ))}
+          {installItem && (
+            <button
+              onClick={() => {
+                onClose();
+                installItem.onClick();
+              }}
+              className="flex items-center gap-3 h-12 px-3 rounded-[12px] text-[15px] font-semibold text-ink-2 hover:bg-line-2"
+            >
+              <installItem.icon className="w-5 h-5 text-ink-3" strokeWidth={1.8} />
+              {installItem.label}
+            </button>
+          )}
           <button
             onClick={() => {
               onClose();
@@ -325,6 +361,7 @@ function MoreSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
           </button>
         </div>
       </div>
+      <InstallHelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }

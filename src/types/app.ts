@@ -1,3 +1,4 @@
+import type { OfferApprovalConfig } from './offers';
 // ================================================================
 // HOVIDA — workspace (multi-tenant SaaS) types shared by client & server.
 // ================================================================
@@ -20,6 +21,41 @@ export interface OrgPublic {
   messageSignature: string;
   isDemo: boolean;
   demoExpiresAt: string | null;
+  /**
+   * Public career portal («پورتال شغلی»): the slug in `/careers/<slug>` and the
+   * short «دربارهٔ ما» shown above the openings. Editable by the workspace admin.
+   */
+  careerSlug: string;
+  careerAbout: string;
+  /**
+   * «پورتال دوزبانه»: `fa` is always on; adding `en` puts a language switch on
+   * the public portal and English metadata for search engines.
+   */
+  careerLanguages?: ('fa' | 'en')[];
+  /** Which language a newcomer lands on (`fa` when unset). */
+  careerDefaultLang?: 'fa' | 'en';
+  /**
+   * «غربالگری بی‌طرف»: while on, screening views are redacted on the server and
+   * contacting a candidate waits for an explicit, logged reveal.
+   */
+  blindScreening?: boolean;
+  /**
+   * «SCIM» — provisioning token for Okta/Entra/Google Workspace. Only the hash of
+   * the secret is stored; the token is shown once when it is issued.
+   */
+  scim?: {
+    id: string;
+    tokenHash: string;
+    createdAtISO: string;
+    createdByName: string;
+    /** True when the issuer was the workspace owner — SCIM may then grant admin. */
+    canManageAdmins: boolean;
+    lastUsedISO: string | null;
+  } | null;
+  /** «برابری فرصت‌ها»: voluntary candidate self-identification, aggregate-only. */
+  eeo?: { enabled: boolean; threshold: number };
+  /** «گردش تأیید پیشنهاد»: who must sign off before an offer goes to the candidate. */
+  offerApproval?: OfferApprovalConfig;
   createdAtISO: string;
   /** Suspended by a platform admin — members cannot sign in. */
   suspended?: boolean;
@@ -37,6 +73,8 @@ export interface UserPublic {
   lastLoginISO: string | null;
   /** Operator of the whole deployment (/admin). */
   platformAdmin?: boolean;
+  /** «ورود دومرحله‌ای» is active for this account (the secret itself never leaves the server). */
+  twoFactorEnabled?: boolean;
   disabled?: boolean;
 }
 
@@ -61,6 +99,20 @@ export interface AuthPayload {
   org: OrgPublic;
 }
 
+/** `POST /api/auth/login` for an account with «ورود دومرحله‌ای» on. */
+export interface TwoFactorChallenge {
+  twoFactorRequired: true;
+  challenge: string;
+  hint: string;
+}
+
+export interface TwoFactorStatus {
+  enabled: boolean;
+  enabledAtISO: string | null;
+  recoveryLeft: number;
+  pending: boolean;
+}
+
 export interface MeResponse {
   user: UserPublic;
   org: OrgPublic;
@@ -74,15 +126,53 @@ export type ActivityType =
   | 'org.created'
   | 'member.added'
   | 'member.removed'
+  | 'member.updated'
+  | 'candidate.revealed'
   | 'job.created'
   | 'job.status'
+  | 'job.access'
   | 'job.deleted'
   | 'analysis.completed'
   | 'decision'
   | 'talent.added'
   | 'message.sent'
+  | 'message.failed'
   | 'deep.review'
-  | 'resume.deleted';
+  | 'resume.deleted'
+  | 'sourcing.search'
+  | 'sourcing.imported'
+  | 'interview.scheduled'
+  | 'interview.cancelled'
+  | 'interview.reminder'
+  | 'automation.run'
+  | 'automation.approved'
+  | 'stage.moved'
+  | 'scorecard.added'
+  | 'offer.sent'
+  | 'offer.accepted'
+  | 'offer.declined'
+  | 'offer.cancelled'
+  | 'offer.revised'
+  | 'comment.added'
+  | 'retention.applied'
+  | 'survey.sent'
+  | 'survey.answered'
+  | 'assessment.sent'
+  | 'assessment.completed'
+  | 'video.invited'
+  | 'video.submitted'
+  | 'video.reviewed'
+  | 'video.cancelled'
+  | 'transcript.added'
+  | 'onboarding.started'
+  | 'onboarding.completed'
+  | 'summary.created'
+  | 'status.link'
+  | 'status.sent'
+  | 'hris.push'
+  | 'room.opened'
+  | 'room.closed'
+  | 'settings.changed';
 
 export interface ActivityItem {
   id: string;
@@ -143,7 +233,21 @@ export interface ReportsData {
   engines: { ai: number; local: number };
   jobs: { id: string; roleTitle: string; departmentName: string; status: JobStatus; total: number; high: number; approved: number; avgScore: number }[];
   timeSaved: { hours: number; resumes: number; minutesManual: number; minutesWithHovida: number };
+  /**
+   * The hiring questions a manager actually asks: where do good people come
+   * from, how long does it take, and is a stage becoming a bottleneck.
+   */
+  hiring: {
+    bySource: { kind: ResumeSourceKind; label: string; count: number; hired: number }[];
+    /** Current pipeline position across every open opening. */
+    byStage: { id: string; name: string; kind: string; count: number }[];
+    timeToHire: { medianDays: number | null; averageDays: number | null; sample: number };
+    offers: { draft: number; sent: number; accepted: number; declined: number; cancelled: number; acceptRate: number | null };
+    interviews: { scheduled: number; upcoming: number; cancelled: number };
+  };
 }
+
+export type ResumeSourceKind = 'careers' | 'referral' | 'linkedin' | 'direct';
 
 export interface SearchResults {
   jobs: { id: string; roleTitle: string; departmentName: string; status: JobStatus; total: number }[];

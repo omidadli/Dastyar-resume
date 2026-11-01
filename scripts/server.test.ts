@@ -79,6 +79,38 @@ async function main() {
   job.updatedAtISO = new Date(Date.now() - 7 * 60_000).toISOString(); // no heartbeat for 7 minutes
   assert(db.getJob(boss.id, job.id)?.analysisStatus === 'done', 'a silent analysis (tab closed) stops showing as processing');
 
+  // ---- duplicate screening across a department's history ----
+  {
+    const salesJob = db.createJob(boss.id, null, {
+      departmentId: 'sales', departmentName: 'فروش', roleTitle: 'فروشنده', extraNotes: '', location: '', employmentType: null,
+      understanding: understanding as any, answers: {}, criteriaSource: 'template',
+    });
+    const marketingJob = db.createJob(boss.id, null, {
+      departmentId: 'marketing', departmentName: 'بازاریابی', roleTitle: 'کارشناس بازاریابی', extraNotes: '', location: '', employmentType: null,
+      understanding: understanding as any, answers: {}, criteriaSource: 'template',
+    });
+    const cv = Buffer.from('%PDF-1.4 same cv bytes for both uploads').toString('base64');
+    const first = await db.saveEvaluation({ job: salesJob, uploadedBy: null, fileName: 'cv.pdf', extractedText: 'علی رضایی، کارشناس فروش. '.repeat(20), unjudgeableReason: null, fileBase64: cv });
+    const second = await db.saveEvaluation({ job: salesJob, uploadedBy: null, fileName: 'cv-again.pdf', extractedText: 'علی رضایی، کارشناس فروش. '.repeat(20), unjudgeableReason: null, fileBase64: cv });
+    const otherDept = await db.saveEvaluation({ job: marketingJob, uploadedBy: null, fileName: 'cv.pdf', extractedText: 'علی رضایی، کارشناس فروش. '.repeat(20), unjudgeableReason: null, fileBase64: cv });
+    assert(first.novelty === 'new', 'the first screening of a department gets «جدید»', String(first.novelty));
+    assert(second.novelty === 'duplicate' && second.duplicateOf?.resumeId === first.id, 'a re-upload in the same department gets «تکراری» and points at the original', String(second.novelty));
+    assert(otherDept.novelty === 'new', 'the same CV in another department is «جدید» there', String(otherDept.novelty));
+
+    const dupOnly = db.queryResumes(boss.id, { jobId: salesJob.id, novelty: 'duplicate' });
+    assert(dupOnly.total === 1 && dupOnly.items[0].id === second.id, 'the «فقط تکراری‌ها» filter returns exactly the duplicate', String(dupOnly.total));
+    assert(dupOnly.counts.novel === 1 && dupOnly.counts.duplicate === 1, 'counts report 1 fresh and 1 duplicate', JSON.stringify(dupOnly.counts));
+    const freshOnly = db.queryResumes(boss.id, { departmentId: 'sales', novelty: 'new' });
+    assert(freshOnly.total === 1 && freshOnly.items[0].id === first.id, 'the «فقط تازه‌ها» filter returns exactly the original');
+
+    db.deleteResume(second);
+    const repromoted = db.getResume(boss.id, first.id);
+    assert(repromoted?.novelty === 'new', 'deleting the duplicate keeps the original «جدید»', String(repromoted?.novelty));
+    db.deleteResume(db.getResume(boss.id, first.id)!);
+    const survivor = db.getResume(boss.id, otherDept.id);
+    assert(survivor?.novelty === 'new', 'another department was never affected by this history');
+  }
+
   // ---- save serialization ----
   for (let i = 0; i < 300; i++) {
     db.updateOrg(boss.id, { messageSignature: `امضا ${i}` });

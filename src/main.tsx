@@ -18,6 +18,7 @@ import 'core-js/actual/global-this';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.tsx';
+import { registerServiceWorker } from './lib/pwa';
 import './index.css';
 
 declare global {
@@ -46,6 +47,8 @@ try {
   );
   // Immediately inform boot watcher that React has initialized
   window.__hovidaBoot?.hide();
+  // «نصب روی دستگاه»: makes the icon on the home screen a real app window.
+  registerServiceWorker();
 } catch (err: any) {
   bootFailed(err?.message || String(err));
 }

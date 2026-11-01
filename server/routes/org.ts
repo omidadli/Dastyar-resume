@@ -6,6 +6,8 @@ import type { Department, Role, TeamMember } from '../../src/types/app';
 import { aiStatus, testConnection } from '../ai/provider';
 import { isEnvAdmin } from '../platform';
 import { h, oneOf, str } from './util';
+import { RetentionError, policyOf, preview, savePolicy, sweep } from '../retention';
+import { randomPassword } from '../scim';
 
 function members(orgId: string, meId: string): TeamMember[] {
   return db.listMembers(orgId).map((u) => ({ ...db.publicUser(u), isYou: u.id === meId }));
@@ -23,12 +25,115 @@ export function orgRoutes(): express.Router {
     const { org } = ctxOf(req);
     const name = str(req.body?.name, 80);
     if (req.body?.name !== undefined && name.length < 2) return res.status(400).json({ error: 'نام سازمان خیلی کوتاه است.' });
+    const blind = typeof req.body?.blindScreening === 'boolean' ? req.body.blindScreening : undefined;
+    // Read it before updateOrg mutates the very same record.
+    const was = Boolean(org.blindScreening);
+    const wasApproval = Boolean(org.offerApproval?.enabled);
+
+    // «گردش تأیید پیشنهاد»: only real members may approve, and an enabled chain
+    // without an approver is refused — a silent no-op here would look like a
+    // control that does not exist.
+    let offerApproval: any = undefined;
+    if (req.body?.offerApproval !== undefined) {
+      const membersList = db.listMembers(org.id);
+      const memberIds = new Set(membersList.map((m) => m.id));
+      const rawSteps = Array.isArray(req.body.offerApproval?.steps) ? req.body.offerApproval.steps : [];
+      const steps = rawSteps
+        .slice(0, 5)
+        .map((raw: any, i: number) => ({
+          id: str(raw?.id, 40) || `apv-${i + 1}`,
+          label: str(raw?.label, 60) || '',
+          approverId: str(raw?.approverId, 80) || '',
+        }))
+        .filter((x: { approverId: string }) => memberIds.has(x.approverId));
+      const enabled = Boolean(req.body.offerApproval?.enabled);
+      if (enabled && !steps.length) {
+        return res.status(400).json({ error: 'برای روشن‌کردن گردش تأیید، دست‌کم یک تأییدکننده از اعضای تیم انتخاب کنید.', code: 'APPROVAL_STEPS_REQUIRED' });
+      }
+      if (new Set(steps.map((s: { approverId: string }) => s.approverId)).size !== steps.length) {
+        return res.status(400).json({ error: 'یک نفر نمی‌تواند در دو مرحلهٔ پیاپی تأیید کند؛ ترتیب را یک‌نفره بچینید.', code: 'APPROVAL_DUPLICATE' });
+      }
+      offerApproval = { enabled, steps };
+    }
+
+    // «برابری فرصت‌ها»: a switch and a suppression threshold, nothing more.
+    let eeo: { enabled: boolean; threshold: number } | undefined;
+    if (req.body?.eeo !== undefined) {
+      const threshold = Math.min(50, Math.max(2, Math.round(Number(req.body.eeo?.threshold) || 5)));
+      eeo = { enabled: Boolean(req.body.eeo?.enabled), threshold };
+    }
+
     const updated = db.updateOrg(org.id, {
       ...(name ? { name } : {}),
+      ...(eeo ? { eeo } : {}),
       ...(typeof req.body?.messageSignature === 'string' ? { messageSignature: str(req.body.messageSignature, 400) } : {}),
+      ...(blind === undefined ? {} : { blindScreening: blind }),
+      ...(offerApproval === undefined ? {} : { offerApproval }),
     });
+    if (offerApproval !== undefined && offerApproval.enabled !== wasApproval) {
+      db.logActivity(
+        org.id,
+        actorOf(req),
+        'settings.changed',
+        offerApproval.enabled
+          ? `«گردش تأیید پیشنهاد» را روشن کرد (${offerApproval.steps.length.toLocaleString('fa-IR')} مرحله)`
+          : '«گردش تأیید پیشنهاد» را خاموش کرد'
+      );
+    }
+    if (blind !== undefined && blind !== was) {
+      db.logActivity(
+        org.id,
+        actorOf(req),
+        'settings.changed',
+        blind ? '«غربالگری بی‌طرف» را روشن کرد؛ نام، تماس و فایل کارجو تا آشکارسازی پنهان می‌ماند' : '«غربالگری بی‌طرف» را خاموش کرد'
+      );
+    }
     res.json({ org: updated });
   });
+
+  // ------------------------------------------------------- داده و حریم خصوصی --
+
+  r.get('/org/retention', (req, res) => {
+    const { org } = ctxOf(req);
+    const policy = policyOf(org.id);
+    res.json({ policy, preview: policy.days > 0 ? preview(org.id) : { days: 0, action: policy.action, items: [] } });
+  });
+
+  r.put(
+    '/org/retention',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      try {
+        const policy = savePolicy(org.id, { days: req.body?.days, action: req.body?.action });
+        db.logActivity(
+          org.id,
+          actorOf(req),
+          'settings.changed',
+          policy.days === 0 ? 'سیاست نگه‌داری داده را خاموش کرد' : `سیاست نگه‌داری داده را روی ${policy.days.toLocaleString('fa-IR')} روز گذاشت`
+        );
+        res.json({ policy, preview: policy.days > 0 ? preview(org.id) : { days: 0, action: policy.action, items: [] } });
+      } catch (err) {
+        if (!(err instanceof RetentionError)) throw err;
+        res.status(err.status).json({ error: err.message, code: err.code });
+      }
+    })
+  );
+
+  r.post(
+    '/org/retention/run',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const days = req.body?.days === undefined ? undefined : Number(req.body.days);
+      const dryRun = req.body?.dryRun === true;
+      if (!dryRun && policyOf(org.id).days === 0 && days === undefined) {
+        return res.status(400).json({ error: 'اول سیاست نگه‌داری را روشن کنید یا تعداد روز را مشخص کنید.', code: 'POLICY_OFF' });
+      }
+      const result = sweep(org.id, { days, dryRun, actor: actorOf(req) });
+      res.json({ result, policy: policyOf(org.id) });
+    })
+  );
 
   r.put('/org/departments', requireRole('admin'), (req, res) => {
     const { org } = ctxOf(req);
@@ -105,6 +210,70 @@ export function orgRoutes(): express.Router {
     db.logActivity(org.id, actorOf(req), 'member.removed', `«${target.name}» را از تیم حذف کرد`);
     res.json({ members: members(org.id, user.id) });
   });
+
+  /**
+   * «تعیین رمز» — an admin gives a member a new password. Needed for accounts
+   * that arrive through SCIM/SSO and never had one, and for the ordinary case of
+   * a colleague who forgot theirs. Every use ends that person's sessions and is
+   * written to the activity log; the password itself is never stored in clear.
+   */
+  r.post(
+    '/org/members/:id/password',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const target = db.getUser(req.params.id);
+      if (!target || target.orgId !== org.id) return res.status(404).json({ error: 'عضو یافت نشد.' });
+      // Privilege ladder: only the owner may touch another admin or the owner —
+      // and nobody changes the owner's password from inside the workspace but the owner.
+      if (target.role === 'owner' && target.id !== user.id) {
+        return res.status(403).json({ error: 'رمز مالک فضای کاری را فقط خودش می‌تواند تغییر دهد.', code: 'OWNER_PASSWORD' });
+      }
+      if (target.role === 'admin' && user.role !== 'owner' && target.id !== user.id) {
+        return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند رمز یک مدیر دیگر را تعیین کند.', code: 'ADMIN_PASSWORD' });
+      }
+      const given = typeof req.body?.password === 'string' ? req.body.password : '';
+      const generated = !given;
+      const password = given || randomPassword();
+      const problem = passwordProblem(password);
+      if (problem) return res.status(400).json({ error: problem, field: 'password' });
+      db.updateUser(target.id, { passwordHash: await hashPassword(password) });
+      db.deleteSessionsOfUser(target.id);
+      db.logActivity(org.id, actorOf(req), 'member.updated', `رمز «${target.name}» را بازنشانی کرد`);
+      res.json({
+        // Returned only when we generated it: the admin has to hand it over once.
+        password: generated ? password : undefined,
+        members: members(org.id, user.id),
+      });
+    })
+  );
+
+  /**
+   * «قفل‌شده‌ام»: a member who lost both phone and recovery codes asks an admin.
+   * The second factor is removed (not the password), their other sessions end,
+   * and the whole organization sees who did it and when — in the activity log.
+   */
+  r.post(
+    '/org/members/:id/2fa-reset',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const target = db.getUser(req.params.id);
+      if (!target || target.orgId !== org.id) return res.status(404).json({ error: 'عضو یافت نشد.' });
+      // An admin cannot strip a second factor from someone more privileged than
+      // themselves: only the owner may reset another admin, and never the owner.
+      if (target.role === 'owner') return res.status(403).json({ error: 'ورود دومرحله‌ای مالک فضای کاری را فقط مدیر سامانه می‌تواند بازنشانی کند.' });
+      if (target.role === 'admin' && user.role !== 'owner') {
+        return res.status(403).json({ error: 'فقط مالک فضای کاری می‌تواند ورود دومرحله‌ای یک مدیر را بازنشانی کند.' });
+      }
+      const record = db.getTwoFactor(target.id);
+      if (!record) return res.status(409).json({ error: 'ورود دومرحله‌ای این عضو روشن نیست.', code: 'NOT_ENABLED' });
+      db.setTwoFactor(target.id, null);
+      db.deleteSessionsOfUser(target.id);
+      db.logActivity(org.id, actorOf(req), 'member.updated', `ورود دومرحله‌ای «${target.name}» را بازنشانی کرد`);
+      res.json({ members: members(org.id, user.id) });
+    })
+  );
 
   r.get('/ai/status', (_req, res) => res.json(aiStatus()));
 

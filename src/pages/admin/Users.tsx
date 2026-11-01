@@ -141,6 +141,11 @@ export default function UsersPage() {
                           ) : (
                             <Chip tone="neutral">فعال</Chip>
                           )}
+                          {u.twoFactorEnabled && (
+                            <Chip tone="brand" icon={ShieldCheck} title="ورود دومرحله‌ای روشن است">
+                              ۲FA
+                            </Chip>
+                          )}
                           {u.platformAdmin && (
                             <Chip tone="brand" icon={ShieldCheck} title={u.platformAdminViaEnv ? 'از طریق متغیر ADMIN_EMAILS' : undefined}>
                               مدیر سامانه
@@ -162,6 +167,15 @@ export default function UsersPage() {
                               },
                             },
                             { label: 'بازنشانی رمز عبور', icon: KeyRound, onClick: () => setDialog({ kind: 'reset', user: u }) },
+                            ...(u.twoFactorEnabled
+                              ? [
+                                  {
+                                    label: 'برداشتن ورود دومرحله‌ای',
+                                    icon: ShieldOff,
+                                    onClick: () => void run(async () => replace((await adminApi.resetTwoFactor(u.id)).user), 'ورود دومرحله‌ای برداشته شد.'),
+                                  },
+                                ]
+                              : []),
                             { label: 'بستن همه نشست‌ها', icon: LogOut, onClick: () => void run(async () => replace((await adminApi.revokeSessions(u.id)).user), 'نشست‌ها بسته شد.') },
                             ...(!isMe && !u.platformAdminViaEnv
                               ? [

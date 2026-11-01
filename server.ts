@@ -3,13 +3,14 @@
  * Express API (multi-tenant workspaces) + Vite dev middleware / static SPA.
  */
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import * as db from './server/db';
 import { initAppSecret } from './server/secret';
 import { storage } from './server/storage';
 import { maintenanceGate, requireAuth } from './server/auth';
-import { initPlatform, systemSettings } from './server/platform';
+import { initPlatform, sharedEmailSecrets, sharedSmsSecrets, systemSettings } from './server/platform';
 import { adminRoutes } from './server/routes/admin';
 import { aiStatus, flushAiState } from './server/ai/provider';
 import { authRoutes } from './server/routes/auth';
@@ -17,7 +18,40 @@ import { orgRoutes } from './server/routes/org';
 import { jobRoutes } from './server/routes/jobs';
 import { fileRoutes, resumeRoutes } from './server/routes/resumes';
 import { insightRoutes } from './server/routes/insights';
+import { integrationPublicRoutes, integrationRoutes } from './server/routes/integrations';
+import { ssoPublicRoutes, ssoRoutes } from './server/routes/sso';
+import { automationRoutes } from './server/routes/automation';
+import {
+  careerOriginOf,
+  careerPublicRoutes,
+  careerRoutes,
+  careersHeadHtml,
+  careersSitemap,
+  jobPostingFeed,
+} from './server/routes/careers';
+import { offerPublicRoutes, offerRoutes } from './server/routes/offers';
+import { schedulingPublicRoutes, schedulingRoutes } from './server/routes/scheduling';
+import { commentRoutes } from './server/routes/comments';
+import { developerRoutes } from './server/routes/developer';
+import { privacyRoutes } from './server/routes/privacy';
+import { referralRoutes } from './server/routes/referrals';
+import { hrisRoutes } from './server/routes/hris';
+import { roomRoutes, roomsPublicRoutes } from './server/routes/rooms';
+import { inboxRoutes } from './server/routes/inbox';
+import { jobBoardRoutes } from './server/routes/jobboard';
+import { scimRoutes } from './server/routes/scim';
+import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
+import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
+import { videoPublicRoutes, videoRoutes } from './server/routes/video';
+import { transcriptPublicRoutes, transcriptRoutes } from './server/routes/transcripts';
+import { onboardingRoutes } from './server/routes/onboarding';
+import { statusPublicRoutes, statusRoutes } from './server/routes/status';
+import { apiV1Routes } from './server/routes/api-v1';
+import { forwardActivity } from './server/chat-webhook';
+import { deliverActivity } from './server/webhooks';
+import { runDuePolicies } from './server/retention';
 import { backupPublicRoutes } from './server/routes/backup';
+import { remindersEnabled, runRemindersQuietly } from './server/reminders';
 
 dotenv.config({ override: true });
 
@@ -30,6 +64,9 @@ async function startServer() {
   await initAppSecret();
   db.purgeExpired();
   initPlatform();
+  // Workspaces without their own mailbox/SMS line fall back to the deployment-
+  // wide ones entered in /admin › «کلیدها و اتصال‌ها».
+  db.setSharedSecretsSource(() => ({ email: sharedEmailSecrets() ?? undefined, sms: sharedSmsSecrets() ?? undefined }));
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', true);
@@ -51,7 +88,9 @@ async function startServer() {
   });
 
   // 70mb fits the largest allowed resume (50mb, /admin › تنظیمات سامانه) as base64.
-  app.use(express.json({ limit: '70mb' }));
+  // SCIM clients send `application/scim+json`, which express.json ignores unless
+  // it is listed — an IdP would otherwise see an empty body and a 400.
+  app.use(express.json({ limit: '70mb', type: ['application/json', 'application/scim+json'] }));
   // A rejected body (too large / malformed) must come back as JSON.
   app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (!err) return next();
@@ -76,7 +115,27 @@ async function startServer() {
   });
   app.use('/api/auth', authRoutes());
   app.use('/api', fileRoutes()); // HMAC-signed, no bearer token needed
+  // Every activity line can become a Slack/Teams message or a signed webhook,
+  // when the workspace asked for it. Both are fire-and-forget.
+  db.setActivityHook((item) => {
+    forwardActivity(item);
+    deliverActivity(item);
+  });
+
   app.use('/api', backupPublicRoutes()); // signed backup download + restore progress
+  app.use('/api', integrationPublicRoutes()); // Google Calendar OAuth callback
+  app.use('/api', ssoPublicRoutes()); // «ورود سازمانی»: lookup, start, callback (no session yet)
+  app.use('/api', careerPublicRoutes()); // public career portal (no session)
+  app.use('/api', offerPublicRoutes()); // public offer page + the candidate's signature
+  app.use('/api', schedulingPublicRoutes()); // public «choose an interview time» page
+  app.use('/api', surveyPublicRoutes()); // public «تجربهٔ کارجو» survey page
+  app.use('/api', assessmentPublicRoutes()); // public «آزمون و ارزیابی» page
+  app.use('/api', videoPublicRoutes()); // public «مصاحبهٔ ویدئویی» recording page
+  app.use('/api', transcriptPublicRoutes()); // signed playback of a transcript's recording
+  app.use('/api', statusPublicRoutes()); // «پیگیری درخواست» — the candidate's own status page
+  app.use('/api', roomsPublicRoutes()); // «اتاق مصاحبهٔ زنده» — the candidate's side of the call
+  app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
+  app.use('/scim/v2', scimRoutes()); // «SCIM 2.0» — authenticated by the workspace's SCIM token
 
   // ---------------- Authenticated API ----------------
   app.use('/api', requireAuth);
@@ -86,6 +145,26 @@ async function startServer() {
   app.use('/api', jobRoutes());
   app.use('/api', resumeRoutes());
   app.use('/api', insightRoutes());
+  app.use('/api', integrationRoutes());
+  app.use('/api', ssoRoutes()); // connect / check / disconnect the workspace's SSO
+  app.use('/api', automationRoutes());
+  app.use('/api', careerRoutes());
+  app.use('/api', offerRoutes());
+  app.use('/api', schedulingRoutes());
+  app.use('/api', commentRoutes());
+  app.use('/api', surveyRoutes()); // candidate-experience surveys (NPS)
+  app.use('/api', assessmentRoutes()); // «آزمون و ارزیابی»: catalogue, send, result
+  app.use('/api', videoRoutes()); // «مصاحبهٔ ویدئویی»: questions, invite, watch, rate
+  app.use('/api', transcriptRoutes()); // «رونویسی گفتار»: audio, subtitle, manual text
+  app.use('/api', onboardingRoutes()); // «تحویل پس از استخدام»: checklist, start date, welcome mail
+  app.use('/api', statusRoutes()); // «پیگیری درخواست»: the revocable status link
+  app.use('/api', privacyRoutes()); // candidate data export + erasure (DSAR)
+  app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
+  app.use('/api', referralRoutes()); // «معرفی همکار»: program, links, reward approval
+  app.use('/api', hrisRoutes()); // «انتقال به حقوق و دستمزد»: roster, CSV, signed push
+  app.use('/api', roomRoutes()); // «اتاق مصاحبهٔ زنده»: the host's side of the call
+  app.use('/api', inboxRoutes()); // «کارتابل تأیید»: everything waiting on a human
+  app.use('/api', jobBoardRoutes()); // «انتشار در جاب‌بورد»: the ad copy + where it went
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------
@@ -109,6 +188,11 @@ async function startServer() {
         index: false,
         setHeaders: (res, filePath) => {
           if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+          // A cached service worker is an app that never updates: always revalidate.
+          else if (/[\\/]sw\.js$/.test(filePath)) {
+            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+            res.setHeader('Service-Worker-Allowed', '/');
+          }
           else if (/[\\/]assets[\\/]/.test(filePath)) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
           else res.setHeader('Cache-Control', 'public, max-age=86400');
         },
@@ -118,9 +202,41 @@ async function startServer() {
     // deploy) must fail as a 404 — never come back as the HTML shell, which
     // the browser would try to run as JavaScript.
     app.use('/assets', (_req, res) => res.status(404).type('text/plain').send('Not found'));
-    app.get('*', (_req, res) => {
+    // The SPA shell, with the career-page <head> swapped in when the address is
+    // a public job page. Google for Jobs reads JobPosting JSON-LD from the HTML —
+    // a client-rendered tag alone is not enough for a crawler that does not wait.
+    // The machine-readable career addresses live at the site root as well as
+    // under /api, because a crawler or an aggregator is given a clean URL.
+    app.get('/careers/:slug/job-posting.json', jobPostingFeed);
+    app.get('/careers/:slug/sitemap.xml', careersSitemap);
+    const shellPath = path.join(distPath, 'index.html');
+    let shellCache: string | null = null;
+    const readShell = () => {
+      if (shellCache === null) shellCache = fs.readFileSync(shellPath, 'utf-8');
+      return shellCache;
+    };
+    app.get('*', (req, res) => {
       res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-      res.sendFile(path.join(distPath, 'index.html'));
+      const m = /^\/careers\/([^/]+)(?:\/jobs\/([^/]+))?\/?$/.exec(req.path);
+      if (m) {
+        try {
+          const extra = careersHeadHtml(
+            decodeURIComponent(m[1]),
+            m[2] ? decodeURIComponent(m[2]) : undefined,
+            careerOriginOf(req)
+          );
+          if (extra) {
+            const html = readShell().replace(
+              /<!--careers-head:start-->[\s\S]*?<!--careers-head:end-->/,
+              () => `<!--careers-head:start-->\n    ${extra}\n    <!--careers-head:end-->`
+            );
+            return res.type('html').send(html);
+          }
+        } catch {
+          // A malformed slug is just an app page; never a 500 for a crawler.
+        }
+      }
+      res.sendFile(shellPath);
     });
   }
 
@@ -147,6 +263,16 @@ async function startServer() {
 
   // Housekeeping: expired sessions and demo workspaces.
   setInterval(() => db.purgeExpired(), 15 * 60_000).unref();
+  // «نگه‌داری داده»: a policy nobody clicked «اجرا» on still runs, once a day.
+  setInterval(() => runDuePolicies(), 60 * 60_000).unref();
+  if (process.env.RETENTION_SWEEP !== 'off') setTimeout(() => runDuePolicies(), 90_000).unref();
+
+  // «یادآوری مصاحبه»: once an hour, one day before each interview, from the
+  // workspace's own mailbox. Every interview is reminded at most once.
+  if (remindersEnabled()) {
+    setTimeout(() => void runRemindersQuietly(), 60_000).unref();
+    setInterval(() => void runRemindersQuietly(), 60 * 60_000).unref();
+  }
 
   const PORT = Number(process.env.PORT) || 3000;
   const server = app.listen(PORT, '0.0.0.0', () => {

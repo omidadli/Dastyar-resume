@@ -1,5 +1,5 @@
 import React from 'react';
-import { Clock3, Loader2, MapPin, Users } from 'lucide-react';
+import { Clock3, Loader2, Lock, MapPin, Users } from 'lucide-react';
 import type { JobSummary } from '../../types/screening';
 import { Link } from '../../lib/router';
 import { EMPLOYMENT_LABELS } from '../../lib/match';
@@ -59,7 +59,12 @@ export function JobCard({ job, running, titleAs: Heading = 'h2' }: { job: JobSum
             </>
           )}
         </span>
-        <span className="inline-flex items-center gap-1">
+        <span className="inline-flex items-center gap-2">
+          {job.accessMode === 'restricted' && (
+            <span className="inline-flex items-center gap-1 text-review-ink" title="این آگهی فقط برای افراد انتخاب‌شده و مدیران دیده می‌شود">
+              <Lock className="w-3.5 h-3.5" /> محدود
+            </span>
+          )}
           <Users className="w-3.5 h-3.5" />
           {faNumber(s.approved)} تأیید
         </span>

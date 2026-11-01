@@ -171,6 +171,9 @@ export function roomRoutes() {
       const row = db.getRoom(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'اتاق پیدا نشد.' });
       if (blockedByJobId(req, res, row.jobId)) return;
+      // Opening blind mode mid-call is a decision to hide identity: the host's
+      // side stops here, while the candidate's link simply ends.
+      if (blockedByBlind(org, res)) return;
       const state = stateOf(row);
       if (state === 'open') touchPresence(row.id, 'host');
       res.setHeader('Cache-Control', 'no-store');
@@ -185,6 +188,9 @@ export function roomRoutes() {
       const row = db.getRoom(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'اتاق پیدا نشد.' });
       if (blockedByJobId(req, res, row.jobId)) return;
+      // Opening blind mode mid-call is a decision to hide identity: the host's
+      // side stops here, while the candidate's link simply ends.
+      if (blockedByBlind(org, res)) return;
       try {
         assertLive(row);
         const signal = appendSignal(row.id, 'host', req.body?.kind, req.body?.payload);
@@ -203,6 +209,9 @@ export function roomRoutes() {
       const row = db.getRoom(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'اتاق پیدا نشد.' });
       if (blockedByJobId(req, res, row.jobId)) return;
+      // Opening blind mode mid-call is a decision to hide identity: the host's
+      // side stops here, while the candidate's link simply ends.
+      if (blockedByBlind(org, res)) return;
       try {
         res.json({ room: closeRoom(org.id, row.id, actorOf(req)) });
       } catch (err) {

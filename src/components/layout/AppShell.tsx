@@ -8,6 +8,7 @@ import {
   Cpu,
   Home,
   LayoutDashboard,
+  Inbox,
   Library,
   LogOut,
   Megaphone,
@@ -54,6 +55,7 @@ interface NavItem {
 
 const NAV: NavItem[] = [
   { to: '/app', label: 'داشبورد', icon: LayoutDashboard, match: (p) => p === '/app' || p === '/app/' },
+  { to: '/app/approvals', label: 'کارتابل تأیید', icon: Inbox, match: (p) => p.startsWith('/app/approvals') },
   { to: '/app/jobs', label: 'فرصت‌های شغلی', icon: BriefcaseBusiness, match: (p) => p.startsWith('/app/jobs') },
   { to: '/app/candidates', label: 'رزومه‌ها', icon: Users, match: (p) => p.startsWith('/app/candidates') || p.startsWith('/app/compare') },
   { to: '/app/sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch, match: (p) => p.startsWith('/app/sourcing') },

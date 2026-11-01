@@ -63,6 +63,7 @@ const EeoReport = lazyPage(() => import('./pages/EeoReport'));
 const VideoInterviews = lazyPage(() => import('./pages/VideoInterviews'));
 const Onboarding = lazyPage(() => import('./pages/Onboarding'));
 const Payroll = lazyPage(() => import('./pages/Payroll'));
+const Approvals = lazyPage(() => import('./pages/Approvals'));
 const ApplicationStatus = lazyPage(() => import('./pages/ApplicationStatus'));
 const InterviewRoom = lazyPage(() => import('./pages/InterviewRoom'));
 const VideoRecord = lazyPage(() => import('./pages/VideoRecord'));
@@ -136,6 +137,7 @@ function appPage(pathname: string): React.ReactNode {
   if (pathname === '/app/video') return <VideoInterviews />;
   if (pathname === '/app/onboarding') return <Onboarding />;
   if (pathname === '/app/payroll') return <Payroll />;
+  if (pathname === '/app/approvals') return <Approvals />;
   if (pathname === '/app/automation') return <Automation />;
   m = matchPath('/app/talent/:dept', pathname);
   if (m) return <Talent dept={m.dept} />;

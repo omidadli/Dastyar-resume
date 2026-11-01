@@ -106,7 +106,10 @@ export function transcriptRoutes() {
   // A transcript quotes the person. While «غربالگری بی‌طرف» is on, it is closed
   // like the résumé file itself — not redacted sentence by sentence, which would
   // silently break the text.
-  r.use((req, res, next) => {
+  // Scoped to the transcript paths on purpose: an unscoped router-level guard
+  // would also close every `/api` route mounted after this one (referrals, the
+  // payroll hand-off, live rooms), which is not what blind screening means.
+  r.use('/transcripts', (req, res, next) => {
     if (blockedByBlind(ctxOf(req).org, res)) return;
     next();
   });

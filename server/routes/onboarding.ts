@@ -44,7 +44,11 @@ export function onboardingRoutes() {
 
   // A plan is a person's name, e-mail and first day. While «غربالگری بی‌طرف» is
   // on, no screening view may show that — including this one.
-  r.use((req, res, next) => {
+  //
+  // The path matters: a router-level `use` without one guards *every* `/api`
+  // route mounted after it (the inbox, referrals, payroll hand-off), which is
+  // not what «hide onboarding names» means.
+  r.use('/onboarding', (req, res, next) => {
     if (blindOn(ctxOf(req).org)) {
       return res.status(409).json({ error: BLIND_MESSAGE, code: 'BLIND_REVEAL_REQUIRED' });
     }

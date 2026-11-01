@@ -439,6 +439,22 @@ POST /api/rooms/public/:token/signal   body: { kind, payload }  (from = candidat
 
 ---
 
+## ۵ط) کارتابل تأیید (همهٔ تصمیم‌های منتظر انسان)
+
+```http
+GET  /api/inbox                       → { items, counts, enabled }
+POST /api/inbox/offers/:id/decision   body: { decision: "approved"|"rejected", note? }
+POST /api/inbox/referrals/:id/approve body: { note? }
+```
+
+سه صف (پیشنهاد شغلی، اتوماسیون، پاداش معرفی) از همان رکوردهای خودشان خوانده می‌شوند؛ هر ردیف
+می‌گوید منتظر چه کسی است و آیا نوبت شماست. تأیید اتوماسیون این‌جا **نیست** چون نامه می‌فرستد؛
+آن تصمیم در صفحهٔ اتوماسیون گرفته می‌شود. قواعد ۴۰۳/۴۰۹ همان قواعد صفحهٔ اصلی است و آگهی
+محرمانه با «دسترسی آگهی» و نام کارجو با «غربالگری بی‌طرف» پنهان می‌شود.
+جزئیات: [`APPROVAL-INBOX.md`](APPROVAL-INBOX.md).
+
+---
+
 ## ۵ز) انتقال به حقوق و دستمزد (داخل برنامه)
 
 ```http

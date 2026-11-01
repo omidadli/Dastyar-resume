@@ -44,6 +44,7 @@ import type { CandidateComment, InterviewFeedback, PipelineBoard, PipelineStage,
 import type { JobOffer, OfferApprovalConfig, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
 import type { HrisPushResult, HrisRoster } from '../types/hris';
 import type { InterviewRoom, PublicRoom, RoomPoll, SignalKind } from '../types/room';
+import type { InboxView } from '../types/inbox';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
   AutomationOverview,
@@ -669,6 +670,14 @@ export const api = {
     cancel: (id: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/cancel`, {}),
     remove: (id: string) => del<void>(`/api/onboarding/${encodeURIComponent(id)}`),
     exportUrl: '/api/onboarding/export',
+  },
+  /** «کارتابل تأیید» — what is waiting on a human, and the two safe decisions. */
+  inbox: {
+    list: () => get<InboxView>('/api/inbox'),
+    decideOffer: (offerId: string, decision: 'approved' | 'rejected', note?: string) =>
+      post<{ inbox: InboxView; offerId: string }>(`/api/inbox/offers/${encodeURIComponent(offerId)}/decision`, { decision, note }),
+    approveReferral: (referralId: string, note?: string) =>
+      post<{ inbox: InboxView }>(`/api/inbox/referrals/${encodeURIComponent(referralId)}/approve`, { note }),
   },
   /** «اتاق مصاحبهٔ زنده» — signalling only; media never touches the server. */
   rooms: {

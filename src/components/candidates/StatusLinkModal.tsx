@@ -149,8 +149,8 @@ export function StatusLinkModal({ record, onClose }: { record: ResumeListItem | 
                     <div key={l.id} className="flex items-center gap-2 text-[11.5px] text-ink-4">
                       <Chip tone="outline">غیرفعال</Chip>
                       <span>ساخته‌شده {faDate(l.createdAtISO)}</span>
-                      <span>· {toPersianDigits(l.views)} بازدید</span>
-                      {l.sentAtISO && <span>· ایمیل شد ({l.sentTo})</span>}
+                      <span>{toPersianDigits(l.views)} بار بازدید</span>
+                      {l.sentAtISO && <span>— ایمیل شد ({l.sentTo})</span>}
                     </div>
                   ))}
               </div>

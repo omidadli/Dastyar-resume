@@ -14,6 +14,7 @@ import {
   FileText,
   KanbanSquare,
   Link2,
+  Wallet,
   MailCheck,
   MailWarning,
   SlidersHorizontal,
@@ -89,6 +90,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'summary.created': NotebookPen,
   'status.link': Link2,
   'status.sent': Link2,
+  'hris.push': Wallet,
 };
 
 export function ActivityRow({ item, unread, onOpen }: { item: ActivityItem; unread?: boolean; onOpen?: () => void }) {

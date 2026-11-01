@@ -197,6 +197,10 @@ export interface StoreSnapshot {
   costAssumptions?: Record<string, CostAssumption>;
   /** «معرفی همکار» — program settings and every referral the portal produced. */
   referralPrograms?: Record<string, ReferralProgram>;
+  /** «انتقال به حقوق و دستمزد» — the endpoint and column mapping per workspace. */
+  hrisConfigs?: Record<string, HrisConfigRow>;
+  /** The last few payroll handoffs, for the page. */
+  hrisPushes?: HrisPushRow[];
   referrals?: ReferralRow[];
 }
 
@@ -315,6 +319,34 @@ export type SummaryRow = Omit<MeetingSummary, 'id'> & { id: string; orgId: strin
 /** «تحویل پس از استخدام» — one plan per hire, with its checklist. */
 export type OnboardingRow = Omit<OnboardingPlan, 'doneCount' | 'total' | 'daysUntil'> & { orgId: string };
 
+/**
+ * «انتقال به حقوق و دستمزد» — where the payroll file goes and what its columns
+ * are called. The URL is a secret (it usually carries its own token), so it is
+ * encrypted; the browser only ever sees host + masked path.
+ */
+export interface HrisConfigRow {
+  orgId: string;
+  urlEnc: string;
+  secretEnc: string;
+  secretHint: string;
+  urlHost: string;
+  urlMasked: string;
+  mapping: Record<string, string>;
+  updatedAtISO: string;
+}
+
+export interface HrisPushRow {
+  id: string;
+  orgId: string;
+  atISO: string;
+  atJalali: string;
+  ok: boolean;
+  status: number | null;
+  error: string | null;
+  rows: number;
+  byName: string | null;
+}
+
 /** A «رونویسی گفتار» row: the text plus where the file lives. */
 export type TranscriptRow = Omit<Transcript, 'audioUrl'> & { orgId: string; filePath: string | null };
 
@@ -394,6 +426,8 @@ const costRows = new Map<string, CostRow>();
 const costAssumptions = new Map<string, CostAssumption>();
 const referralPrograms = new Map<string, ReferralProgram>();
 const referrals = new Map<string, ReferralRow>();
+const hrisConfigs = new Map<string, HrisConfigRow>();
+const hrisPushes = new Map<string, HrisPushRow>();
 let activity: ActivityItem[] = [];
 let platformBlob: unknown = null;
 let auditLog: AuditItem[] = [];
@@ -455,6 +489,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   for (const [k, v] of Object.entries(snap.costAssumptions || {})) costAssumptions.set(k, normalizeAssumption(v));
   for (const [k, v] of Object.entries(snap.referralPrograms || {})) referralPrograms.set(k, normalizeReferralProgram(v));
   snap.referrals?.forEach((x) => referrals.set(x.id, x));
+  for (const [k, v] of Object.entries(snap.hrisConfigs || {})) hrisConfigs.set(k, v);
+  snap.hrisPushes?.forEach((x) => hrisPushes.set(x.id, x));
   activity = Array.isArray(snap.activity) ? snap.activity : [];
   platformBlob = snap.platform ?? null;
   auditLog = Array.isArray(snap.audit) ? snap.audit : [];
@@ -498,6 +534,8 @@ function clearMemory() {
   costRows.clear();
   costAssumptions.clear();
   referralPrograms.clear();
+  hrisConfigs.clear();
+  hrisPushes.clear();
   referrals.clear();
   activity = [];
   platformBlob = null;
@@ -631,6 +669,8 @@ function snapshot(): StoreSnapshot {
     costAssumptions: Object.fromEntries(costAssumptions),
     referralPrograms: Object.fromEntries(referralPrograms),
     referrals: Array.from(referrals.values()),
+    hrisConfigs: Object.fromEntries(hrisConfigs),
+    hrisPushes: Array.from(hrisPushes.values()),
   };
 }
 
@@ -2035,6 +2075,40 @@ export function normalizeReferralProgram(raw: unknown): ReferralProgram {
 
 export function getReferralProgram(orgId: string): ReferralProgram {
   return referralPrograms.get(orgId) || { ...DEFAULT_REFERRAL_PROGRAM };
+}
+
+/** «انتقال به حقوق و دستمزد» — one endpoint per workspace. */
+export function getHrisConfig(orgId: string): HrisConfigRow | null {
+  return hrisConfigs.get(orgId) || null;
+}
+
+export function saveHrisConfig(row: HrisConfigRow): HrisConfigRow {
+  hrisConfigs.set(row.orgId, row);
+  scheduleSave();
+  return row;
+}
+
+export function dropHrisConfig(orgId: string) {
+  if (hrisConfigs.delete(orgId)) scheduleSave();
+}
+
+/** Newest first, capped — this is a page log, not an audit trail. */
+export function listHrisPushes(orgId: string, limit = 20): HrisPushRow[] {
+  return Array.from(hrisPushes.values())
+    .filter((p) => p.orgId === orgId)
+    .sort((a, b) => b.atISO.localeCompare(a.atISO))
+    .slice(0, limit);
+}
+
+export function saveHrisPush(row: HrisPushRow): HrisPushRow {
+  hrisPushes.set(row.id, row);
+  const mine = Array.from(hrisPushes.values())
+    .filter((p) => p.orgId === row.orgId)
+    .sort((a, b) => b.atISO.localeCompare(a.atISO));
+  // Keep the log small: older entries beyond fifty are dropped.
+  mine.slice(50).forEach((p) => hrisPushes.delete(p.id));
+  scheduleSave();
+  return row;
 }
 
 export function saveReferralProgram(orgId: string, program: ReferralProgram): ReferralProgram {
@@ -3879,6 +3953,10 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       ? raw.costs.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && Number.isFinite(Number(c.amount)) && Number(c.amount) > 0)
       : [],
     costAssumptions: raw.costAssumptions && typeof raw.costAssumptions === 'object' && !Array.isArray(raw.costAssumptions) ? raw.costAssumptions : undefined,
+    hrisConfigs: raw.hrisConfigs && typeof raw.hrisConfigs === 'object' && !Array.isArray(raw.hrisConfigs) ? raw.hrisConfigs : undefined,
+    hrisPushes: Array.isArray(raw.hrisPushes)
+      ? raw.hrisPushes.filter((x: any) => x && isStr(x.id) && isStr(x.orgId) && isStr(x.atISO))
+      : undefined,
     aiStats: undefined,
   };
 }

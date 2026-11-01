@@ -42,6 +42,7 @@ import type {
 import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, PortalLang, PublicCareersPage, PublicJobDetail } from '../types/careers';
 import type { CandidateComment, InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
 import type { JobOffer, OfferApprovalConfig, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
+import type { HrisPushResult, HrisRoster } from '../types/hris';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
   AutomationOverview,
@@ -667,6 +668,15 @@ export const api = {
     cancel: (id: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/cancel`, {}),
     remove: (id: string) => del<void>(`/api/onboarding/${encodeURIComponent(id)}`),
     exportUrl: '/api/onboarding/export',
+  },
+  /** «انتقال به حقوق و دستمزد» — the payroll handoff. */
+  hris: {
+    roster: () => get<HrisRoster>('/api/hris'),
+    mapping: (mapping: Record<string, string>) => patch<{ mapping: Record<string, string>; roster: HrisRoster }>('/api/hris/mapping', { mapping }),
+    endpoint: (b: { url: string; secret?: string }) => put<{ roster: HrisRoster }>('/api/hris/endpoint', b),
+    disconnect: () => del<{ roster: HrisRoster }>('/api/hris/endpoint'),
+    push: () => post<{ push: HrisPushResult; roster: HrisRoster }>('/api/hris/push', {}, { timeoutMs: 60_000 }),
+    exportUrl: '/api/hris/export.csv',
   },
   summaries: {
     list: (q: { resumeId?: string; transcriptId?: string }) => get<{ items: MeetingSummary[] }>(`/api/summaries${qs(q)}`),

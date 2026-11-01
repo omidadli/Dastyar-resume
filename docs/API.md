@@ -203,6 +203,7 @@ curl -X POST https://hovida.example.ir/api/v1/candidates/res_…/decision \
 | `offer.accepted` | پذیرش پیشنهاد |
 | `offer.declined` | رد پیشنهاد |
 | `offer.revised` | نسخهٔ تازهٔ پیشنهاد پس از مذاکره |
+| `hris.push` | ارسال فهرست به سیستم حقوق (موفق یا ناموفق) |
 | `automation.run` | اجرای اتوماسیون جذب |
 | `automation.approved` | تأیید پیشنهاد اتوماسیون |
 | `comment.added` | یادداشت تیمی روی کارجو |
@@ -418,6 +419,21 @@ GET  /api/offers/public/<token>  → 410 { code: "OFFER_SUPERSEDED" }  (نسخه
 فقط پیشنهاد `sent` نسخه‌سازی می‌شود؛ بقیه `409 { code: "OFFER_NOT_REVISABLE" }` می‌گیرند.
 نسخهٔ جدید تأییدهای خودش را از نو می‌گیرد و صفر ایمیل دارد تا کسی «ارسال» را نزند.
 جزئیات: [`OFFER-VERSIONS.md`](OFFER-VERSIONS.md).
+
+---
+
+## ۵ز) انتقال به حقوق و دستمزد (داخل برنامه)
+
+```http
+GET   /api/hris                 → { items, fields, mapping, endpoint, lastPush, counts }
+PATCH /api/hris/mapping         body: { mapping: { fullName: "نام کامل", email: "" } }
+GET   /api/hris/export.csv      → text/csv با BOM (فایل اکسل)
+PUT   /api/hris/endpoint        body: { url, secret? }      (مدیر/مالک)
+POST  /api/hris/push            → { push: { ok, status, error, rows, … } }
+```
+
+ارسال یک `POST` امضاشده با `X-Hovida-Signature: t=…,v1=…` است؛ سلول خالی، رشتهٔ خالی می‌ماند
+و حقوقی که در پیشنهاد نیامده هرگز حدس زده نمی‌شود. جزئیات: [`PAYROLL-HRIS.md`](PAYROLL-HRIS.md).
 
 ---
 

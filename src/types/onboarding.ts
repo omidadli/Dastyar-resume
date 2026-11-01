@@ -29,6 +29,8 @@ export interface OnboardingTask {
 export interface OnboardingPlan {
   id: string;
   resumeId: string;
+  /** «کد پرسنلی» suggested by HOVIDA (`H-0001`) for the payroll handoff. */
+  employeeCode: string;
   jobId: string | null;
   jobTitle: string | null;
   departmentName: string | null;

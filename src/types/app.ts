@@ -169,6 +169,7 @@ export type ActivityType =
   | 'summary.created'
   | 'status.link'
   | 'status.sent'
+  | 'hris.push'
   | 'settings.changed';
 
 export interface ActivityItem {

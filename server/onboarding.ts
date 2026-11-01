@@ -12,6 +12,7 @@
  *     cannot mark a plan «کامل» while the laptop box is empty.
  */
 import * as db from './db';
+import { nextEmployeeCode } from './hris';
 import { isEmailConfigured, sendMail, friendlySmtpError } from './mailer';
 import { formatJalaliDate, parseJalaliDateString, toJalaliDateString, toPersianDigits } from '../src/utils/jalali';
 import { jalaliAndTehranTime, tehranIsoFromJalali, tehranJalaliOf } from './tehran-time';
@@ -140,6 +141,8 @@ export function createPlan(
     id: db.uid('onb'),
     orgId,
     resumeId: rec.id,
+    // The payroll handoff needs a stable, human code from day one.
+    employeeCode: nextEmployeeCode(orgId),
     jobId: rec.jobId || null,
     jobTitle: job?.roleTitle || null,
     departmentName: job?.departmentName || null,

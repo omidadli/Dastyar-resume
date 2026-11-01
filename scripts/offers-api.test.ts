@@ -329,6 +329,70 @@ async function main() {
     assert(free.status === 201 && free.json.offer.approvals.length === 0, 'with the chain off, a new offer goes straight to draft', `${free.status}/${free.json.offer?.approvals?.length}`);
     assert((await call('POST', `/api/offers/${free.json.offer.id}/send`, A, {})).status === 200, 'and it can be sent without any approval');
 
+    // ------------------------------------------------------- new version ---
+    // A candidate negotiates: the live offer closes and a fresh draft opens.
+    const csv4 = [
+      'First Name,Last Name,Headline,Location,Current Company,Profile URL,Open to work,Skills,Email',
+      'مریم,اکبری,"کارشناس شبکه",تهران,امگا,https://www.linkedin.com/in/maryam,Yes,"شبکه",maryam@example.ir',
+    ].join('\r\n');
+    const imported4 = await call('POST', '/api/sourcing/csv', A, { csv: csv4, departmentId: dept.id, jobId: job.id, openToWorkOnly: true });
+    const rec4 = (await call('POST', `/api/sourcing/searches/${imported4.json.search.id}/import`, A, { profileId: imported4.json.search.results[0].id, jobId: job.id })).json.record;
+    const v1 = await call('POST', '/api/offers', A, { resumeId: rec4.id, terms: { title: 'کارشناس شبکه', startDate: '۱۴۰۶/۰۴/۰۱', salaryAmount: 40000000 } });
+    assert(v1.status === 201 && v1.json.offer.version === 1, 'a fresh offer is version ۱', `${v1.status} ${v1.json.offer?.version}`);
+    assert(v1.json.offer.supersedesId === null && v1.json.offer.supersededById === null, 'the first version supersedes nothing');
+
+    const notYet = await call('POST', `/api/offers/${v1.json.offer.id}/revise`, A, {});
+    assert(notYet.status === 409 && notYet.json.code === 'OFFER_NOT_REVISABLE', 'a draft is edited, not versioned', `${notYet.status} ${notYet.json?.code}`);
+
+    const v1Send = await call('POST', `/api/offers/${v1.json.offer.id}/send`, A, {});
+    assert(v1Send.status === 200, 'version ۱ goes out with its own link');
+    const token1 = String(v1Send.json.offer.url).split('/offer/')[1];
+    const mailsBefore = smtp.messages.length;
+
+    const revised = await call('POST', `/api/offers/${v1.json.offer.id}/revise`, A, {});
+    assert(revised.status === 201 && revised.json.offer.version === 2, 'the revised offer is version ۲', `${revised.status} ${revised.json?.error || ''}`);
+    assert(revised.json.offer.status === 'draft' && revised.json.offer.supersedesId === v1.json.offer.id, 'the new version starts as a draft that supersedes the old one');
+    assert(revised.json.offer.terms.salaryAmount === 40000000, 'with no new conditions, the old ones are carried over');
+
+    const negotiated = await call('PATCH', `/api/offers/${revised.json.offer.id}`, A, {
+      terms: { ...revised.json.offer.terms, salaryAmount: 46000000, startDate: '۱۴۰۶/۰۴/۱۵' },
+    });
+    assert(negotiated.status === 200 && negotiated.json.offer.terms.salaryAmount === 46000000, 'the negotiated salary is edited on the new draft');
+    assert(negotiated.json.offer.version === 2, 'editing a draft does not create yet another version');
+    assert(revised.json.offer.sentAtISO === null && revised.json.offer.signatureName === null, 'a new version carries no old signature');
+    const token2b = String(negotiated.json.offer.url).split('/offer/')[1];
+    assert(token2b !== token1, 'the new version has its own link');
+    assert(smtp.messages.length === mailsBefore, 'writing a new version sends nothing by itself');
+
+    const oldLink = await call('GET', `/api/offers/public/${token1}`);
+    assert(oldLink.status === 410 && oldLink.json.code === 'OFFER_SUPERSEDED', 'the old link is closed for good', `${oldLink.status}`);
+    assert((await call('GET', `/api/offers/public/${token2b}`)).status === 404, 'the new draft is not open yet either');
+
+    const versions = (await call('GET', `/api/offers?resumeId=${rec4.id}`, A)).json.items as any[];
+    assert(versions.length === 2, 'both versions stay in the record', String(versions.length));
+    assert(versions.find((o) => o.id === v1.json.offer.id).status === 'superseded', 'the previous version is marked «نسخهٔ پیشین»');
+    assert(versions.find((o) => o.id === v1.json.offer.id).supersededById === revised.json.offer.id, 'the old version points at the one that replaced it');
+
+    const reopenOld = await call('POST', `/api/offers/${v1.json.offer.id}/revise`, A, {});
+    assert(reopenOld.status === 409 && reopenOld.json.code === 'OFFER_NOT_REVISABLE', 'a superseded version cannot be versioned again');
+
+    const v2Send = await call('POST', `/api/offers/${revised.json.offer.id}/send`, A, {});
+    assert(v2Send.status === 200 && v2Send.json.offer.version === 2, 'version ۲ reaches the candidate', `${v2Send.status} ${v2Send.json?.error || ''}`);
+    const page2 = await call('GET', `/api/offers/public/${token2b}`);
+    assert(page2.status === 200 && page2.json.offer.version === 2, 'the candidate sees which version this is');
+    assert(page2.json.offer.terms.salaryAmount === 46000000, 'the candidate sees the renegotiated terms');
+    assert(page2.json.offer.signatureName === null, 'no signature is carried over');
+
+    const signed = await call('POST', `/api/offers/public/${token2b}/accept`, null, { name: 'مریم اکبری' });
+    assert(signed.status === 200 && signed.json.offer.status === 'accepted', 'the candidate signs the new version');
+    assert((await call('POST', `/api/offers/${revised.json.offer.id}/revise`, A, {})).status === 409, 'an accepted offer cannot be re-versioned');
+
+    assert((await call('POST', `/api/offers/${revised.json.offer.id}/revise`, B, {})).status === 404, 'another workspace cannot revise it');
+    assert((await call('GET', `/api/offers/public/${token1}`)).status === 410, 'the closed link stays closed after the signature');
+
+    const feed2 = (await call('GET', '/api/activity', A)).json.items as any[];
+    assert(feed2.some((a) => a.type === 'offer.revised' && a.text.includes('مریم اکبری')), 'the new version is in the history');
+
     // ------------------------------------------------------------ snapshot --
     child.kill('SIGTERM');
     await new Promise((r) => child.once('exit', r));
@@ -337,6 +401,8 @@ async function main() {
     assert((snap.offers || []).some((o: any) => Array.isArray(o.approvals) && o.approvals.length === 2), 'the approval chain survives a restart');
     assert((snap.offers || []).every((o: any) => o.token), 'each stored offer keeps its link token (the e-mail must keep working after a restart)');
     assert((snap.offers || []).some((o: any) => o.signatureName === 'سارا محمدی'), 'the signature survives a restart');
+    assert((snap.offers || []).some((o: any) => o.version === 2 && o.supersedesId), 'the version history survives a restart');
+    assert((snap.offers || []).some((o: any) => o.status === 'superseded'), 'the closed version stays closed after a restart');
     assert(!JSON.stringify(snap).includes('smtp-secret-123'), 'the SMTP password is never written in clear');
   } finally {
     if (!child.killed) child.kill('SIGKILL');

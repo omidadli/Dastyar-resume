@@ -17,6 +17,7 @@ export default function OfferPage({ token }: { token: string }) {
   useTitle('پیشنهاد شغلی');
   const [offer, setOffer] = useState<PublicOffer | null>(null);
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading');
+  const [errorText, setErrorText] = useState('');
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'accept' | 'decline' | null>(null);
@@ -32,7 +33,10 @@ export default function OfferPage({ token }: { token: string }) {
         setName(r.offer.candidateName);
         setState('ready');
       })
-      .catch(() => setState('missing'));
+      .catch((err: any) => {
+        setErrorText(err?.message || '');
+        setState('missing');
+      });
   }, [token]);
 
   const accept = async () => {
@@ -88,7 +92,7 @@ export default function OfferPage({ token }: { token: string }) {
 
           {state === 'missing' && (
             <div className="bg-surface border border-line rounded-[16px] p-8 text-center">
-              <p className="font-bold text-ink mb-2">این پیشنهاد پیدا نشد.</p>
+              <p className="font-bold text-ink mb-2">{errorText || 'این پیشنهاد پیدا نشد.'}</p>
               <p className="text-[13px] text-ink-3 leading-relaxed">
                 نشانی را کامل از ایمیل باز کنید. اگر مشکل ادامه داشت، با واحد منابع انسانی سازمان تماس بگیرید.
               </p>
@@ -104,9 +108,14 @@ export default function OfferPage({ token }: { token: string }) {
                     <h1 className="text-[22px] sm:text-[26px] font-black text-ink mt-1">{offer.jobTitle}</h1>
                     <p className="text-[13px] text-ink-3 mt-1">برای {offer.candidateName}</p>
                   </div>
-                  <Chip tone={offer.status === 'accepted' ? 'brand' : offer.status === 'declined' ? 'danger' : 'outline'}>
-                    {OFFER_STATUS_LABEL[offer.status]}
-                  </Chip>
+                  <div className="flex items-center gap-2">
+                    {(offer.version || 1) > 1 && (
+                      <Chip tone="neutral">نسخهٔ {toPersianDigits(offer.version)}</Chip>
+                    )}
+                    <Chip tone={offer.status === 'accepted' ? 'brand' : offer.status === 'declined' ? 'danger' : 'outline'}>
+                      {OFFER_STATUS_LABEL[offer.status]}
+                    </Chip>
+                  </div>
                 </div>
 
                 {offer.message && (

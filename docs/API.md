@@ -202,6 +202,7 @@ curl -X POST https://hovida.example.ir/api/v1/candidates/res_…/decision \
 | `offer.sent` | ارسال پیشنهاد شغلی |
 | `offer.accepted` | پذیرش پیشنهاد |
 | `offer.declined` | رد پیشنهاد |
+| `offer.revised` | نسخهٔ تازهٔ پیشنهاد پس از مذاکره |
 | `automation.run` | اجرای اتوماسیون جذب |
 | `automation.approved` | تأیید پیشنهاد اتوماسیون |
 | `comment.added` | یادداشت تیمی روی کارجو |
@@ -403,6 +404,20 @@ POST  /api/offers/:id/approval   body: { decision: "approved" | "rejected", note
 تا وقتی یک مرحله «در انتظار» است، `POST /api/offers/:id/send` با
 `409 { code: "OFFER_APPROVAL_PENDING" }` و نام همان تأییدکننده برمی‌گردد. زنجیره هنگام
 ساخت پیشنهاد روی آن کپی می‌شود. جزئیات و قاعده‌ها در [`OFFER-APPROVAL.md`](OFFER-APPROVAL.md).
+
+---
+
+## ۵و) نسخه‌های پیشنهاد شغلی (مذاکره)
+
+```http
+POST /api/offers/:id/revise   body: { terms?, message? }   → 201 { offer }   (نسخهٔ بعدی، پیش‌نویس)
+GET  /api/offers?resumeId=…   → { items }                  (همهٔ نسخه‌ها، از جمله superseded)
+GET  /api/offers/public/<token>  → 410 { code: "OFFER_SUPERSEDED" }  (نسخهٔ بسته)
+```
+
+فقط پیشنهاد `sent` نسخه‌سازی می‌شود؛ بقیه `409 { code: "OFFER_NOT_REVISABLE" }` می‌گیرند.
+نسخهٔ جدید تأییدهای خودش را از نو می‌گیرد و صفر ایمیل دارد تا کسی «ارسال» را نزند.
+جزئیات: [`OFFER-VERSIONS.md`](OFFER-VERSIONS.md).
 
 ---
 

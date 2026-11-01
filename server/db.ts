@@ -2797,7 +2797,7 @@ export function openOfferFor(orgId: string, resumeId: string): OfferRow | null {
 }
 
 export function offerCounts(orgId: string): Record<OfferStatus, number> {
-  const counts: Record<OfferStatus, number> = { draft: 0, sent: 0, accepted: 0, declined: 0, cancelled: 0 };
+  const counts: Record<OfferStatus, number> = { draft: 0, sent: 0, accepted: 0, declined: 0, cancelled: 0, superseded: 0 };
   for (const o of offers.values()) if (o.orgId === orgId) counts[o.status]++;
   return counts;
 }

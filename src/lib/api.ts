@@ -432,6 +432,8 @@ export const api = {
     create: (b: { resumeId: string; terms: Partial<OfferTerms>; message?: string }) => post<{ offer: JobOffer }>('/api/offers', b),
     update: (id: string, b: { terms?: Partial<OfferTerms>; message?: string }) => patch<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}`, b),
     send: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    revise: (id: string, b: { terms?: Partial<OfferTerms>; message?: string } = {}) =>
+      post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/revise`, b),
     cancel: (id: string) => post<{ offer: JobOffer }>(`/api/offers/${encodeURIComponent(id)}/cancel`, {}),
     /** One step of «گردش تأیید پیشنهاد». */
     approve: (id: string, decision: 'approved' | 'rejected', note?: string) =>

@@ -78,7 +78,14 @@ function withoutToken(row: db.OfferRow): JobOffer {
 }
 
 function viewOf(req: express.Request, row: db.OfferRow): JobOffer {
-  return { ...withoutToken(row), url: publicUrl(req, row.token) };
+  // Offers written before versioning existed are version 1, not «undefined».
+  return {
+    ...withoutToken(row),
+    version: row.version || 1,
+    supersedesId: row.supersedesId || null,
+    supersededById: row.supersededById || null,
+    url: publicUrl(req, row.token),
+  };
 }
 
 /** null / '' / an omitted field all mean «no number»; only a real figure becomes one. */
@@ -150,9 +157,18 @@ export function offerPublicRoutes() {
       if (row.status === 'draft' || (row.status === 'cancelled' && !row.sentAtISO)) {
         return res.status(404).json({ error: 'این پیشنهاد هنوز برای شما فرستاده نشده است.' });
       }
+      // An older version of a renegotiated offer is dead on purpose: one live
+      // offer, one link. The candidate is told to expect a new one.
+      if (row.status === 'superseded') {
+        return res.status(410).json({
+          error: 'این نسخه از پیشنهاد جایگزین شده است. نسخهٔ تازه برای شما فرستاده می‌شود؛ اگر نرسید، از منابع انسانی بخواهید دوباره بفرستد.',
+          code: 'OFFER_SUPERSEDED',
+        });
+      }
       const org = db.getOrg(row.orgId);
       const offer: PublicOffer = {
         org: { name: org?.name || '', about: org?.careerAbout || '' },
+        version: row.version || 1,
         candidateName: row.candidateName,
         jobTitle: row.terms.title || row.jobTitle,
         terms: row.terms,
@@ -257,6 +273,7 @@ function publicOf(row: db.OfferRow): PublicOffer {
   const org = db.getOrg(row.orgId);
   return {
     org: { name: org?.name || '', about: org?.careerAbout || '' },
+    version: row.version || 1,
     candidateName: row.candidateName,
     jobTitle: row.terms.title || row.jobTitle,
     terms: row.terms,
@@ -335,6 +352,9 @@ export function offerRoutes() {
         id: db.uid('off'),
         orgId: org.id,
         token: crypto.randomBytes(18).toString('base64url'),
+        version: 1,
+        supersedesId: null,
+        supersededById: null,
         jobId: job.id,
         resumeId: rec.id,
         candidateName: rec.candidateName || rec.fileName,
@@ -519,6 +539,68 @@ export function offerRoutes() {
         { jobId: row.jobId, resumeId: row.resumeId }
       );
       res.json({ offer: viewOf(req, next), pending: pendingApproval(next)?.approverName || null });
+    })
+  );
+
+  /**
+   * «نسخهٔ تازه» — after a negotiation call. The live offer is closed as
+   * `superseded` and a fresh draft (version + 1) is written for the same
+   * candidate. The old link stops answering, so two live links can never both
+   * be accepted. The new version must earn its own approvals again — HR never
+   * bypasses the chain by «just editing» a sent offer.
+   */
+  r.post(
+    '/offers/:id/revise',
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const row = db.getOffer(org.id, str(req.params.id, 80));
+      if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
+      if (blockedByJobId(req, res, row.jobId)) return;
+      if (row.status !== 'sent') {
+        return res.status(409).json({
+          error: `فقط پیشنهاد «${OFFER_STATUS_LABEL.sent}» را می‌شود نسخهٔ تازه کرد؛ این یکی «${OFFER_STATUS_LABEL[row.status]}» است.`,
+          code: 'OFFER_NOT_REVISABLE',
+        });
+      }
+      const terms = readTerms(req.body?.terms, row.terms);
+      if (!terms.title) return res.status(400).json({ error: 'عنوان شغلی پیشنهاد را بنویسید.' });
+      if (!terms.startDate) return res.status(400).json({ error: 'تاریخ شروع همکاری را وارد کنید.' });
+
+      const stamp = new Date();
+      const stampISO = stamp.toISOString();
+      const version = (row.version || 1) + 1;
+      const next: db.OfferRow = {
+        ...row,
+        id: db.uid('off'),
+        token: crypto.randomBytes(18).toString('base64url'),
+        status: 'draft',
+        version,
+        supersedesId: row.id,
+        supersededById: null,
+        terms,
+        message: typeof req.body?.message === 'string' && req.body.message.trim() ? req.body.message.slice(0, 4000) : row.message,
+        createdByName: user.name,
+        createdAtISO: stampISO,
+        createdAtJalali: formatJalaliDate(tehranJalaliOf(stamp), true),
+        sentAtISO: null,
+        sentAtJalali: null,
+        respondedAtISO: null,
+        respondedAtJalali: null,
+        signatureName: null,
+        signatureNote: null,
+        approvals: buildApprovalChain(org, stampISO),
+        updatedAtISO: stampISO,
+      };
+      db.saveOffer({ ...row, status: 'superseded' as OfferStatus, supersededById: next.id, updatedAtISO: stampISO });
+      db.saveOffer(next);
+      db.logActivity(
+        org.id,
+        user,
+        'offer.revised',
+        `نسخهٔ ${toPersianDigits(version)} پیشنهاد «${terms.title || row.jobTitle}» برای «${row.candidateName}» نوشته شد؛ نسخهٔ پیشین بسته شد`,
+        { jobId: row.jobId, resumeId: row.resumeId }
+      );
+      res.status(201).json({ offer: viewOf(req, next) });
     })
   );
 

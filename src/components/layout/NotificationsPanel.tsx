@@ -69,6 +69,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'offer.accepted': FileSignature,
   'offer.declined': FileSignature,
   'offer.cancelled': FileSignature,
+  'offer.revised': FileSignature,
   'comment.added': MessageSquareText,
   'settings.changed': SlidersHorizontal,
   'deep.review': FileSearch2,

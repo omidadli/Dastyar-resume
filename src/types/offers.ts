@@ -8,7 +8,7 @@
  * or accepted.
  */
 
-export type OfferStatus = 'draft' | 'sent' | 'accepted' | 'declined' | 'cancelled';
+export type OfferStatus = 'draft' | 'sent' | 'accepted' | 'declined' | 'cancelled' | 'superseded';
 
 export const OFFER_STATUS_LABEL: Record<OfferStatus, string> = {
   draft: 'پیش‌نویس',
@@ -16,6 +16,7 @@ export const OFFER_STATUS_LABEL: Record<OfferStatus, string> = {
   accepted: 'پذیرفته‌شده',
   declined: 'رد‌شده',
   cancelled: 'لغو‌شده',
+  superseded: 'نسخهٔ پیشین',
 };
 
 /**
@@ -92,6 +93,12 @@ export interface JobOffer {
   terms: OfferTerms;
   /** The covering note that goes with the link. */
   message: string;
+  /** ۱ برای پیشنهاد اول؛ با هر مذاکره یکی بالا می‌رود. */
+  version: number;
+  /** پیشنهادی که این نسخه جای آن را گرفته است. */
+  supersedesId: string | null;
+  /** نسخهٔ تازه‌تری که این یکی را کنار گذاشته است. */
+  supersededById: string | null;
   createdByName: string;
   createdAtISO: string;
   createdAtJalali: string;
@@ -110,6 +117,8 @@ export interface JobOffer {
 
 export interface PublicOffer {
   org: { name: string; about: string };
+  /** «نسخهٔ ۲» — کارجو می‌فهمد این جایگزین نسخهٔ قبلی است. */
+  version: number;
   candidateName: string;
   jobTitle: string;
   terms: OfferTerms;

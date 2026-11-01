@@ -152,6 +152,7 @@ export type ActivityType =
   | 'offer.accepted'
   | 'offer.declined'
   | 'offer.cancelled'
+  | 'offer.revised'
   | 'comment.added'
   | 'retention.applied'
   | 'survey.sent'

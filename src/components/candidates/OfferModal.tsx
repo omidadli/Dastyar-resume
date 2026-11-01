@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CheckCircle2, ExternalLink, FileSignature, Send, Trash2 } from 'lucide-react';
+import { CheckCircle2, ExternalLink, FileSignature, RefreshCw, Send, Trash2 } from 'lucide-react';
 import type { JobOffer, OfferTerms, SalaryPeriod } from '../../types/offers';
 import { OFFER_STATUS_LABEL, SALARY_PERIOD_LABEL } from '../../types/offers';
 import type { ResumeListItem } from '../../types/screening';
@@ -29,7 +29,7 @@ export function OfferModal({
 }) {
   const [offer, setOffer] = useState<JobOffer | null>(null);
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'save' | 'send' | 'cancel' | 'approve' | 'reject' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'send' | 'cancel' | 'approve' | 'reject' | 'revise' | null>(null);
   const [terms, setTerms] = useState<OfferTerms>({
     title: jobTitle || '',
     salaryAmount: null,
@@ -128,6 +128,27 @@ export function OfferModal({
     }
   };
 
+  /**
+   * «نسخهٔ تازه» — after the candidate negotiates. The sent offer closes and a
+   * draft of the next version opens with the same conditions, ready to edit,
+   * re-approve and re-send.
+   */
+  const revise = async () => {
+    if (!offer) return;
+    setBusy('revise');
+    try {
+      const r = await api.offers.revise(offer.id, { terms, message });
+      applySaved(r.offer);
+      emitChange('resumes');
+      emitChange('activity');
+      toast(`نسخهٔ ${toPersianDigits(r.offer.version)} ساخته شد؛ نشانی پیشین بسته شد. شرط‌ها را ویرایش و دوباره بفرستید.`);
+    } catch (err: any) {
+      toast(err?.message || 'ساخت نسخهٔ تازه ممکن نشد.', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const decide = async (decision: 'approved' | 'rejected') => {
     if (!offer) return;
     setBusy(decision === 'approved' ? 'approve' : 'reject');
@@ -206,6 +227,7 @@ export function OfferModal({
               <Chip tone={offer.status === 'accepted' ? 'brand' : offer.status === 'declined' ? 'danger' : offer.status === 'sent' ? 'outline' : 'neutral'}>
                 {OFFER_STATUS_LABEL[offer.status]}
               </Chip>
+              {(offer.version || 1) > 1 && <Chip tone="neutral">نسخهٔ {toPersianDigits(offer.version)}</Chip>}
               {offer.sentAtJalali && <span className="text-[12px] text-ink-3">ارسال: {offer.sentAtJalali}</span>}
               {offer.respondedAtJalali && <span className="text-[12px] text-ink-3">پاسخ: {offer.respondedAtJalali}</span>}
               {offer.url && (offer.status === 'sent' || offer.status === 'accepted' || offer.status === 'declined') && (
@@ -218,12 +240,29 @@ export function OfferModal({
                   </Button>
                 </>
               )}
+              {offer.status === 'sent' && (
+                <Button size="sm" variant="secondary" icon={RefreshCw} onClick={() => void revise()} loading={busy === 'revise'}>
+                  نسخهٔ تازه (مذاکره)
+                </Button>
+              )}
               {(offer.status === 'draft' || offer.status === 'sent') && (
                 <Button size="sm" variant="ghost" icon={Trash2} onClick={() => void cancel()} loading={busy === 'cancel'}>
                   لغو پیشنهاد
                 </Button>
               )}
             </div>
+          )}
+
+          {offer?.supersedesId && (
+            <Callout tone="info">
+              این نسخه جایگزین نسخهٔ پیشین است؛ نشانی قبلی که برای کارجو فرستاده شده دیگر باز نمی‌شود. پس از ارسال،
+              فقط نشانی همین نسخه معتبر است.
+            </Callout>
+          )}
+          {offer?.status === 'superseded' && (
+            <Callout tone="warning">
+              این نسخه بسته شده است چون نسخهٔ تازه‌تری برای همین کارجو نوشته شده. همان نسخهٔ تازه را بفرستید.
+            </Callout>
           )}
 
           {offer && approvals.length > 0 && (

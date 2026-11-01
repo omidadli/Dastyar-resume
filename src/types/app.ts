@@ -170,6 +170,8 @@ export type ActivityType =
   | 'status.link'
   | 'status.sent'
   | 'hris.push'
+  | 'room.opened'
+  | 'room.closed'
   | 'settings.changed';
 
 export interface ActivityItem {

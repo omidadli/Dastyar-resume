@@ -53,7 +53,8 @@
     "test:team": "npm run build && tsx scripts/team-cost-api.test.ts",
     "test:sso": "npm run build && tsx scripts/sso-api.test.ts",
     "test:assessment": "npm run build && tsx scripts/assessment-api.test.ts",
-    "test:hris": "npm run build && tsx scripts/hris-api.test.ts"
+    "test:hris": "npm run build && tsx scripts/hris-api.test.ts",
+    "test:room": "npm run build && tsx scripts/interview-room.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

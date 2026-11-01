@@ -64,6 +64,7 @@ const VideoInterviews = lazyPage(() => import('./pages/VideoInterviews'));
 const Onboarding = lazyPage(() => import('./pages/Onboarding'));
 const Payroll = lazyPage(() => import('./pages/Payroll'));
 const ApplicationStatus = lazyPage(() => import('./pages/ApplicationStatus'));
+const InterviewRoom = lazyPage(() => import('./pages/InterviewRoom'));
 const VideoRecord = lazyPage(() => import('./pages/VideoRecord'));
 const Sourcing = lazyPage(() => import('./pages/Sourcing'));
 const Automation = lazyPage(() => import('./pages/Automation'));
@@ -195,6 +196,15 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <ApplicationStatus token={m.token} />
+      </Suspense>
+    );
+  }
+  // «اتاق مصاحبهٔ زنده» — the same address for both sides; the session decides.
+  m = matchPath('/room/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بازکردن اتاق…" />}>
+        <InterviewRoom token={m.token} />
       </Suspense>
     );
   }

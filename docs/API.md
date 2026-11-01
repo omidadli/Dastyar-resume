@@ -204,6 +204,7 @@ curl -X POST https://hovida.example.ir/api/v1/candidates/res_…/decision \
 | `offer.declined` | رد پیشنهاد |
 | `offer.revised` | نسخهٔ تازهٔ پیشنهاد پس از مذاکره |
 | `hris.push` | ارسال فهرست به سیستم حقوق (موفق یا ناموفق) |
+| `room.opened` / `room.closed` | باز/بسته شدن اتاق مصاحبهٔ زنده |
 | `automation.run` | اجرای اتوماسیون جذب |
 | `automation.approved` | تأیید پیشنهاد اتوماسیون |
 | `comment.added` | یادداشت تیمی روی کارجو |
@@ -419,6 +420,22 @@ GET  /api/offers/public/<token>  → 410 { code: "OFFER_SUPERSEDED" }  (نسخه
 فقط پیشنهاد `sent` نسخه‌سازی می‌شود؛ بقیه `409 { code: "OFFER_NOT_REVISABLE" }` می‌گیرند.
 نسخهٔ جدید تأییدهای خودش را از نو می‌گیرد و صفر ایمیل دارد تا کسی «ارسال» را نزند.
 جزئیات: [`OFFER-VERSIONS.md`](OFFER-VERSIONS.md).
+
+---
+
+## ۵ح) اتاق مصاحبهٔ زنده (سیگنالینگ WebRTC)
+
+```http
+POST /api/interviews/:id/room          → { room, reused }      (تکرار → 200، همان لینک)
+GET  /api/rooms/:id/signals?since=N    → { seq, items, presence, status, closedReason }
+POST /api/rooms/:id/signal             body: { kind, payload }  (from = host)
+GET  /api/rooms/public/:token          → { room, state }        (بدون نشست)
+POST /api/rooms/public/:token/signal   body: { kind, payload }  (from = candidate)
+```
+
+فقط `offer`/`answer`/`ice`/`bye` پذیرفته می‌شود و نقش را سرور تعیین می‌کند: توکن عمومی
+هرگز نمی‌تواند پیام میزبان بفرستد. تصویر و صدا از سرور عبور نمی‌کند و هیچ پیامی روی
+دیسک نوشته نمی‌شود. جزئیات و محدودیت شبکه: [`INTERVIEW-ROOM.md`](INTERVIEW-ROOM.md).
 
 ---
 

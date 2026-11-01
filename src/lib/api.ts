@@ -43,6 +43,7 @@ import type { CareerApplicationInput, CareerApplicationResult, CareerSettings, P
 import type { CandidateComment, InterviewFeedback, PipelineBoard, PipelineStage, ScorecardSummary } from '../types/pipeline';
 import type { JobOffer, OfferApprovalConfig, OfferDecisionInput, OfferStatus, OfferTerms, PublicOffer } from '../types/offers';
 import type { HrisPushResult, HrisRoster } from '../types/hris';
+import type { InterviewRoom, PublicRoom, RoomPoll, SignalKind } from '../types/room';
 import type { PublicSchedulingLink, SchedulingLink } from '../types/scheduling';
 import type {
   AutomationOverview,
@@ -668,6 +669,23 @@ export const api = {
     cancel: (id: string) => post<{ plan: OnboardingPlan }>(`/api/onboarding/${encodeURIComponent(id)}/cancel`, {}),
     remove: (id: string) => del<void>(`/api/onboarding/${encodeURIComponent(id)}`),
     exportUrl: '/api/onboarding/export',
+  },
+  /** «اتاق مصاحبهٔ زنده» — signalling only; media never touches the server. */
+  rooms: {
+    create: (interviewId: string) =>
+      post<{ room: InterviewRoom; reused: boolean }>(`/api/interviews/${encodeURIComponent(interviewId)}/room`, {}),
+    list: (q: { interviewId?: string; jobId?: string; resumeId?: string } = {}) => get<{ items: InterviewRoom[] }>(`/api/rooms${qs(q)}`),
+    byToken: (token: string) => get<{ room: InterviewRoom | null }>(`/api/rooms/by-token/${encodeURIComponent(token)}`),
+    close: (id: string) => post<{ room: InterviewRoom }>(`/api/rooms/${encodeURIComponent(id)}/close`, {}),
+    hostSignals: (id: string, since: number) => get<RoomPoll>(`/api/rooms/${encodeURIComponent(id)}/signals?since=${since}`),
+    hostSignal: (id: string, kind: SignalKind, payload: string) =>
+      post<{ signal: unknown }>(`/api/rooms/${encodeURIComponent(id)}/signal`, { kind, payload }),
+    publicRoom: (token: string) => get<{ room: PublicRoom; state: 'open' | 'closed' }>(`/api/rooms/public/${encodeURIComponent(token)}`, { anonymous: true }),
+    candidateSignals: (token: string, since: number) =>
+      get<RoomPoll>(`/api/rooms/public/${encodeURIComponent(token)}/signals?since=${since}`, { anonymous: true }),
+    candidateSignal: (token: string, kind: SignalKind, payload: string) =>
+      post<{ signal: unknown }>(`/api/rooms/public/${encodeURIComponent(token)}/signal`, { kind, payload }, { anonymous: true }),
+    leave: (token: string) => post<{ ok: boolean }>(`/api/rooms/public/${encodeURIComponent(token)}/leave`, {}, { anonymous: true }),
   },
   /** «انتقال به حقوق و دستمزد» — the payroll handoff. */
   hris: {

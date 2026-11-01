@@ -53,6 +53,7 @@ import type {
 import { cloneDefaultDepartments } from '../src/shared/departments';
 import { tehranJalaliOf, tehranNow, tehranWallDate } from './tehran-time';
 import type { InterviewRecord, SentEmail, SentSms, SourcingSearch } from '../src/types/integrations';
+import type { InterviewRoom } from '../src/types/room';
 import type { AutomationProposal, AutomationSettings } from '../src/types/automation';
 import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
@@ -197,6 +198,8 @@ export interface StoreSnapshot {
   costAssumptions?: Record<string, CostAssumption>;
   /** «معرفی همکار» — program settings and every referral the portal produced. */
   referralPrograms?: Record<string, ReferralProgram>;
+  /** «اتاق مصاحبهٔ زنده» — one P2P room per scheduled interview (no media). */
+  rooms?: InterviewRoomRow[];
   /** «انتقال به حقوق و دستمزد» — the endpoint and column mapping per workspace. */
   hrisConfigs?: Record<string, HrisConfigRow>;
   /** The last few payroll handoffs, for the page. */
@@ -397,10 +400,17 @@ export type ApiKeyRow = ApiKeyPublic & { orgId: string; hash: string; createdByI
 export type WebhookEndpointRow = WebhookEndpointPublic & { orgId: string; urlEnc: string; secretEnc: string };
 export type WebhookDeliveryRow = WebhookDeliveryPublic & { orgId: string };
 export type InterviewRecordRow = InterviewRecord & { orgId: string };
+
+/**
+ * A live interview room. Only the browser's addressing messages travel through
+ * the server, and they are kept in memory (never in the snapshot).
+ */
+export type InterviewRoomRow = Omit<InterviewRoom, 'url' | 'presence'> & { orgId: string; token: string };
 export type SentEmailRow = SentEmail & { orgId: string };
 
 const sourcingSearches = new Map<string, SourcingSearchRecord>();
 const interviews = new Map<string, InterviewRecordRow>();
+const interviewRooms = new Map<string, InterviewRoomRow>();
 const sentEmails = new Map<string, SentEmailRow>();
 const orgSecrets = new Map<string, OrgSecrets>();
 const automationSettings = new Map<string, AutomationSettings>();
@@ -464,6 +474,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   refreshDuplicates(resumes.values());
   snap.sourcing?.forEach((x) => sourcingSearches.set(x.id, x));
   snap.interviews?.forEach((x) => interviews.set(x.id, x));
+  snap.rooms?.forEach((x) => interviewRooms.set(x.id, x));
   snap.emails?.forEach((x) => sentEmails.set(x.id, x));
   for (const [k, v] of Object.entries(snap.orgSecrets || {})) orgSecrets.set(k, v);
   for (const [k, v] of Object.entries(snap.automation || {})) automationSettings.set(k, normalizeAutomationSettings(v));
@@ -510,6 +521,7 @@ function clearMemory() {
   resumes.clear();
   sourcingSearches.clear();
   interviews.clear();
+  interviewRooms.clear();
   sentEmails.clear();
   orgSecrets.clear();
   automationSettings.clear();
@@ -644,6 +656,7 @@ function snapshot(): StoreSnapshot {
     aiStats: aiStatsBlob ?? undefined,
     sourcing: Array.from(sourcingSearches.values()),
     interviews: Array.from(interviews.values()),
+    rooms: Array.from(interviewRooms.values()),
     emails: Array.from(sentEmails.values()),
     orgSecrets: Object.fromEntries(orgSecrets),
     automation: Object.fromEntries(automationSettings),
@@ -1147,6 +1160,8 @@ export function deleteOrg(id: string) {
   activity = activity.filter((a) => a.orgId !== id);
   for (const [k, v] of sourcingSearches) if (v.orgId === id) sourcingSearches.delete(k);
   for (const [k, v] of interviews) if (v.orgId === id) interviews.delete(k);
+  for (const [k, v] of interviewRooms) if (v.orgId === id) interviewRooms.delete(k);
+  for (const [k, v] of interviewRooms) if (v.orgId === id) interviewRooms.delete(k);
   for (const [k, v] of sentEmails) if (v.orgId === id) sentEmails.delete(k);
   for (const [k, v] of interviewFeedback) if (v.orgId === id) interviewFeedback.delete(k);
   for (const [k, v] of offers) if (v.orgId === id) offers.delete(k);
@@ -2077,6 +2092,37 @@ export function getReferralProgram(orgId: string): ReferralProgram {
   return referralPrograms.get(orgId) || { ...DEFAULT_REFERRAL_PROGRAM };
 }
 
+// ------------------------------------------------------- interview rooms ----
+
+export function getRoom(orgId: string, id: string): InterviewRoomRow | null {
+  const row = interviewRooms.get(id);
+  return row && row.orgId === orgId ? row : null;
+}
+
+export function findRoomByToken(token: string): InterviewRoomRow | null {
+  for (const row of interviewRooms.values()) if (row.token === token) return row;
+  return null;
+}
+
+export function roomForInterview(orgId: string, interviewId: string): InterviewRoomRow | null {
+  return (
+    Array.from(interviewRooms.values()).find((r) => r.orgId === orgId && r.interviewId === interviewId && r.status === 'open') || null
+  );
+}
+
+export function listRooms(orgId: string, filter: { interviewId?: string; jobId?: string; resumeId?: string } = {}): InterviewRoomRow[] {
+  return Array.from(interviewRooms.values())
+    .filter((r) => r.orgId === orgId)
+    .filter((r) => (!filter.interviewId || r.interviewId === filter.interviewId) && (!filter.jobId || r.jobId === filter.jobId) && (!filter.resumeId || r.resumeId === filter.resumeId))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function saveRoom(row: InterviewRoomRow): InterviewRoomRow {
+  interviewRooms.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
 /** «انتقال به حقوق و دستمزد» — one endpoint per workspace. */
 export function getHrisConfig(orgId: string): HrisConfigRow | null {
   return hrisConfigs.get(orgId) || null;
@@ -2677,6 +2723,7 @@ export interface ErasedCounts {
   onboarding: number;
   summaries: number;
   statusLinks: number;
+  rooms: number;
 }
 
 /**
@@ -2687,9 +2734,10 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0, summaries: 0, statusLinks: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0, summaries: 0, statusLinks: 0, rooms: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
+  for (const [k, v] of interviewRooms) if (v.orgId === orgId && v.resumeId === resumeId) { interviewRooms.delete(k); counts.rooms++; }
   for (const [k, v] of offers) if (v.orgId === orgId && v.resumeId === resumeId) { offers.delete(k); counts.offers++; }
   for (const [k, v] of sentEmails) if (v.orgId === orgId && v.resumeId === resumeId) { sentEmails.delete(k); counts.messages++; }
   for (const [k, v] of smsLog) if (v.orgId === orgId && v.resumeId === resumeId) { smsLog.delete(k); counts.messages++; }
@@ -2936,6 +2984,7 @@ export function patchOrgSecrets(orgId: string, patch: Partial<OrgSecrets>): OrgS
 function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   if (!job.orgId) return;
   for (const [k, v] of interviews) if (v.orgId === job.orgId && v.jobId === job.id) interviews.delete(k);
+  for (const [k, v] of interviewRooms) if (v.orgId === job.orgId && v.jobId === job.id) interviewRooms.delete(k);
   for (const [k, v] of offers) if (v.orgId === job.orgId && v.jobId === job.id) offers.delete(k);
   for (const [k, v] of schedulingLinks) if (v.orgId === job.orgId && v.jobId === job.id) schedulingLinks.delete(k);
   for (const [k, v] of comments) if (v.orgId === job.orgId && v.jobId === job.id) comments.delete(k);
@@ -3954,7 +4003,10 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       : [],
     costAssumptions: raw.costAssumptions && typeof raw.costAssumptions === 'object' && !Array.isArray(raw.costAssumptions) ? raw.costAssumptions : undefined,
     hrisConfigs: raw.hrisConfigs && typeof raw.hrisConfigs === 'object' && !Array.isArray(raw.hrisConfigs) ? raw.hrisConfigs : undefined,
-    hrisPushes: Array.isArray(raw.hrisPushes)
+    rooms: Array.isArray(raw.rooms)
+      ? raw.rooms.filter((x: any) => x && isStr(x.id) && isStr(x.orgId) && isStr(x.token) && isStr(x.jobId))
+      : undefined,
+  hrisPushes: Array.isArray(raw.hrisPushes)
       ? raw.hrisPushes.filter((x: any) => x && isStr(x.id) && isStr(x.orgId) && isStr(x.atISO))
       : undefined,
     aiStats: undefined,

@@ -36,6 +36,7 @@ import { developerRoutes } from './server/routes/developer';
 import { privacyRoutes } from './server/routes/privacy';
 import { referralRoutes } from './server/routes/referrals';
 import { hrisRoutes } from './server/routes/hris';
+import { roomRoutes, roomsPublicRoutes } from './server/routes/rooms';
 import { scimRoutes } from './server/routes/scim';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
@@ -130,6 +131,7 @@ async function startServer() {
   app.use('/api', videoPublicRoutes()); // public «مصاحبهٔ ویدئویی» recording page
   app.use('/api', transcriptPublicRoutes()); // signed playback of a transcript's recording
   app.use('/api', statusPublicRoutes()); // «پیگیری درخواست» — the candidate's own status page
+  app.use('/api', roomsPublicRoutes()); // «اتاق مصاحبهٔ زنده» — the candidate's side of the call
   app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
   app.use('/scim/v2', scimRoutes()); // «SCIM 2.0» — authenticated by the workspace's SCIM token
 
@@ -158,6 +160,7 @@ async function startServer() {
   app.use('/api', developerRoutes()); // API keys + outbound webhooks (settings)
   app.use('/api', referralRoutes()); // «معرفی همکار»: program, links, reward approval
   app.use('/api', hrisRoutes()); // «انتقال به حقوق و دستمزد»: roster, CSV, signed push
+  app.use('/api', roomRoutes()); // «اتاق مصاحبهٔ زنده»: the host's side of the call
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 
   // ---------------- Frontend ----------------

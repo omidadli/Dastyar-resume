@@ -300,6 +300,22 @@ export function InterviewModal({
 
 /** Compact list of an opening's interviews (used on the job page). */
 export function InterviewList({ items, onCancel }: { items: InterviewRecord[]; onCancel: (id: string) => void }) {
+  /**
+   * «اتاق زنده» — one click gets the room, or the link that already exists.
+   * The link is copied, because sending it to the candidate stays a human act.
+   */
+  const openRoom = async (id: string) => {
+    try {
+      const r = await api.rooms.create(id);
+      const url = `${window.location.origin}${r.room.url}`;
+      await navigator.clipboard.writeText(url).catch(() => undefined);
+      toast(r.reused ? 'لینک اتاق کپی شد — همان اتاقی است که قبلاً ساخته شده.' : 'اتاق ساخته و لینکش کپی شد؛ خودتان برای کارجو بفرستید.', 'success');
+      emitChange('activity');
+    } catch (err: any) {
+      toast(err?.message || 'ساختن اتاق ممکن نشد.', 'error');
+    }
+  };
+
   if (!items.length) return null;
   return (
     <div className="flex flex-col divide-y divide-line-2">
@@ -320,6 +336,11 @@ export function InterviewList({ items, onCancel }: { items: InterviewRecord[]; o
             <ButtonLink to={it.meetLink} target="_blank" rel="noreferrer" variant="secondary" size="sm">
               Meet
             </ButtonLink>
+          )}
+          {it.status !== 'cancelled' && (
+            <Button variant="secondary" size="sm" icon={Video} onClick={() => void openRoom(it.id)}>
+              اتاق زنده
+            </Button>
           )}
           {it.status !== 'cancelled' && (
             <Button variant="secondary" size="sm" onClick={() => onCancel(it.id)}>

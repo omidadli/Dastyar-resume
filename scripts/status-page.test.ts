@@ -13,6 +13,7 @@
  */
 import { spawn } from 'child_process';
 import fs from 'fs';
+import net from 'net';
 import os from 'os';
 import path from 'path';
 
@@ -47,6 +48,49 @@ function assert(cond: boolean, label: string, extra = '') {
   if (!cond) failures++;
 }
 
+/** A throwaway SMTP server: the only way to prove a letter really left. */
+function mockSmtp(): Promise<{ server: net.Server; messages: string[] }> {
+  const messages: string[] = [];
+  const server = net.createServer((socket) => {
+    let buffer = '';
+    let inData = false;
+    let data = '';
+    socket.write('220 mock.local ESMTP\r\n');
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString('utf-8');
+      for (;;) {
+        const idx = buffer.indexOf('\r\n');
+        if (idx < 0) break;
+        const line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        if (inData) {
+          if (line === '.') {
+            inData = false;
+            messages.push(data);
+            data = '';
+            socket.write('250 2.0.0 queued\r\n');
+          } else data += line + '\r\n';
+          continue;
+        }
+        const cmd = line.slice(0, 4).toUpperCase();
+        if (cmd === 'EHLO') socket.write('250-mock.local\r\n250-AUTH PLAIN LOGIN\r\n250 OK\r\n');
+        else if (cmd === 'HELO') socket.write('250 mock.local\r\n');
+        else if (cmd === 'AUTH') socket.write('235 2.7.0 accepted\r\n');
+        else if (cmd === 'MAIL' || cmd === 'RCPT' || cmd === 'RSET' || cmd === 'NOOP') socket.write('250 2.1.0 OK\r\n');
+        else if (cmd === 'DATA') {
+          inData = true;
+          socket.write('354 end with <CRLF>.<CRLF>\r\n');
+        } else if (cmd === 'QUIT') {
+          socket.write('221 2.0.0 bye\r\n');
+          socket.end();
+        } else socket.write('250 OK\r\n');
+      }
+    });
+    socket.on('error', () => undefined);
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, messages })));
+}
+
 async function main() {
   const dist = path.join(process.cwd(), 'dist', 'server.cjs');
   if (!fs.existsSync(dist)) throw new Error('Run `npm run build` first.');
@@ -70,6 +114,8 @@ async function main() {
   child.stderr.on('data', (d) => (log += d));
   const started = Date.now();
   while (!/آماده است/.test(log) && Date.now() - started < 25_000) await new Promise((r) => setTimeout(r, 150));
+
+  const smtp = await mockSmtp();
 
   const call = async (method: string, url: string, token?: string | null, body?: unknown) => {
     const res = await fetch(BASE + url, {
@@ -202,11 +248,75 @@ async function main() {
     const fresh = await call('POST', `/api/resumes/${rec.id}/status-link`, A, {});
     const freshToken = String(fresh.json.link.url).split('/status/')[1];
 
+    // ------------------------------------------------------------ e-mail ---
+    // Nothing is e-mailed by creating a link; the send button has its own rules.
+    assert(fresh.json.link.sentAtISO === null && fresh.json.link.sentTo === null, 'a new link records no send', JSON.stringify(fresh.json.link.sentTo));
+    assert(smtp.messages.length === 0, 'creating links sent nothing');
+
+    const noMailbox = await call('POST', `/api/status-links/${fresh.json.link.id}/send`, A, {});
+    assert(noMailbox.status === 409 && noMailbox.json.code === 'EMAIL_NOT_CONFIGURED', 'sending without a mailbox is refused honestly', `${noMailbox.status} ${noMailbox.json?.code}`);
+    assert(/تنظیمات|اتصال/.test(noMailbox.json.error || ''), 'and the message says where to connect it', noMailbox.json.error);
+
+    const revokedSend = await call('POST', `/api/status-links/${active.id}/send`, A, {});
+    assert(revokedSend.status === 409 && revokedSend.json.code === 'LINK_REVOKED', 'a revoked link is not e-mailed', `${revokedSend.status}`);
+    assert(smtp.messages.length === 0, 'still nothing was sent');
+
+    const smtpPort = (smtp.server.address() as any).port;
+    const mailbox = await call('PUT', '/api/integrations/email', A, {
+      host: '127.0.0.1',
+      port: smtpPort,
+      secure: false,
+      username: 'hr@company.ir',
+      password: 'smtp-secret-status-123',
+      fromName: 'واحد منابع انسانی',
+      fromAddress: 'hr@company.ir',
+    });
+    assert(mailbox.status === 200, 'the workspace mailbox is connected');
+
+    const sent = await call('POST', `/api/status-links/${fresh.json.link.id}/send`, A, {});
+    assert(sent.status === 200 && Boolean(sent.json.link.sentAtISO), 'HR can e-mail the link', `${sent.status} ${sent.json?.error || ''}`);
+    assert(sent.json.link.sentTo === 'sara@example.ir', 'the letter goes to the candidate’s own address', String(sent.json.link.sentTo));
+    assert(/[۰-۹]/.test(sent.json.link.sentAtJalali || ''), 'and the send is dated in Persian');
+    assert(smtp.messages.length === 1, 'exactly one message left', String(smtp.messages.length));
+    const raw = smtp.messages[0] || '';
+    assert(/To: sara@example\.ir/i.test(raw), 'the envelope names the candidate');
+    // Real mail is quoted-printable: soft line breaks split a long URL, so join
+    // them back before reading the letter. (Base64 bodies are handled too.)
+    const softBreaksJoined = raw.replace(/=\r?\n/g, '');
+    const decodedBody = (() => {
+      if (softBreaksJoined.includes('/status/')) return softBreaksJoined;
+      const compact = raw.split(/\r?\n\r?\n/).slice(1).join('').replace(/[^A-Za-z0-9+/=]/g, '');
+      try {
+        return Buffer.from(compact, 'base64').toString('utf8');
+      } catch {
+        return raw;
+      }
+    })();
+    assert(decodedBody.includes(`/status/${freshToken}`), 'the letter carries the personal link');
+    assert(!/score|rejected|interviewer/i.test(raw), 'and nothing internal');
+
+    const mailLog = await call('GET', `/api/integrations/emails?resumeId=${rec.id}`, A);
+    assert(mailLog.json.items.length === 1 && mailLog.json.items[0].status === 'sent', 'the letter is in the candidate history');
+    assert(mailLog.json.items[0].body.includes(`/status/${freshToken}`), 'the stored copy shows what the candidate read');
+    assert(!JSON.stringify(mailLog.json).includes('smtp-secret-status-123'), 'the SMTP password is never echoed back');
+
+    const resent = await call('POST', `/api/status-links/${fresh.json.link.id}/send`, A, {});
+    assert(resent.status === 200, 're-sending the same live link is allowed', String(resent.status));
+
+    const viewed = (await call('GET', `/api/resumes/${rec.id}/status-links`, A)).json.items.find((l: any) => l.id === fresh.json.link.id);
+    assert(viewed.sentAtISO && viewed.sentTo === 'sara@example.ir', 'the send is stored on the link for the follow-up');
+
+    const feedStatus = (await call('GET', '/api/activity', A)).json.items as any[];
+    assert(feedStatus.some((a) => a.type === 'status.sent'), 'the send is in the activity history');
+    assert((await call('POST', `/api/status-links/${fresh.json.link.id}/send`, B, {})).status === 404, 'another workspace cannot send it');
+
     // Blind screening: HR may not even mint the link while identity is hidden.
     await call('PATCH', '/api/org', A, { blindScreening: true });
     const blindCreate = await call('POST', `/api/resumes/${rec.id}/status-link`, A, {});
     assert(blindCreate.status === 409 && blindCreate.json.code === 'BLIND_REVEAL_REQUIRED', 'blind mode refuses to create a personal link', `${blindCreate.status}`);
     assert((await call('GET', `/api/status/${freshToken}`)).status === 200, 'the candidate’s own page keeps working');
+    const blindSend = await call('POST', `/api/status-links/${fresh.json.link.id}/send`, A, {});
+    assert(blindSend.status === 409 && blindSend.json.code === 'BLIND_REVEAL_REQUIRED', 'blind mode refuses to e-mail a personal link', `${blindSend.status}`);
     await call('PATCH', '/api/org', A, { blindScreening: false });
 
     // --------------------------------------------------------------- erasure ---
@@ -230,6 +340,7 @@ async function main() {
     child2.kill();
   } finally {
     child.kill();
+    smtp.server.close();
   }
 
   console.log(failures ? `\n${failures} check(s) failed.` : '\nAll checks passed.');

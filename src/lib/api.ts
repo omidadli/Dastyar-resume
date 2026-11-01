@@ -641,6 +641,8 @@ export const api = {
   status: {
     links: (resumeId: string) => get<{ items: StatusLink[] }>(`/api/resumes/${encodeURIComponent(resumeId)}/status-links`),
     create: (resumeId: string) => post<{ link: StatusLink }>(`/api/resumes/${encodeURIComponent(resumeId)}/status-link`, {}),
+    /** E-mails the link from the workspace mailbox — only when HR presses it. */
+    send: (id: string) => post<{ link: StatusLink }>(`/api/status-links/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
     revoke: (id: string) => del<{ link: StatusLink }>(`/api/status-links/${encodeURIComponent(id)}`),
     /** Public: no session, no headers — the token is the whole key. */
     public: (token: string) => get<{ status: PublicStatus }>(`/api/status/${encodeURIComponent(token)}`, { anonymous: true }),

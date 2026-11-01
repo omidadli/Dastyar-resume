@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, Link2, RefreshCw, Trash2 } from 'lucide-react';
+import { Copy, Link2, Mail, RefreshCw, Trash2 } from 'lucide-react';
 import type { ResumeListItem } from '../../types/screening';
 import type { StatusLink } from '../../types/status';
 import { api } from '../../lib/api';
@@ -15,6 +15,7 @@ import { Button, Callout, Chip, IconButton, Modal, Skeleton, toast } from '../ui
 export function StatusLinkModal({ record, onClose }: { record: ResumeListItem | null; onClose: () => void }) {
   const [items, setItems] = useState<StatusLink[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const load = () => {
     if (!record) return;
@@ -39,6 +40,24 @@ export function StatusLinkModal({ record, onClose }: { record: ResumeListItem | 
       toast(err?.message || 'ساختن لینک ممکن نشد.', 'error');
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * «فرستادن با ایمیل سازمان» — the only path that e-mails the link, and it
+   * exists because a human clicked it. Refusals come back with a code, and the
+   * message says what to do next instead of pretending it worked.
+   */
+  const send = async (link: StatusLink) => {
+    setSending(true);
+    try {
+      const r = await api.status.send(link.id);
+      setItems((prev) => (prev || []).map((l) => (l.id === link.id ? r.link : l)));
+      toast(r.link.sentTo ? `لینک از ایمیل سازمان به ${r.link.sentTo} فرستاده شد.` : 'لینک فرستاده شد.', 'success');
+    } catch (err: any) {
+      toast(err?.message || 'ارسال نشد.', 'error');
+    } finally {
+      setSending(false);
     }
   };
 
@@ -67,7 +86,8 @@ export function StatusLinkModal({ record, onClose }: { record: ResumeListItem | 
         <div className="flex flex-col gap-4">
           <Callout tone="info" icon={Link2} title="این صفحه چه چیزی نشان می‌دهد؟">
             فقط مرحلهٔ فعلی، تاریخ آخرین به‌روزرسانی و ایمیل تماس. امتیاز، یادداشت، نام مصاحبه‌گر و دلیل تصمیم در آن نیست. با
-            ساختن لینک تازه، لینک قبلی خودکار غیرفعال می‌شود.
+            ساختن لینک تازه، لینک قبلی خودکار غیرفعال می‌شود. با ساختن لینک هیچ نامه‌ای نمی‌رود؛ فرستادن با ایمیل سازمان فقط
+            وقتی است که خودتان دکمه‌اش را بزنید.
           </Callout>
 
           {items === null && <Skeleton className="h-[72px] rounded-[12px]" />}
@@ -90,11 +110,19 @@ export function StatusLinkModal({ record, onClose }: { record: ResumeListItem | 
                 >
                   کپی لینک
                 </Button>
+                <Button size="sm" variant="ghost" icon={Mail} onClick={() => void send(active)} loading={sending} disabled={busy || sending}>
+                  فرستادن با ایمیل سازمان
+                </Button>
                 <a href={active.url} target="_blank" rel="noreferrer" className="hv-btn hv-btn-ghost hv-btn-sm">
                   دیدن صفحه
                 </a>
                 <IconButton icon={Trash2} label="غیرفعال‌کردن لینک" onClick={() => void revoke(active)} />
               </div>
+              {active.sentAtISO && (
+                <p className="mt-1 text-[11px] text-ink-3">
+                  با ایمیل سازمان به {active.sentTo} فرستاده شد — {active.sentAtJalali}
+                </p>
+              )}
               <p className="mt-2 text-[11px] text-ink-4">
                 {toPersianDigits(active.views)} بار باز شده
                 {active.lastViewedAtISO ? ` · آخرین بار ${faDate(active.lastViewedAtISO)}` : ''} · تا {active.expiresAtJalali} معتبر است
@@ -122,6 +150,7 @@ export function StatusLinkModal({ record, onClose }: { record: ResumeListItem | 
                       <Chip tone="outline">غیرفعال</Chip>
                       <span>ساخته‌شده {faDate(l.createdAtISO)}</span>
                       <span>· {toPersianDigits(l.views)} بازدید</span>
+                      {l.sentAtISO && <span>· ایمیل شد ({l.sentTo})</span>}
                     </div>
                   ))}
               </div>

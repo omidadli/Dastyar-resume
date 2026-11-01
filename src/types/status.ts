@@ -38,6 +38,10 @@ export interface StatusLink {
   expiresAtJalali: string;
   views: number;
   lastViewedAtISO: string | null;
+  /** When HR e-mailed the link from the workspace mailbox — never automatic. */
+  sentAtISO: string | null;
+  sentAtJalali: string | null;
+  sentTo: string | null;
 }
 
 export interface PublicStatusStep {

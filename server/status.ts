@@ -119,6 +119,9 @@ export function createLink(orgId: string, resumeId: string, actorName: string | 
     expiresAtJalali: formatJalaliDate(tehranJalaliOf(new Date(now.getTime() + TTL_DAYS * DAY)), true),
     views: 0,
     lastViewedAtISO: null,
+    sentAtISO: null,
+    sentAtJalali: null,
+    sentTo: null,
   };
   db.saveStatusLink(row);
   db.logActivity(orgId, actorName ? { id: 'actor', name: actorName } : null, 'status.link', `لینک پیگیری درخواست «${row.candidateName}» را ساخت`, {
@@ -133,6 +136,35 @@ export function revokeLink(orgId: string, id: string): StatusLink {
   if (!row) throw new StatusError('این لینک پیدا نشد.', 404, 'LINK_NOT_FOUND');
   const saved = db.saveStatusLink({ ...row, revokedAtISO: row.revokedAtISO || new Date().toISOString() });
   return linkView(saved);
+}
+
+/** HR pressed «فرستادن با ایمیل سازمان» — recorded on the link itself. */
+export function markLinkSent(orgId: string, id: string, to: string): StatusLink {
+  const row = db.getStatusLink(orgId, id);
+  if (!row) throw new StatusError('این لینک پیدا نشد.', 404, 'LINK_NOT_FOUND');
+  const now = new Date();
+  const saved = db.saveStatusLink({
+    ...row,
+    sentAtISO: now.toISOString(),
+    sentAtJalali: formatJalaliDate(tehranJalaliOf(now), true),
+    sentTo: to,
+  });
+  return linkView(saved);
+}
+
+/** The plain-text letter that carries the link. Short, honest, no scores. */
+export function statusEmailText(opts: { candidateName: string; orgName: string; jobTitle: string; link: string; expiresJalali: string }): string {
+  return [
+    `${opts.candidateName} عزیز،`,
+    '',
+    `وضعیت درخواست شما برای «${opts.jobTitle}» در ${opts.orgName} را می‌توانید در همین صفحه ببینید:`,
+    opts.link,
+    '',
+    `این صفحه فقط مرحلهٔ فعلی را نشان می‌دهد و هیچ امتیاز یا یادداشت داخلی در آن نیست. لینک تا ${opts.expiresJalali} معتبر است؛ اگر بسته شد، از منابع انسانی لینک تازه بخواهید.`,
+    '',
+    'با احترام',
+    opts.orgName,
+  ].join('\n');
 }
 
 export function listLinks(orgId: string, resumeId: string): StatusLink[] {

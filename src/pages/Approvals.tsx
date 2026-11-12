@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Bot, CheckCircle2, Clock3, FileSignature, Gift, Inbox, ShieldCheck, Users } from 'lucide-react';
+import { ArrowLeft, Bot, CheckCircle2, Clock3, FileCheck2, FileSignature, Gift, Inbox, ShieldCheck, Users } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
 import { Button, Callout, Card, CardHeader, Chip, ErrorState, Modal, Skeleton, Stat, TextArea, toast } from '../components/ui';
 import { api } from '../lib/api';
@@ -13,6 +13,7 @@ const KIND_META: Record<InboxKind, { label: string; icon: typeof FileSignature; 
   offer: { label: 'پیشنهاد شغلی', icon: FileSignature, tone: 'brand' },
   automation: { label: 'اتوماسیون', icon: Bot, tone: 'warning' },
   referral: { label: 'پاداش معرفی', icon: Gift, tone: 'neutral' },
+  requisition: { label: 'نیازمندسنجی', icon: FileCheck2, tone: 'brand' },
 };
 
 /**
@@ -101,11 +102,12 @@ export default function Approvals() {
 
       {data && (
         <div className="flex flex-col gap-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Stat label="منتظر شما" value={toPersianDigits(data.counts.mine)} icon={Users} />
             <Stat label="پیشنهاد شغلی" value={toPersianDigits(data.counts.offers)} icon={FileSignature} />
             <Stat label="اتوماسیون" value={toPersianDigits(data.counts.automation)} icon={Bot} />
             <Stat label="پاداش معرفی" value={toPersianDigits(data.counts.referrals)} icon={Gift} />
+            <Stat label="نیازمندسنجی" value={toPersianDigits(data.counts.requisitions ?? 0)} icon={FileCheck2} />
           </div>
 
           {data.items.length === 0 && (
@@ -159,9 +161,12 @@ export default function Approvals() {
                       <div className="flex items-center gap-2 shrink-0">
                         {item.href && (
                           <Link to={item.href} className="hv-btn hv-btn-ghost hv-btn-sm inline-flex items-center gap-1">
-                            {item.kind === 'automation' ? 'دیدن پیش‌نویس' : 'پرونده'}
+                            {item.kind === 'automation' ? 'دیدن پیش‌نویس' : item.kind === 'requisition' ? 'دیدن درخواست' : 'پرونده'}
                             <ArrowLeft className="w-3.5 h-3.5" />
                           </Link>
+                        )}
+                        {!item.canAct && item.kind === 'requisition' && item.blockedReason && (
+                          <span className="text-[11px] text-ink-4 max-w-[220px] leading-relaxed hidden sm:block">{item.blockedReason}</span>
                         )}
                         {item.canAct && item.kind !== 'automation' && (
                           <Button size="sm" icon={CheckCircle2} onClick={() => setDecision({ item, kind: 'approved' })}>

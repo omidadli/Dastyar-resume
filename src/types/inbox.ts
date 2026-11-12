@@ -6,7 +6,7 @@
  * waiting on them: an offer stage, an automation proposal, a referral reward.
  */
 
-export type InboxKind = 'offer' | 'automation' | 'referral';
+export type InboxKind = 'offer' | 'automation' | 'referral' | 'requisition';
 
 export interface InboxItem {
   /** `offer:<id>`, `automation:<id>`, `referral:<id>` — stable for the row. */
@@ -39,11 +39,12 @@ export interface InboxCounts {
   offers: number;
   automation: number;
   referrals: number;
+  requisitions: number;
 }
 
 export interface InboxView {
   items: InboxItem[];
   counts: InboxCounts;
   /** Which queues exist in this workspace at all (an unused chain is not «empty»). */
-  enabled: { offers: boolean; automation: boolean; referrals: boolean };
+  enabled: { offers: boolean; automation: boolean; referrals: boolean; requisitions: boolean };
 }

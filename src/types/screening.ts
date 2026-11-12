@@ -247,6 +247,12 @@ export interface Job {
   accessMode?: JobAccessMode;
   /** Only meaningful with `accessMode: 'restricted'`. Members, never outside users. */
   allowedUserIds?: string[];
+  /**
+   * «نیازمندسنجی» — the approved requisition this opening spends headcount from.
+   * `null` means no requisition; when the workspace turns the gate on, such an
+   * opening cannot be published on the public portal.
+   */
+  requisitionId?: string | null;
   /** The board's columns for this opening (defaults applied when absent). */
   stages?: PipelineStage[];
   stats: JobStats;

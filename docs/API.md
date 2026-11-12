@@ -502,6 +502,33 @@ GET  /api/psych/report?jobId=
 
 ---
 
+## ۵ط) نیازمندسنجی و سرفصل نیرو (داخل برنامه)
+
+```http
+GET  /api/requisitions?status=&departmentId=   → { items }
+GET  /api/requisitions/summary                 → { rollup, settings }
+GET  /api/requisitions/:id                     → { requisition, canApprove, cannotApproveReason, selfApprovalOnly, attachableJobs }
+POST /api/requisitions                         body: { title, departmentId, slots, salaryMin?, salaryMax?, justification?, … }
+PATCH /api/requisitions/:id                    body: same, only while draft/rejected
+POST /api/requisitions/:id/submit              # needs ≥۲۰ نویسه دلیل
+POST /api/requisitions/:id/decision            body: { decision: "approved"|"rejected", note?, approvedSlots? }
+POST /api/requisitions/:id/hold | /resume
+POST /api/requisitions/:id/cancel              body: { note? }   # refused when a hire exists
+POST /api/requisitions/:id/jobs                body: { jobId }
+DELETE /api/requisitions/:id/jobs/:jobId
+GET  /api/requisitions/settings                # admin
+PUT  /api/requisitions/settings                body: { requireApprovedForPublish, approverUserIds }
+```
+
+انتشار آگهی (`POST /api/jobs/:id/publish`) وقتی قاعده روشن باشد با یکی از کدهای
+`REQUISITION_REQUIRED` / `REQUISITION_NOT_APPROVED` / `REQUISITION_FILLED` (۴۰۹) رد
+می‌شود. کدهای دیگر: `TITLE_REQUIRED`، `DEPARTMENT_REQUIRED`، `BAD_SLOTS`،
+`BAD_SALARY_RANGE`، `JUSTIFICATION_REQUIRED`، `NOT_EDITABLE`، `NOT_APPROVER`،
+`BAD_APPROVED_SLOTS`، `REQUISITION_NOT_OPEN`، `DEPARTMENT_MISMATCH`، `HAS_HIRES`.
+جزئیات: [`REQUISITIONS.md`](REQUISITIONS.md).
+
+---
+
 ## ۵ز) انتقال به حقوق و دستمزد (داخل برنامه)
 
 ```http

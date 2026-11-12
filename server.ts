@@ -42,6 +42,7 @@ import { brandingRoutes } from './server/routes/branding';
 import { referencePublicRoutes, referenceRoutes } from './server/routes/references';
 import { codingPublicRoutes, codingRoutes } from './server/routes/coding';
 import { psychPublicRoutes, psychRoutes } from './server/routes/psychometrics';
+import { requisitionRoutes } from './server/routes/requisitions';
 import { jobBoardRoutes } from './server/routes/jobboard';
 import { scimRoutes } from './server/routes/scim';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
@@ -175,6 +176,7 @@ async function startServer() {
   app.use('/api', referenceRoutes()); // «استعلام مرجع»: consent, referees, phone records
   app.use('/api', codingRoutes());
   app.use('/api', psychRoutes()); // «سنجش نرم‌شده»: send, read, norms, group report
+  app.use('/api', requisitionRoutes()); // «نیازمندسنجی»: headcount, approvals, the publish gate
   app.use('/api', jobBoardRoutes()); // «انتشار در جاب‌بورد»: the ad copy + where it went
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 

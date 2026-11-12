@@ -43,6 +43,15 @@ import type { ReferenceAnswers, RefereeRelation, RefereeStatus } from '../src/ty
 import type { CodeStatus, CodeSubmissionResult } from '../src/types/coding';
 import type { PsychAnswers, PsychNormConfig, PsychResult, PsychStatus } from '../src/types/psychometrics';
 import type {
+  RequisitionHistoryEntry,
+  RequisitionPriority,
+  RequisitionSeniority,
+  RequisitionSettings,
+  RequisitionStatus,
+  RequisitionWorkMode,
+  SalaryBasis,
+} from '../src/types/requisition';
+import type {
   ActivityItem,
   ActivityType,
   DashboardData,
@@ -181,6 +190,10 @@ export interface StoreSnapshot {
   psychInvites?: PsychInviteRow[];
   /** Per-workspace norm tables for the psychometric scales, keyed by org id. */
   psychNorms?: Record<string, PsychNormConfig>;
+  /** «نیازمندسنجی» — requisitions with headcount and approvals. */
+  requisitions?: RequisitionRow[];
+  /** Per-workspace requisition rules, keyed by org id. */
+  requisitionSettings?: Record<string, RequisitionSettings>;
   /** «آزمون و ارزیابی» — invitations, answers and scores. */
   assessments?: AssessmentInviteRow[];
   /** «مصاحبهٔ ویدئویی» — invitations, questions and the recorded answers. */
@@ -501,6 +514,41 @@ export type PsychInviteRow = {
   sentByName: string | null;
 };
 
+/** One «نیازمندسنجی» row. The approval and its history live on the row itself. */
+export type RequisitionRow = {
+  id: string;
+  orgId: string;
+  code: string;
+  title: string;
+  departmentId: string;
+  departmentName: string;
+  hiringManagerId: string | null;
+  hiringManagerName: string;
+  requestedById: string | null;
+  requestedByName: string;
+  status: RequisitionStatus;
+  priority: RequisitionPriority;
+  seniority: RequisitionSeniority;
+  employmentType: string;
+  workMode: RequisitionWorkMode;
+  location: string;
+  slots: number;
+  approvedSlots: number | null;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  salaryBasis: SalaryBasis;
+  justification: string;
+  targetStartISO: string | null;
+  createdAtISO: string;
+  updatedAtISO: string;
+  submittedAtISO: string | null;
+  decidedAtISO: string | null;
+  decidedById: string | null;
+  decidedByName: string | null;
+  decisionNote: string | null;
+  history: RequisitionHistoryEntry[];
+};
+
 /** Consent + note for one candidate's reference checks (one row per resume). */
 export type ReferenceCaseRow = {
   id: string;
@@ -572,6 +620,8 @@ const referees = new Map<string, RefereeRow>();
 const codeInvites = new Map<string, CodeInviteRow>();
 const psychInvites = new Map<string, PsychInviteRow>();
 const psychNorms = new Map<string, PsychNormConfig>();
+const requisitions = new Map<string, RequisitionRow>();
+const requisitionSettings = new Map<string, RequisitionSettings>();
 const assessments = new Map<string, AssessmentInviteRow>();
 const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
@@ -643,6 +693,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.codeInvites?.forEach((x) => codeInvites.set(x.id, x));
   snap.psychInvites?.forEach((x) => psychInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.psychNorms || {})) psychNorms.set(k, v);
+  snap.requisitions?.forEach((x) => requisitions.set(x.id, x));
+  for (const [k, v] of Object.entries(snap.requisitionSettings || {})) requisitionSettings.set(k, v);
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
   snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
@@ -835,6 +887,8 @@ function snapshot(): StoreSnapshot {
     codeInvites: Array.from(codeInvites.values()),
     psychInvites: Array.from(psychInvites.values()),
     psychNorms: Object.fromEntries(psychNorms),
+    requisitions: Array.from(requisitions.values()),
+    requisitionSettings: Object.fromEntries(requisitionSettings),
     assessments: Array.from(assessments.values()),
     videoInvites: Array.from(videoInvites.values()),
     videoSettings: Object.fromEntries(videoSettings),
@@ -1356,6 +1410,8 @@ export function deleteOrg(id: string) {
   for (const [k, v] of codeInvites) if (v.orgId === id) codeInvites.delete(k);
   for (const [k, v] of psychInvites) if (v.orgId === id) psychInvites.delete(k);
   psychNorms.delete(id);
+  for (const [k, v] of requisitions) if (v.orgId === id) requisitions.delete(k);
+  requisitionSettings.delete(id);
   for (const [k, v] of referenceCases) if (v.orgId === id) referenceCases.delete(k);
   for (const [k, v] of assessments) if (v.orgId === id) assessments.delete(k);
   for (const [k, v] of videoInvites) if (v.orgId === id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${id}/${k}/`); }
@@ -1667,6 +1723,7 @@ export function updateJob(
       | 'allowedUserIds'
       | 'titleEn'
       | 'descriptionEn'
+      | 'requisitionId'
     >
   >
 ): Job | null {
@@ -1688,6 +1745,7 @@ export function updateJob(
   // travels with backups like every other field.
   if (patch.accessMode !== undefined) j.accessMode = patch.accessMode === 'restricted' ? 'restricted' : 'everyone';
   if (patch.allowedUserIds !== undefined) j.allowedUserIds = Array.from(new Set(patch.allowedUserIds)).slice(0, 200);
+  if (patch.requisitionId !== undefined) j.requisitionId = patch.requisitionId ? String(patch.requisitionId).slice(0, 80) : null;
   if (patch.titleEn !== undefined) j.titleEn = patch.titleEn ? String(patch.titleEn).slice(0, 160) : null;
   if (patch.descriptionEn !== undefined) j.descriptionEn = patch.descriptionEn ? String(patch.descriptionEn).slice(0, 4000) : null;
   if (patch.stages !== undefined) {
@@ -2720,6 +2778,44 @@ export function savePsychNorms(orgId: string, config: PsychNormConfig): PsychNor
 
 export function dropPsychNorms(orgId: string): void {
   if (psychNorms.delete(orgId)) scheduleSave();
+}
+
+// ------------------------------------------------------------ requisitions ---
+
+export function listRequisitions(orgId: string, filter: { departmentId?: string; status?: RequisitionStatus } = {}): RequisitionRow[] {
+  return Array.from(requisitions.values())
+    .filter((r) => r.orgId === orgId)
+    .filter((r) => (filter.departmentId ? r.departmentId === filter.departmentId : true))
+    .filter((r) => (filter.status ? r.status === filter.status : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getRequisition(orgId: string, id: string): RequisitionRow | null {
+  const r = requisitions.get(id);
+  return r && r.orgId === orgId ? r : null;
+}
+
+export function saveRequisition(row: RequisitionRow): RequisitionRow {
+  requisitions.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function getRequisitionSettings(orgId: string): RequisitionSettings {
+  return requisitionSettings.get(orgId) || { requireApprovedForPublish: false, approverUserIds: [] };
+}
+
+export function saveRequisitionSettings(orgId: string, next: RequisitionSettings): RequisitionSettings {
+  requisitionSettings.set(orgId, next);
+  scheduleSave();
+  return next;
+}
+
+/** The requisition a job is attached to, if any. */
+export function requisitionOfJob(orgId: string, jobId: string): RequisitionRow | null {
+  const job = getJob(orgId, jobId);
+  const id = job?.requisitionId;
+  return id ? getRequisition(orgId, id) : null;
 }
 
 // ------------------------------------------------------------ status links ----
@@ -4346,6 +4442,10 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       ? raw.psychInvites.filter((p: any) => p && isStr(p.id) && isStr(p.orgId) && isStr(p.token) && isStr(p.resumeId))
       : [],
     psychNorms: raw.psychNorms && typeof raw.psychNorms === 'object' ? raw.psychNorms : {},
+    requisitions: Array.isArray(raw.requisitions)
+      ? raw.requisitions.filter((r: any) => r && isStr(r.id) && isStr(r.orgId) && isStr(r.title))
+      : [],
+    requisitionSettings: raw.requisitionSettings && typeof raw.requisitionSettings === 'object' ? raw.requisitionSettings : {},
     codeInvites: Array.isArray(raw.codeInvites)
       ? raw.codeInvites.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && isStr(c.token) && isStr(c.challengeId))
       : [],

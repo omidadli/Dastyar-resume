@@ -21,6 +21,14 @@ import type { BrandingPayload, OrgBranding } from '../types/branding';
 import type { PublicReference, ReferenceAnswerInput, ReferenceCase, Referee } from '../types/references';
 import type { CodeCaseResult, CodeChallengeSummary, CodeInvite, PublicCodeChallenge } from '../types/coding';
 import type {
+  Requisition,
+  RequisitionApprovers,
+  RequisitionInput,
+  RequisitionRollup,
+  RequisitionSettings,
+  RequisitionSummaryRow,
+} from '../types/requisition';
+import type {
   PsychGroupReport,
   PsychInvite,
   PsychNormConfig,
@@ -630,6 +638,41 @@ export const api = {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),
     list: (p: { departmentId?: string; q?: string; tags?: string[]; minScore?: number; minYears?: number; sort?: string; page?: number }) =>
       get<PagedResult<ResumeListItem>>(`/api/talent/list${qs({ ...p, tags: p.tags?.length ? p.tags.join(',') : undefined })}`),
+  },
+  /** «نیازمندسنجی» — headcount, approvals and the publish gate. */
+  requisitions: {
+    list: (filter: { status?: string; departmentId?: string } = {}) => {
+      const q: string[] = [];
+      if (filter.status) q.push(`status=${encodeURIComponent(filter.status)}`);
+      if (filter.departmentId) q.push(`departmentId=${encodeURIComponent(filter.departmentId)}`);
+      return get<{ items: RequisitionSummaryRow[] }>(`/api/requisitions${q.length ? `?${q.join('&')}` : ''}`);
+    },
+    summary: () =>
+      get<{ rollup: RequisitionRollup; settings: RequisitionSettings }>('/api/requisitions/summary'),
+    get: (id: string) =>
+      get<{
+        requisition: Requisition;
+        canApprove: boolean;
+        cannotApproveReason: string | null;
+        attachableJobs: { id: string; roleTitle: string; status: string; isPublic: boolean }[];
+      }>(`/api/requisitions/${encodeURIComponent(id)}`),
+    create: (b: RequisitionInput) => post<{ requisition: Requisition }>('/api/requisitions', b),
+    update: (id: string, b: RequisitionInput) => patch<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}`, b),
+    submit: (id: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/submit`, {}),
+    decide: (id: string, b: { decision: 'approved' | 'rejected'; note?: string; approvedSlots?: number }) =>
+      post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/decision`, b),
+    hold: (id: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/hold`, {}),
+    resume: (id: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/resume`, {}),
+    cancel: (id: string, note: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/cancel`, { note }),
+    attach: (id: string, jobId: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/jobs`, { jobId }),
+    detach: (id: string, jobId: string) =>
+      del<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/jobs/${encodeURIComponent(jobId)}`),
+    settings: {
+      get: () =>
+        get<{ settings: RequisitionSettings; approvers: RequisitionApprovers[] }>('/api/requisitions/settings'),
+      save: (b: { requireApprovedForPublish?: boolean; approverUserIds?: string[] }) =>
+        put<{ settings: RequisitionSettings }>('/api/requisitions/settings', b),
+    },
   },
   /** «سنجش نرم‌شده» — scales, invitations, norms and the group report. */
   psych: {

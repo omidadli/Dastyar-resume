@@ -79,6 +79,8 @@ const References = lazyPage(() => import('./pages/References'));
 const CodeChallenge = lazyPage(() => import('./pages/CodeChallenge'));
 const PsychTest = lazyPage(() => import('./pages/PsychTest'));
 const PsychReview = lazyPage(() => import('./pages/PsychReview'));
+const Requisitions = lazyPage(() => import('./pages/Requisitions'));
+const RequisitionDetail = lazyPage(() => import('./pages/RequisitionDetail'));
 const CodeReview = lazyPage(() => import('./pages/CodeReview'));
 const Assessment = lazyPage(() => import('./pages/Assessment'));
 const Settings = lazyPage(() => import('./pages/Settings'));
@@ -137,6 +139,22 @@ function appPage(pathname: string): React.ReactNode {
   if (m) return RECORD_ID.test(m.id) ? <JobDetail key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/candidates') return <Candidates />;
   // «استعلام مرجع» has its own page: it needs room for consent, referees and answers.
+  // «نیازمندسنجی» — headcount and approvals.
+  if (pathname === '/app/requisitions') {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <Requisitions />
+      </Suspense>
+    );
+  }
+  m = matchPath('/app/requisitions/:id', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <RequisitionDetail id={m.id} />
+      </Suspense>
+    );
+  }
   // «سنجش نرم‌شده» for one candidate.
   m = matchPath('/app/candidates/:id/psychometrics', pathname);
   if (m) {

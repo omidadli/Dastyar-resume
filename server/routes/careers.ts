@@ -10,6 +10,7 @@
  */
 import express from 'express';
 import * as db from '../db';
+import { publishGate } from '../requisitions';
 import { ctxOf, requireRole } from '../auth';
 import { publicBrandingOf } from './branding';
 import { h, str } from './util';
@@ -705,6 +706,12 @@ export function careerRoutes() {
       const next = req.body?.isPublic === true;
       if (next && job.status !== 'open') {
         return res.status(409).json({ error: 'فرصت شغلی بسته است؛ اول آن را باز کنید.' });
+      }
+      // «نیازمندسنجی»: when the workspace turned the gate on, an opening needs an
+      // approved requisition with a free seat before it can go on the portal.
+      if (next) {
+        const blocked = publishGate(org.id, job.id);
+        if (blocked) return res.status(409).json({ error: blocked.message, code: blocked.code });
       }
       const updated = db.updateJob(org.id, job.id, { isPublic: next })!;
       db.logActivity(

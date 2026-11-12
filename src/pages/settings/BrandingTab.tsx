@@ -36,6 +36,7 @@ const NAV_LABEL: Record<string, string> = {
   dashboard: 'داشبورد',
   approvals: 'کارتابل تأیید',
   jobs: 'فرصت‌های شغلی',
+  requisitions: 'نیازمندسنجی',
   candidates: 'رزومه‌ها',
   sourcing: 'جست‌وجوی استعداد',
   automation: 'اتوماسیون جذب',

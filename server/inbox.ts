@@ -122,6 +122,41 @@ export function inboxFor(org: db.OrgRecord, user: db.UserRecord): InboxView {
     });
   }
 
+  // ----------------------------------------------------------- requisitions ---
+  // A hire request waiting for a signature. The decision belongs on its own page,
+  // where the reason, the salary band and the remaining seats are on screen — the
+  // inbox says it is waiting and takes you there.
+  for (const row of db.listRequisitions(org.id)) {
+    if (row.status !== 'pending') continue;
+    const settings = db.getRequisitionSettings(org.id);
+    const mine =
+      row.requestedById !== user.id &&
+      (settings.approverUserIds.length ? settings.approverUserIds.includes(user.id) : isAdmin(user));
+    const approverNames = settings.approverUserIds.length
+      ? settings.approverUserIds
+          .map((id) => db.getUser(id)?.name || '')
+          .filter(Boolean)
+          .join('، ')
+      : 'مدیر یا مالک فضای کاری';
+    items.push({
+      id: `requisition:${row.id}`,
+      kind: 'requisition',
+      title: `تأیید نیازمندسنجی — ${row.title}`,
+      detail: `${row.slots} پست برای «${row.departmentName}»؛ تا تأیید نشود، آگهی به آن وصل و منتشر نمی‌شود.`,
+      candidateName: '',
+      jobTitle: row.title,
+      jobId: null,
+      resumeId: null,
+      waitingSinceISO: row.submittedAtISO || row.createdAtISO,
+      waitingSinceJalali: jalali(row.submittedAtISO || row.createdAtISO),
+      waitingOn: row.requestedById === user.id ? 'شما درخواست داده‌اید؛ تأیید با دیگری است' : approverNames,
+      mine,
+      canAct: false,
+      blockedReason: 'تأیید در صفحهٔ نیازمندسنجی گرفته می‌شود، جایی که دلیل، بازهٔ حقوق و سرفصل باقی‌مانده روی صفحه است.',
+      href: `/app/requisitions/${row.id}`,
+    });
+  }
+
   // Mine first — that is the whole point of an inbox — then oldest first.
   items.sort((a, b) => {
     if (a.mine !== b.mine) return a.mine ? -1 : 1;
@@ -137,11 +172,13 @@ export function inboxFor(org: db.OrgRecord, user: db.UserRecord): InboxView {
       offers: of('offer'),
       automation: of('automation'),
       referrals: of('referral'),
+      requisitions: of('requisition'),
     },
     enabled: {
       offers: Boolean(org.offerApproval?.enabled),
       automation: settings.enabled,
       referrals: db.getReferralProgram(org.id).enabled,
+      requisitions: db.listRequisitions(org.id).length > 0 || db.getRequisitionSettings(org.id).requireApprovedForPublish,
     },
   };
 }

@@ -89,6 +89,7 @@ export const NAV_KEYS = [
   'dashboard',
   'approvals',
   'jobs',
+  'requisitions',
   'candidates',
   'sourcing',
   'automation',

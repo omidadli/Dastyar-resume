@@ -192,6 +192,12 @@ export type ActivityType =
   | 'psych.cancelled'
   | 'psych.declined'
   | 'psych.norms'
+  | 'requisition.created'
+  | 'requisition.updated'
+  | 'requisition.submitted'
+  | 'requisition.approved'
+  | 'requisition.rejected'
+  | 'requisition.settings'
   | 'settings.changed';
 
 export interface ActivityItem {

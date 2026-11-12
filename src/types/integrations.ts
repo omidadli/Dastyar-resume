@@ -314,6 +314,12 @@ export const CHAT_EVENT_LABEL: Record<string, string> = {
   'psych.cancelled': 'لغو سنجش نرم‌شده',
   'psych.declined': 'نپذیرفتن سنجش نرم‌شده',
   'psych.norms': 'تغییر هنجار مقایسه‌ای',
+  'requisition.created': 'ساخت نیازمندسنجی',
+  'requisition.updated': 'تغییر نیازمندسنجی',
+  'requisition.submitted': 'ارسال نیازمندسنجی برای تأیید',
+  'requisition.approved': 'تأیید نیازمندسنجی',
+  'requisition.rejected': 'رد نیازمندسنجی',
+  'requisition.settings': 'تغییر قواعد نیازمندسنجی',
   'survey.answered': 'پاسخ کارجو به نظرسنجی',
 };
 

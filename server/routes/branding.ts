@@ -13,7 +13,7 @@
 import express from 'express';
 import * as db from '../db';
 import { actorOf, ctxOf, requireRole } from '../auth';
-import { BRAND_PRESETS, DEFAULT_BRANDING, LANDING_KEYS, NAV_KEYS, type OrgBranding } from '../../src/types/branding';
+import { BRAND_PRESETS, DASHBOARD_CARDS, DEFAULT_BRANDING, LANDING_KEYS, NAV_KEYS, type OrgBranding } from '../../src/types/branding';
 import { brandTokens, isBranded, isHex, normalizeHex } from '../../src/lib/brand';
 import { mailBrandOf } from '../mail-brand';
 import { friendlySmtpError, isEmailConfigured, sendMail } from '../mailer';
@@ -112,6 +112,11 @@ export function validateBranding(raw: any): OrgBranding {
       ),
     },
     landing: (LANDING_KEYS as readonly string[]).includes(raw.landing) ? raw.landing : base.landing,
+    // The four KPIs stay: an empty dashboard teaches a new team nothing, and the
+    // page would have no way back to the switch that hid it.
+    hiddenCards: Array.isArray(raw.hiddenCards)
+      ? (DASHBOARD_CARDS.map((c) => c.id) as OrgBranding['hiddenCards']).filter((id) => id !== 'kpis' && raw.hiddenCards.includes(id))
+      : [],
     email: {
       // Empty means «add nothing»: most letters already sign themselves, and a
       // second signature stacked on top is worse than none.

@@ -1000,6 +1000,7 @@ function normalizeOrg(o: OrgRecord): OrgRecord {
       terms: { ...DEFAULT_BRANDING.terms, ...(o.branding.terms || {}) },
       nav: { hidden: Array.isArray(o.branding.nav?.hidden) ? o.branding.nav.hidden : [], labels: { ...(o.branding.nav?.labels || {}) } },
       email: { ...DEFAULT_BRANDING.email, ...(o.branding.email || {}) },
+      hiddenCards: Array.isArray(o.branding.hiddenCards) ? o.branding.hiddenCards : [],
     } : undefined,
   };
 }

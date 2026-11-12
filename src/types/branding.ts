@@ -64,6 +64,18 @@ export interface BrandEmail {
   includeLogo: boolean;
 }
 
+/** What a workspace wants on its dashboard — and what it would rather not see. */
+export const DASHBOARD_CARDS = [
+  { id: 'kpis', label: 'چهار عدد اصلی', hint: 'فرصت‌های باز، رزومه‌های تحلیل‌شده، در انتظار تصمیم، تطابق بالا' },
+  { id: 'pending', label: 'در انتظار تصمیم شما', hint: 'فهرست کاندیداهایی که تصمیمشان مانده' },
+  { id: 'timeSaved', label: 'زمان صرفه‌جویی‌شده', hint: 'برآورد ساعتی که با تحلیل خودکار برگشته' },
+  { id: 'activity', label: 'فعالیت تیم', hint: 'آخرین رویدادهای فضای کاری' },
+  { id: 'aiNote', label: 'یادداشت وضعیت هوش مصنوعی', hint: 'وقتی موتور محلی کار می‌کند یا AI خاموش است' },
+  { id: 'onboarding', label: 'راهنمای سه‌قدمی شروع', hint: 'فقط در فضای کاری تازه دیده می‌شود' },
+] as const;
+
+export type DashboardCard = (typeof DASHBOARD_CARDS)[number]['id'];
+
 /** The panel's own navigation: renamed items, and the ones this team never uses. */
 export interface BrandNav {
   /** Keys from `NAV_KEYS` the workspace chose to hide. */
@@ -111,6 +123,8 @@ export interface OrgBranding {
   portal: BrandPortal;
   terms: BrandTerms;
   nav: BrandNav;
+  /** Dashboard cards this workspace hid; «چهار عدد اصلی» is never hidden. */
+  hiddenCards: DashboardCard[];
   email: BrandEmail;
   /** Key from `LANDING_KEYS`; the dashboard unless the company chose otherwise. */
   landing: LandingKey;
@@ -152,6 +166,7 @@ export const DEFAULT_BRANDING: OrgBranding = {
   portal: { heading: '', coverDataUrl: null },
   terms: { candidate: 'کارجو', job: 'فرصت شغلی', interview: 'مصاحبه', offer: 'پیشنهاد شغلی' },
   nav: { hidden: [], labels: {} },
+  hiddenCards: [],
   email: { signoff: '', footerNote: '', includeLogo: true },
   landing: 'dashboard',
   showHovidaCredit: true,

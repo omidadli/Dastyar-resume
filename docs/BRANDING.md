@@ -28,6 +28,7 @@ day, the sign-in screen its staff see, and the career portal its candidates open
 | Words | rename any navigation item | sidebar + mobile sheet |
 | Words | hide navigation items the team never uses | sidebar + mobile sheet (`settings` cannot be hidden) |
 | Words | where people land after signing in | the redirect after login |
+| Dashboard | hide the blocks a team never reads (activity, waiting-on-you, time saved, AI note, onboarding guide) | `/app` — «چهار عدد اصلی» can never be hidden |
 | Sign-in | headline, subtitle, background style (gradient / plain / mesh) | `/login?ws=<career-slug>` |
 | Public portal | heading, wide cover image | `/careers/<slug>` |
 | E-mail | logo in the letterhead (on/off), sign-off line, footer note | every letter: offers, invites, reminders, status links, surveys, assessments, video invites, onboarding |
@@ -153,7 +154,7 @@ sees in the preview is what the team gets.
 | ~~E-mail templates~~ | **Done** — see «The letterhead» above. |
 | Per-role themes | Deliberate: one workspace, one identity. A member seeing different colours than their manager is a bug, not a feature. |
 | Arbitrary CSS / custom fonts uploaded | Would let one workspace break the shared bundle and (with a font URL) leak visitor IPs. Offered alternatives: system font or Vazirmatn, plus full colour and geometry control. |
-| Dashboard card choice | The dashboard is still HOVIDA's composition; hiding cards is the next candidate in this area. |
+| Dashboard layout (drag-and-drop) | Cards can be hidden; their order and size are still HOVIDA's composition. Reordering needs a grid model that survives RTL and print — planned, not pretended. |
 
 ---
 

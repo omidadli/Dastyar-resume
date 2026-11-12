@@ -21,6 +21,7 @@ import { brandTokens, contrast, isHex } from '../../lib/brand';
 import { useBranding } from '../../components/brand/BrandingProvider';
 import {
   BRAND_PRESETS,
+  DASHBOARD_CARDS,
   FONT_LABEL,
   LANDING_KEYS,
   LOGIN_BG_LABEL,
@@ -379,7 +380,7 @@ export default function BrandingTab() {
   return (
     <div className="flex flex-col gap-4">
       <Callout tone="info" title="این تغییر برای همهٔ اعضای فضای کاری شما اعمال می‌شود">
-        لوگو، رنگ‌ها، گوشه‌ها، فونت، نوار کناری، واژه‌ها و صفحهٔ ورود — همه از همین‌جا. هویدا رنگ‌های مشتق‌شده را طوری می‌سازد که نوشته‌ها و دکمه‌ها خوانا بمانند؛
+        لوگو، رنگ‌ها، گوشه‌ها، فونت، نوار کناری، واژه‌ها، کارت‌های داشبورد، صفحهٔ ورود و سربرگ ایمیل — همه از همین‌جا. هویدا رنگ‌های مشتق‌شده را طوری می‌سازد که نوشته‌ها و دکمه‌ها خوانا بمانند؛
         اگر مجبور شویم سایه‌ای را اصلاح کنیم، پایین همین صفحه به شما می‌گوییم.
       </Callout>
 
@@ -579,6 +580,26 @@ export default function BrandingTab() {
                         })
                       }
                       label={NAV_LABEL[k]}
+                    />
+                  ))}
+                </div>
+              </Field>
+            </div>
+            <div className="mt-4">
+              <Field label="کارت‌های داشبورد" hint="هر چیزی که تیم شما نمی‌خواند را بردارید؛ «چهار عدد اصلی» همیشه می‌ماند.">
+                <div className="grid sm:grid-cols-2 gap-x-4">
+                  {DASHBOARD_CARDS.filter((c) => c.id !== 'kpis').map((c) => (
+                    <Switch
+                      key={c.id}
+                      checked={!draft.hiddenCards.includes(c.id)}
+                      onChange={(v) =>
+                        set(
+                          'hiddenCards',
+                          v ? draft.hiddenCards.filter((x) => x !== c.id) : [...draft.hiddenCards, c.id]
+                        )
+                      }
+                      label={c.label}
+                      description={c.hint}
                     />
                   ))}
                 </div>

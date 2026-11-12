@@ -118,6 +118,14 @@ async function main() {
     assert(saved.json.branding.terms.job === 'موقعیت', 'the workspace renamed «فرصت شغلی»');
     assert(saved.json.branding.showHovidaCredit === false, 'the white-label switch stuck');
 
+    // ---------------------------------------------------- dashboard cards
+    const cards = await call('PUT', '/api/org/branding', A, {
+      ...saved.json.branding,
+      hiddenCards: ['activity', 'kpis', 'not-a-card'],
+    });
+    assert(cards.status === 200, 'dashboard choices save');
+    assert(cards.json.branding.hiddenCards.join(',') === 'activity', 'unknown cards drop, «چهار عدد اصلی» cannot be hidden', cards.json.branding.hiddenCards.join(','));
+
     // --------------------------------------------- readability is guaranteed
     const dark = saved.json.tokens['--color-brand-strong'];
     const lum = (hex: string) => {

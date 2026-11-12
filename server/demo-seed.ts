@@ -15,6 +15,7 @@ import { hashPassword, DEMO_TTL_MS } from './auth';
 import { buildTemplateUnderstanding } from './ai/screening';
 import type { CandidateEvaluation, DecisionStatus, Recommendation, ResumeRecord } from '../src/types/screening';
 import type { Department } from '../src/types/app';
+import { DEFAULT_BRANDING } from '../src/types/branding';
 import type { CostKind } from '../src/types/reports';
 import { scoreAnswers } from './assessments';
 import { templateById } from './assessment-bank';
@@ -826,7 +827,27 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
   // draft offer is waiting for the demo user (then the HR manager), and one
   // referral reward is owed for a hire that already happened. Both are the kind
   // of decision a human really makes here; nothing is sent by approving them.
+  // «هویت سازمانی» — the demo workspace arrives already wearing its own identity,
+  // so the panel the visitor sees is *not* HOVIDA's: dark indigo sidebar, its own
+  // name, its own words. One click on «بازگشت به پیش‌فرض» in
+  // تنظیمات → هویت سازمانی puts HOVIDA's own identity back, which is the point:
+  // every part of this is a setting, not a fork of the product.
   db.updateOrg(org.id, {
+    branding: {
+      ...DEFAULT_BRANDING,
+      nickname: 'سامانهٔ استخدام آوا',
+      colors: { brand: '#4F46E5', accent: '#312E81' },
+      sidebar: 'dark',
+      radius: 'soft',
+      terms: { candidate: 'متقاضی', job: 'موقعیت شغلی', interview: 'مصاحبه', offer: 'پیشنهاد شغلی' },
+      nav: { hidden: [], labels: {} },
+      landing: 'dashboard',
+      login: { ...DEFAULT_BRANDING.login, title: 'ورود به سامانهٔ استخدام آوا', subtitle: 'رزومه‌ها، مصاحبه‌ها و تصمیم‌ها در یک جای امن.' },
+      portal: { heading: 'به تیم آوا بپیوندید', coverDataUrl: null },
+      updatedAtISO: new Date().toISOString(),
+      updatedByName: 'مدیر منابع انسانی',
+      presetId: 'indigo',
+    },
     offerApproval: {
       enabled: true,
       steps: [

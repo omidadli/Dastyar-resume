@@ -20,6 +20,13 @@ import type {
 import type { BrandingPayload, OrgBranding } from '../types/branding';
 import type { PublicReference, ReferenceAnswerInput, ReferenceCase, Referee } from '../types/references';
 import type { CodeCaseResult, CodeChallengeSummary, CodeInvite, PublicCodeChallenge } from '../types/coding';
+import type {
+  PsychGroupReport,
+  PsychInvite,
+  PsychNormConfig,
+  PsychScaleSummary,
+  PublicPsychTest,
+} from '../types/psychometrics';
 import type { InterviewKit } from '../types/interview-kit';
 import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
 import type { EeoReport } from '../types/eeo';
@@ -623,6 +630,36 @@ export const api = {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),
     list: (p: { departmentId?: string; q?: string; tags?: string[]; minScore?: number; minYears?: number; sort?: string; page?: number }) =>
       get<PagedResult<ResumeListItem>>(`/api/talent/list${qs({ ...p, tags: p.tags?.length ? p.tags.join(',') : undefined })}`),
+  },
+  /** «سنجش نرم‌شده» — scales, invitations, norms and the group report. */
+  psych: {
+    scales: () =>
+      get<{ scales: (PsychScaleSummary & { itemCount: number })[]; ttlDays: number; smallGroup: number; minNormN: number }>('/api/psych/scales'),
+    invites: (filter: { resumeId?: string; jobId?: string } = {}) => {
+      const q = filter.resumeId ? `?resumeId=${encodeURIComponent(filter.resumeId)}` : filter.jobId ? `?jobId=${encodeURIComponent(filter.jobId)}` : '';
+      return get<{ items: PsychInvite[] }>(`/api/psych/invites${q}`);
+    },
+    invite: (id: string) =>
+      get<{ invite: PsychInvite; reading: { id: string; label: string; high: string; low: string }[] }>(`/api/psych/invites/${encodeURIComponent(id)}`),
+    create: (b: { resumeId: string }) => post<{ invite: PsychInvite }>('/api/psych/invites', b),
+    send: (id: string) => post<{ invite: PsychInvite }>(`/api/psych/invites/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ invite: PsychInvite }>(`/api/psych/invites/${encodeURIComponent(id)}/cancel`, {}),
+    norms: {
+      get: () =>
+        get<{ norms: PsychNormConfig | null; minNormN: number; scales: { id: string; label: string }[] }>('/api/psych/norms'),
+      save: (b: { source: string; n: number; scales: Record<string, { mean: number; sd: number }> }) =>
+        put<{ norms: PsychNormConfig }>('/api/psych/norms', b),
+      clear: () => del<{ norms: null }>('/api/psych/norms'),
+    },
+    report: (jobId: string) => get<{ report: PsychGroupReport }>(`/api/psych/report?jobId=${encodeURIComponent(jobId)}`),
+    public: {
+      get: (token: string) => get<{ test: PublicPsychTest }>(`/api/psych/public/${encodeURIComponent(token)}`),
+      save: (token: string, answers: Record<string, number>) =>
+        post<{ saved: boolean; answered: number }>(`/api/psych/public/${encodeURIComponent(token)}/answers`, { answers }),
+      submit: (token: string, answers: Record<string, number>) =>
+        post<{ test: PublicPsychTest }>(`/api/psych/public/${encodeURIComponent(token)}/submit`, { answers }, { timeoutMs: 30_000 }),
+      decline: (token: string) => post<{ test: PublicPsychTest }>(`/api/psych/public/${encodeURIComponent(token)}/decline`, {}),
+    },
   },
   /** «چالش کد» — the bank, invitations, and the candidate's token page. */
   coding: {

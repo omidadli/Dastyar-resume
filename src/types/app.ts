@@ -187,6 +187,11 @@ export type ActivityType =
   | 'code.sent'
   | 'code.submitted'
   | 'code.cancelled'
+  | 'psych.sent'
+  | 'psych.submitted'
+  | 'psych.cancelled'
+  | 'psych.declined'
+  | 'psych.norms'
   | 'settings.changed';
 
 export interface ActivityItem {

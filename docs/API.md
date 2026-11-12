@@ -460,6 +460,48 @@ POST /api/inbox/referrals/:id/approve body: { note? }
 
 ---
 
+## ۵ط) چالش کد و سنجش نرم‌شده (داخل برنامه، بدون کلید)
+
+```http
+# چالش کد — کارجو
+GET  /api/code/public/:token            → { challenge }        # بدون تست پنهان، بدون پاسخ مرجع
+POST /api/code/public/:token/run        body: { code }         # فقط نمونه‌های قابل‌مشاهده، رایگان
+POST /api/code/public/:token/submit     body: { code }         # یک‌بار، نهایی
+POST /api/code/public/:token/decline
+
+# چالش کد — فضای کاری
+GET  /api/code/challenges
+GET  /api/code/invites?resumeId=
+POST /api/code/invites                  body: { resumeId, challengeId }
+POST /api/code/invites/:id/send
+POST /api/code/invites/:id/cancel
+GET  /api/code/invites/:id              → { invite, rubric, tests }
+
+# سنجش نرم‌شده — کارجو
+GET  /api/psych/public/:token           → { test }
+POST /api/psych/public/:token/answers   body: { answers }
+POST /api/psych/public/:token/submit    body: { answers }
+POST /api/psych/public/:token/decline
+
+# سنجش نرم‌شده — فضای کاری
+GET  /api/psych/scales
+GET  /api/psych/invites?resumeId=|jobId=
+POST /api/psych/invites                 body: { resumeId }
+POST /api/psych/invites/:id/send
+POST /api/psych/invites/:id/cancel
+GET  /api/psych/invites/:id             → { invite, reading }
+GET  /api/psych/norms
+PUT  /api/psych/norms                   body: { source, n, scales: { <scaleId>: { mean, sd } } }
+DELETE /api/psych/norms
+GET  /api/psych/report?jobId=
+```
+
+هیچ‌کدام از این مسیرها با کلید API قابل فراخوانی نیست و لازم هم نیست: لینک کارجو خودش کلید است
+(توکن تصادفی ۱۸ بایتی) و سمت فضای کاری، نشست کاربر با نقش بررسی می‌شود. پاسخ‌های خام سنجش هرگز
+برنمی‌گردند؛ فقط نمره و کیفیت. جزئیات: [`CODING.md`](CODING.md) و [`PSYCHOMETRICS.md`](PSYCHOMETRICS.md).
+
+---
+
 ## ۵ز) انتقال به حقوق و دستمزد (داخل برنامه)
 
 ```http

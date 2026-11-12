@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
   Braces,
+  BarChart3,
   Building2,
   Copy,
   EyeOff,
@@ -43,8 +44,9 @@ import { OfferApprovalCard } from '../components/settings/OfferApprovalCard';
 import { ReferralCard } from '../components/settings/ReferralCard';
 import { EeoCard } from '../components/settings/EeoCard';
 import { DeveloperTab } from './settings/DeveloperTab';
+const PsychNormsTab = lazy(() => import('./settings/PsychNormsTab'));
 
-type SettingsTab = 'org' | 'branding' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'developer' | 'account';
+type SettingsTab = 'org' | 'branding' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'psych' | 'developer' | 'account';
 const ROLE_LABEL: Record<Role, string> = { owner: 'مالک', admin: 'مدیر', member: 'عضو' };
 
 function ReadOnlyNote() {
@@ -1253,6 +1255,7 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   messages: 'پیام‌ها',
   ai: 'هوش مصنوعی',
   integrations: 'اتصال‌ها',
+  psych: 'سنجش نرم‌شده',
   developer: 'توسعه‌دهندگان',
   account: 'حساب کاربری',
 };
@@ -1280,6 +1283,7 @@ export default function Settings({ tab }: { tab: string }) {
           { id: 'messages', label: TAB_LABELS.messages, icon: MessageSquareText },
           { id: 'ai', label: TAB_LABELS.ai, icon: Sparkles },
           { id: 'integrations', label: TAB_LABELS.integrations, icon: PlugZap },
+          { id: 'psych', label: TAB_LABELS.psych, icon: BarChart3 },
           { id: 'developer', label: TAB_LABELS.developer, icon: Braces },
           { id: 'account', label: TAB_LABELS.account, icon: UserRound },
         ]}
@@ -1304,6 +1308,11 @@ export default function Settings({ tab }: { tab: string }) {
       {current === 'messages' && <MessagesTab />}
       {current === 'ai' && <AiTab />}
       {current === 'integrations' && <IntegrationsTab />}
+      {current === 'psych' && (
+        <Suspense fallback={<Skeleton className="h-64" />}>
+          <PsychNormsTab />
+        </Suspense>
+      )}
       {current === 'developer' && <DeveloperTab />}
       {current === 'account' && <AccountTab />}
     </div>

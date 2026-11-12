@@ -309,6 +309,11 @@ export const CHAT_EVENT_LABEL: Record<string, string> = {
   'code.sent': 'ارسال چالش کد',
   'code.submitted': 'ارسال پاسخ چالش کد',
   'code.cancelled': 'لغو چالش کد',
+  'psych.sent': 'ارسال سنجش نرم‌شده',
+  'psych.submitted': 'تکمیل سنجش نرم‌شده',
+  'psych.cancelled': 'لغو سنجش نرم‌شده',
+  'psych.declined': 'نپذیرفتن سنجش نرم‌شده',
+  'psych.norms': 'تغییر هنجار مقایسه‌ای',
   'survey.answered': 'پاسخ کارجو به نظرسنجی',
 };
 

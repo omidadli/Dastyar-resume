@@ -39,6 +39,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trash2,
+  BarChart3,
   Code2,
   UserRoundCheck,
   Wallet,
@@ -909,6 +910,10 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   {/* «استعلام مرجع» has a page of its own — consent, referees, answers. */}
                   <Button size="sm" variant="ghost" icon={UserRoundCheck} onClick={() => navigate(`/app/candidates/${record.id}/references`)} disabled={hidden}>
                     استعلام مرجع
+                  </Button>
+                  {/* «سنجش نرم‌شده» — five scales, read against a named norm group. */}
+                  <Button size="sm" variant="ghost" icon={BarChart3} onClick={() => navigate(`/app/candidates/${record.id}/psychometrics`)} disabled={hidden}>
+                    سنجش نرم‌شده
                   </Button>
                   {/* «چالش کد» runs the candidate's own code against tests. */}
                   <Button size="sm" variant="ghost" icon={Code2} onClick={() => navigate(`/app/candidates/${record.id}/coding`)} disabled={hidden}>

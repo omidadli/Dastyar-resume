@@ -77,6 +77,8 @@ const Survey = lazyPage(() => import('./pages/Survey'));
 const ReferenceForm = lazyPage(() => import('./pages/ReferenceForm'));
 const References = lazyPage(() => import('./pages/References'));
 const CodeChallenge = lazyPage(() => import('./pages/CodeChallenge'));
+const PsychTest = lazyPage(() => import('./pages/PsychTest'));
+const PsychReview = lazyPage(() => import('./pages/PsychReview'));
 const CodeReview = lazyPage(() => import('./pages/CodeReview'));
 const Assessment = lazyPage(() => import('./pages/Assessment'));
 const Settings = lazyPage(() => import('./pages/Settings'));
@@ -135,6 +137,15 @@ function appPage(pathname: string): React.ReactNode {
   if (m) return RECORD_ID.test(m.id) ? <JobDetail key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/candidates') return <Candidates />;
   // «استعلام مرجع» has its own page: it needs room for consent, referees and answers.
+  // «سنجش نرم‌شده» for one candidate.
+  m = matchPath('/app/candidates/:id/psychometrics', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <PsychReview resumeId={m.id} />
+      </Suspense>
+    );
+  }
   // «چالش کد» for one candidate.
   m = matchPath('/app/candidates/:id/coding', pathname);
   if (m) {
@@ -239,6 +250,15 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <Survey token={m.token} />
+      </Suspense>
+    );
+  }
+  // «سنجش نرم‌شده» — the candidate's token page.
+  m = matchPath('/psych/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <PsychTest token={m.token} />
       </Suspense>
     );
   }

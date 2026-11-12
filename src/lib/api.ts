@@ -359,6 +359,8 @@ export const api = {
     get: () => get<BrandingPayload>('/api/org/branding', { timeoutMs: 20_000 }),
     save: (branding: OrgBranding) => put<BrandingPayload>('/api/org/branding', branding, { timeoutMs: 45_000 }),
     reset: () => post<BrandingPayload>('/api/org/branding/reset', {}),
+    /** «نامهٔ آزمایشی به خودم» — proves the letterhead in a real inbox. */
+    emailTest: () => post<{ ok: boolean; to: string; messageId: string }>('/api/org/branding/email-test', {}, { timeoutMs: 45_000 }),
   },
   ai: {
     status: () => get<AiStatus>('/api/ai/status'),

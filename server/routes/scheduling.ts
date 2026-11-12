@@ -24,6 +24,7 @@ import { formatJalaliDate } from '../../src/utils/jalali';
 import { tehranIsoFromJalali, tehranJalaliOf } from '../tehran-time';
 import type { PublicSchedulingLink, SchedulingLink, SchedulingSlot } from '../../src/types/scheduling';
 import type { OrgPublic } from '../../src/types/app';
+import { mailBrandOf } from '../mail-brand';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const MAX_SLOTS = 8;
@@ -277,7 +278,7 @@ export function schedulingRoutes() {
         org.name,
       ].join('\n');
       try {
-        await sendMail(db.resolveOrgSecrets(org.id).email!, { to, subject: `انتخاب زمان مصاحبه — ${row.jobTitle}`, text });
+        await sendMail(db.resolveOrgSecrets(org.id).email!, { to, subject: `انتخاب زمان مصاحبه — ${row.jobTitle}`, text, brand: mailBrandOf(org) });
       } catch (err: any) {
         return res.status(502).json({ error: `ارسال نشد: ${friendlySmtpError(err)}`, code: 'SMTP_FAILED' });
       }

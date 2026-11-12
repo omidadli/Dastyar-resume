@@ -54,6 +54,7 @@ import { decryptSecret, encryptSecret } from '../secret';
 import { formatJalaliDate, toPersianDigits } from '../../src/utils/jalali';
 import { TEHRAN_OFFSET_MINUTES, tehranIsoFromJalali, tehranJalaliOf, tehranNow } from '../tehran-time';
 import type { SourcingBrief, SourcingProfile } from '../../src/types/integrations';
+import { mailBrandOf } from '../mail-brand';
 
 const MAX_RESULTS = 50;
 
@@ -574,7 +575,7 @@ export function integrationRoutes(): express.Router {
         attachments: [],
       };
       try {
-        await sendMail(settings, { to, subject, text: body });
+        await sendMail(settings, { to, subject, text: body, brand: mailBrandOf(org) });
       } catch (err: any) {
         row.status = 'failed';
         row.error = friendlySmtpError(err);

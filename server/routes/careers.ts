@@ -26,6 +26,7 @@ import { systemSettings } from '../platform';
 import { markOfferReached, markOutcome, memberByCode, recordReferral } from '../referrals';
 import { blockedByJob, blockedByResume, visibleJobs } from '../job-access';
 import { eeoConfigOf, readEeoInput } from '../eeo';
+import { mailBrandOf } from '../mail-brand';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const RESERVED_SLUGS = new Set([
@@ -582,7 +583,7 @@ export function careerPublicRoutes() {
           attachments: [],
         };
         try {
-          await sendMail(secrets.email!, { to: email, subject: row.subject, text: bodyText });
+          await sendMail(secrets.email!, { to: email, subject: row.subject, text: bodyText, brand: mailBrandOf(org) });
           emailed = true;
           db.saveEmail(row);
         } catch (err: any) {

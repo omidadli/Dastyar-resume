@@ -20,6 +20,7 @@ import { withinEmailLimit, noteEmailSend } from './email-rate';
 import { DEFAULT_ONBOARDING_TASKS } from '../src/types/onboarding';
 import type { OnboardingPlan, OnboardingStatus, OnboardingTask } from '../src/types/onboarding';
 import type { ResumeRecord } from '../src/types/screening';
+import { mailBrandOf } from './mail-brand';
 
 export class OnboardingError extends Error {
   status: number;
@@ -328,7 +329,7 @@ export async function sendWelcome(
     attachments: [],
   };
   try {
-    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body });
+    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body, brand: mailBrandOf(db.getOrg(orgId)) });
     noteEmailSend(orgId);
   } catch (err: any) {
     // The failure is part of the candidate's history too — not a silent no-op.

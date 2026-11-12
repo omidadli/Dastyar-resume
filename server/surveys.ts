@@ -18,6 +18,7 @@ import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
 import { SURVEY_DIMENSIONS, SURVEY_STAGE_LABEL } from '../src/types/survey';
 import type { ExperienceReport, PublicSurvey, SurveyAnswers, SurveyStage, SurveyStatus } from '../src/types/survey';
+import { mailBrandOf } from './mail-brand';
 
 export class SurveyError extends Error {
   status: number;
@@ -178,7 +179,7 @@ export async function sendInvite(orgId: string, id: string, url: string, actor: 
   const org = db.getOrg(orgId);
   const { subject, body } = invitationText(row, org?.name || 'سازمان', url);
   try {
-    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body });
+    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body, brand: mailBrandOf(db.getOrg(orgId)) });
   } catch (err: any) {
     throw new SurveyError(friendlySmtpError(err), 502, 'EMAIL_FAILED');
   }

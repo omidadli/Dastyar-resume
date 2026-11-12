@@ -16,6 +16,7 @@ import * as db from './db';
 import { friendlySmtpError, sendMail } from './mailer';
 import { formatJalaliDate, toPersianDigits } from '../src/utils/jalali';
 import { jalaliAndTehranTime, tehranJalaliOf } from './tehran-time';
+import { mailBrandOf } from './mail-brand';
 
 export interface ReminderOutcome {
   /** How many interviews fall inside the window right now. */
@@ -91,6 +92,7 @@ export async function sendInterviewReminders(now = new Date(), orgId?: string): 
         to: recipients.join(', '),
         subject: `یادآوری مصاحبه — ${row.title}`,
         text: bodyFor(row, organizer),
+        brand: mailBrandOf(db.getOrg(row.orgId)),
       });
       // Marked only after the SMTP server accepted the message.
       row.reminderSentAtISO = atISO;

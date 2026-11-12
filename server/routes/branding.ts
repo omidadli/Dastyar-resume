@@ -15,7 +15,9 @@ import * as db from '../db';
 import { actorOf, ctxOf, requireRole } from '../auth';
 import { BRAND_PRESETS, DEFAULT_BRANDING, LANDING_KEYS, NAV_KEYS, type OrgBranding } from '../../src/types/branding';
 import { brandTokens, isBranded, isHex, normalizeHex } from '../../src/lib/brand';
-import { str } from './util';
+import { mailBrandOf } from '../mail-brand';
+import { friendlySmtpError, isEmailConfigured, sendMail } from '../mailer';
+import { h, str } from './util';
 
 const LOGO_MAX = 512 * 1024; // characters of data-URI ≈ 384 KB of image
 const IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml', 'image/x-icon', 'image/vnd.microsoft.icon'];
@@ -110,6 +112,13 @@ export function validateBranding(raw: any): OrgBranding {
       ),
     },
     landing: (LANDING_KEYS as readonly string[]).includes(raw.landing) ? raw.landing : base.landing,
+    email: {
+      // Empty means «add nothing»: most letters already sign themselves, and a
+      // second signature stacked on top is worse than none.
+      signoff: text(raw.email?.signoff, 200),
+      footerNote: text(raw.email?.footerNote, 300),
+      includeLogo: raw.email?.includeLogo === undefined ? base.email.includeLogo : Boolean(raw.email.includeLogo),
+    },
     terms: {
       candidate: text(raw.terms?.candidate, 30, base.terms.candidate),
       job: text(raw.terms?.job, 30, base.terms.job),
@@ -171,6 +180,49 @@ export function brandingRoutes(): express.Router {
       }
       res.json({ ...brandingPayload(updated || { branding: payload }) });
     }
+  );
+
+  /**
+   * «یک نامهٔ آزمایشی به خودم» — the only honest way to check a letterhead is to
+   * open it in a real inbox. It goes to the signed-in admin, uses the saved
+   * identity (not the unsaved draft in the editor), and says so when the
+   * mailbox is not connected instead of pretending it sent something.
+   */
+  r.post(
+    '/org/branding/email-test',
+    requireRole('admin'),
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      const secrets = db.resolveOrgSecrets(org.id);
+      if (!isEmailConfigured(secrets)) {
+        return res.status(409).json({
+          error: 'صندوق ایمیل سازمان هنوز وصل نیست؛ از «تنظیمات ← اتصال‌ها» وصلش کنید تا بتوانیم نامهٔ آزمایشی بفرستیم.',
+          code: 'EMAIL_NOT_CONFIGURED',
+        });
+      }
+      const brand = mailBrandOf(org);
+      const text = [
+        `${user.name} عزیز،`,
+        '',
+        `این یک نامهٔ آزمایشی از «${brand.name}» است؛ آن را برای دیدن ظاهر سربرگ، رنگ‌ها و پانویس روی همان دستگاهی باز کنید که کارجوها با آن نامه می‌خوانند.`,
+        '',
+        'اگر جایی از این نامه درست دیده نشد — مثلاً لوگو در سربرگ نیامد — در «تنظیمات ← هویت سازمانی ← نامهٔ سازمان» یک تصویر PNG بارگذاری کنید (بعضی صندوق‌ها SVG و WebP را نشان نمی‌دهند).',
+        '',
+        'این نامه به هیچ کارجویی فرستاده نشده است.',
+      ].join('\n');
+      try {
+        const sent = await sendMail(secrets.email!, {
+          to: user.email,
+          subject: `نامهٔ آزمایشی — ${brand.name}`,
+          text,
+          brand,
+        });
+        db.logActivity(org.id, actorOf(req), 'settings.changed', 'یک نامهٔ آزمایشی از هویت سازمانی برای خودش فرستاد');
+        res.json({ ok: true, to: user.email, messageId: sent.messageId });
+      } catch (err: any) {
+        res.status(502).json({ error: friendlySmtpError(err), code: 'SMTP_FAILED' });
+      }
+    })
   );
 
   r.post('/org/branding/reset', requireRole('admin'), (req, res) => {

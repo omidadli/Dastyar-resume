@@ -15,6 +15,7 @@ import { noteEmailSend, withinEmailLimit } from './email-rate';
 import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranIsoFromJalali, tehranJalaliOf } from './tehran-time';
 import { str } from './routes/util';
+import { mailBrandOf } from './mail-brand';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -193,6 +194,7 @@ export async function bookInterview(input: {
           subject: `دعوت به مصاحبه — ${job.roleTitle} — ${org.name}`,
           text,
           attachments: [{ filename: 'interview.ics', content: Buffer.from(ics, 'utf-8'), contentType: 'text/calendar' }],
+          brand: mailBrandOf(org),
         });
         row.inviteSentTo = candidateEmail;
         noteEmailSend(org.id);

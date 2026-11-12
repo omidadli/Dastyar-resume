@@ -25,6 +25,7 @@ import { isEmailConfigured, sendMail, friendlySmtpError } from './mailer';
 import { formatJalaliDate, toPersianDigits } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
 import type { PublicVideoInvite, VideoAnswer, VideoInvite, VideoQuestion, VideoSettings, VideoStatus } from '../src/types/video';
+import { mailBrandOf } from './mail-brand';
 
 export class VideoError extends Error {
   status: number;
@@ -257,7 +258,7 @@ export async function sendInvite(
   const org = db.getOrg(orgId);
   const { subject, body } = invitationText(row, org?.name || 'سازمان', url);
   try {
-    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body });
+    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body, brand: mailBrandOf(db.getOrg(orgId)) });
   } catch (err: any) {
     throw new VideoError(friendlySmtpError(err), 502, 'EMAIL_FAILED');
   }

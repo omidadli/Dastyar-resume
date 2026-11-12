@@ -14,6 +14,7 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import type { EmailSettingsPublic } from '../src/types/integrations';
 import type { OrgSecrets } from './db';
 import { decryptSecret, encryptSecret } from './secret';
+import { HOVIDA_MAIL_BRAND, LOGO_CID, logoAttachment, renderEmailHtml, type MailBrand } from './mail-brand';
 
 export interface EmailSettingsInput {
   host: string;
@@ -146,13 +147,10 @@ function transportFor(settings: NonNullable<OrgSecrets['email']>): Transporter {
   return transporter;
 }
 
-function plainToHtml(text: string): string {
-  const escaped = text
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-  return `<!doctype html><html dir="rtl" lang="fa"><body style="margin:0;padding:24px;background:#f7f8f9;font-family:Tahoma,'Segoe UI',sans-serif"><div style="max-width:640px;margin:0 auto;background:#fff;border:1px solid #e6e8eb;border-radius:12px;padding:28px 26px;color:#1d2329;font-size:14px;line-height:2;white-space:pre-wrap">${escaped.replace(/\n/g, '<br>')}</div></body></html>`;
+/** The letter for a workspace: its own colours, logo and footer (see mail-brand.ts). */
+export function htmlFor(text: string, brand: MailBrand = HOVIDA_MAIL_BRAND): string {
+  const attached = Boolean(logoAttachment(brand));
+  return renderEmailHtml(text, brand, { logoCid: attached ? LOGO_CID : null });
 }
 
 /** Header-injection guard: a newline in the subject could add recipients. */
@@ -179,7 +177,14 @@ export interface SendResult {
 
 export async function sendMail(
   settings: NonNullable<OrgSecrets['email']>,
-  message: { to: string; subject: string; text: string; attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }> }
+  message: {
+    to: string;
+    subject: string;
+    text: string;
+    attachments?: Array<{ filename: string; content: Buffer | string; contentType?: string }>;
+    /** The workspace the letter is from. Omitted = HOVIDA's own letterhead. */
+    brand?: MailBrand | null;
+  }
 ): Promise<SendResult> {
   const to = String(message.to || '').trim().toLowerCase();
   if (!EMAIL_RE.test(to)) throw new Error('نشانی ایمیل گیرنده معتبر نیست.');
@@ -188,15 +193,18 @@ export async function sendMail(
   const text = String(message.text || '').slice(0, 20_000);
   if (!text.trim()) throw new Error('متن ایمیل خالی است.');
 
+  const brand = message.brand || HOVIDA_MAIL_BRAND;
   const from = settings.fromName ? `"${settings.fromName.replace(/"/g, '')}" <${settings.fromAddress}>` : settings.fromAddress;
+  // An attached logo needs a cid; without one the header draws the wordmark.
+  const logo = logoAttachment(brand);
   const info = await transportFor(settings).sendMail({
     from,
     to,
     replyTo: settings.replyTo || undefined,
     subject,
     text,
-    html: plainToHtml(text),
-    attachments: message.attachments,
+    html: renderEmailHtml(text, brand, { logoCid: logo ? LOGO_CID : null }),
+    attachments: [...(message.attachments || []), ...(logo ? [logo] : [])],
   });
   return { messageId: String(info.messageId || ''), accepted: (info.accepted || []).map(String) };
 }

@@ -26,6 +26,7 @@ import { tehranJalaliOf } from '../tehran-time';
 import { withinEmailLimit, noteEmailSend } from '../email-rate';
 import type { JobOffer, OfferApprovalStep, OfferStatus, OfferTerms, PublicOffer } from '../../src/types/offers';
 import { OFFER_STATUS_LABEL } from '../../src/types/offers';
+import { mailBrandOf } from '../mail-brand';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -433,6 +434,7 @@ export function offerRoutes() {
           to,
           subject: `پیشنهاد شغلی — ${row.terms.title || row.jobTitle}`,
           text: emailBody(row, org.name, link),
+          brand: mailBrandOf(org),
         });
         noteEmailSend(org.id);
       } catch (err: any) {

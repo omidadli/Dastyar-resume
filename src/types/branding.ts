@@ -47,6 +47,23 @@ export interface BrandTerms {
   offer: string;
 }
 
+/**
+ * What every letter we send on the company's behalf looks like.
+ *
+ * E-mail is not a web page: clients strip styles, block data-URI images and
+ * ignore modern layout. So this block is deliberately small — the things that
+ * survive an inbox — and the renderer (server/mail-brand.ts) draws them with
+ * table-based HTML and an *attached* logo, which Gmail and Outlook both show.
+ */
+export interface BrandEmail {
+  /** Closing line, e.g. «با احترام، واحد منابع انسانی». Empty = nothing added. */
+  signoff: string;
+  /** Small print in the footer: address, phone, the company's own notice. */
+  footerNote: string;
+  /** The logo in the letter header (attached inline, never a data-URI). */
+  includeLogo: boolean;
+}
+
 /** The panel's own navigation: renamed items, and the ones this team never uses. */
 export interface BrandNav {
   /** Keys from `NAV_KEYS` the workspace chose to hide. */
@@ -94,6 +111,7 @@ export interface OrgBranding {
   portal: BrandPortal;
   terms: BrandTerms;
   nav: BrandNav;
+  email: BrandEmail;
   /** Key from `LANDING_KEYS`; the dashboard unless the company chose otherwise. */
   landing: LandingKey;
   /** «ساخته‌شده با هویدا» in the sidebar footer; false = fully white-label. */
@@ -134,6 +152,7 @@ export const DEFAULT_BRANDING: OrgBranding = {
   portal: { heading: '', coverDataUrl: null },
   terms: { candidate: 'کارجو', job: 'فرصت شغلی', interview: 'مصاحبه', offer: 'پیشنهاد شغلی' },
   nav: { hidden: [], labels: {} },
+  email: { signoff: '', footerNote: '', includeLogo: true },
   landing: 'dashboard',
   showHovidaCredit: true,
   updatedAtISO: null,

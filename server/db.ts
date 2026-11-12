@@ -943,6 +943,7 @@ function normalizeOrg(o: OrgRecord): OrgRecord {
       portal: { ...DEFAULT_BRANDING.portal, ...(o.branding.portal || {}) },
       terms: { ...DEFAULT_BRANDING.terms, ...(o.branding.terms || {}) },
       nav: { hidden: Array.isArray(o.branding.nav?.hidden) ? o.branding.nav.hidden : [], labels: { ...(o.branding.nav?.labels || {}) } },
+      email: { ...DEFAULT_BRANDING.email, ...(o.branding.email || {}) },
     } : undefined,
   };
 }

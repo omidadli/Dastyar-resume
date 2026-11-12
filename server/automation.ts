@@ -29,6 +29,7 @@ import { bookInterview } from './interviews';
 import { calendarStatus } from './gcal';
 import { formatJalaliDate, toPersianDigits } from '../src/utils/jalali';
 import { jalaliAndTehranTime, tehranIsoFromJalali, tehranJalaliOf } from './tehran-time';
+import { mailBrandOf } from './mail-brand';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const AUTOMATION_ACTOR = { id: 'automation', name: 'اتوماسیون جذب' };
@@ -380,7 +381,7 @@ export async function approveAction(
     attachments: [],
   };
   try {
-    await sendMail(mailSecrets, { to: email, subject, text });
+    await sendMail(mailSecrets, { to: email, subject, text, brand: mailBrandOf(org) });
   } catch (err: any) {
     mail.status = 'failed';
     mail.error = friendlySmtpError(err);

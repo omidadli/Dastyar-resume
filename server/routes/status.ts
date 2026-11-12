@@ -16,6 +16,7 @@ import { StatusError, createLink, listLinks, markLinkSent, publicStatus, revokeL
 import { formatJalaliDate } from '../../src/utils/jalali';
 import { tehranJalaliOf } from '../tehran-time';
 import { h, str } from './util';
+import { mailBrandOf } from '../mail-brand';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -128,7 +129,7 @@ export function statusRoutes() {
       });
       const stamp = new Date();
       try {
-        await sendMail(db.resolveOrgSecrets(org.id).email!, { to, subject, text });
+        await sendMail(db.resolveOrgSecrets(org.id).email!, { to, subject, text, brand: mailBrandOf(org) });
         noteEmailSend(org.id);
       } catch (err: any) {
         db.saveEmail({

@@ -32,6 +32,7 @@ import type {
   PublicAssessment,
 } from '../src/types/assessment';
 import type { AssessmentTemplate } from './assessment-bank';
+import { mailBrandOf } from './mail-brand';
 
 export class AssessmentError extends Error {
   status: number;
@@ -262,7 +263,7 @@ export async function sendInvite(orgId: string, id: string, url: string, actor: 
   const org = db.getOrg(orgId);
   const { subject, body } = invitationText(row, org?.name || 'سازمان', url);
   try {
-    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body });
+    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body, brand: mailBrandOf(org) });
   } catch (err: any) {
     throw new AssessmentError(friendlySmtpError(err), 502, 'EMAIL_FAILED');
   }

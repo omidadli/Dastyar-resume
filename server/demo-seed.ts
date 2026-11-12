@@ -844,6 +844,7 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
       landing: 'dashboard',
       login: { ...DEFAULT_BRANDING.login, title: 'ورود به سامانهٔ استخدام آوا', subtitle: 'رزومه‌ها، مصاحبه‌ها و تصمیم‌ها در یک جای امن.' },
       portal: { heading: 'به تیم آوا بپیوندید', coverDataUrl: null },
+      email: { signoff: 'با احترام،\nواحد منابع انسانی آوا', footerNote: 'تهران، خیابان ولیعصر — ۰۲۱–۸۸۷۷۶۶۵۵', includeLogo: true },
       updatedAtISO: new Date().toISOString(),
       updatedByName: 'مدیر منابع انسانی',
       presetId: 'indigo',

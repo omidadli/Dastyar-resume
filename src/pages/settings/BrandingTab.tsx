@@ -13,7 +13,7 @@
  *     someone cannot read.
  */
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Check, Image as ImageIcon, Palette, RotateCcw, Save, Sparkles, TriangleAlert, Type, LayoutTemplate } from 'lucide-react';
+import { Check, Image as ImageIcon, LayoutTemplate, Mail, Palette, RotateCcw, Save, Sparkles, TriangleAlert, Type } from 'lucide-react';
 import { Button, Callout, Card, CardHeader, Field, Segmented, Select, Switch, TextArea, TextInput, toast } from '../../components/ui';
 import { useAuth } from '../../lib/auth';
 import { api, ApiError } from '../../lib/api';
@@ -262,6 +262,67 @@ function Preview({ branding }: { branding: OrgBranding }) {
   );
 }
 
+/**
+ * «نامهٔ سازمان» — a miniature of the e-mail, drawn with the same rules the
+ * server uses (accent rule on top, logo or wordmark, body, signature, footer).
+ * It is deliberately plain: an inbox is not a browser, and showing a fancier
+ * preview here would promise something the mail clients cannot deliver.
+ */
+function MailPreview({ branding }: { branding: OrgBranding }) {
+  const { vars } = useMemo(() => brandTokens(branding), [branding]);
+  const name = branding.nickname || 'سازمان شما';
+  const logo = branding.email.includeLogo ? branding.logoDataUrl || branding.markDataUrl : null;
+  const raster = logo && /^data:image\/(png|jpeg|gif)/i.test(logo);
+  return (
+    <div className="rounded-card border border-line overflow-hidden bg-[#f4f5f5] p-3" dir="rtl">
+      <div className="mx-auto max-w-[420px] rounded-[10px] overflow-hidden bg-white border border-[#e4e7e5]">
+        <div className="h-1" style={{ background: vars['--color-brand-strong'] }} />
+        <div className="px-4 pt-3 pb-1">
+          {raster ? (
+            <img src={logo as string} alt="" style={{ height: 24 }} className="object-contain" />
+          ) : (
+            <span className="text-[13px] font-extrabold" style={{ color: vars['--color-brand-ink'] }}>
+              {name}
+            </span>
+          )}
+          {logo && !raster && (
+            <p className="text-[9px] text-[#8a4b08] mt-1">
+              این تصویر SVG/WebP است؛ در خیلی از صندوق‌ها نمایش داده نمی‌شود و به‌جایش نام سازمان می‌آید.
+            </p>
+          )}
+        </div>
+        <div className="px-4 pb-3 text-[10.5px] leading-[1.9] text-[#1d2329]">
+          کارجو عزیز،
+          <br />
+          برای «{branding.terms.job}» درخواست شما ثبت شد و در حال بررسی است.
+          {branding.email.signoff && (
+            <>
+              <br />
+              <br />
+              <span className="whitespace-pre-wrap">{branding.email.signoff}</span>
+            </>
+          )}
+        </div>
+        <div className="px-4 py-2.5 border-t border-[#eceeed] text-[9px] leading-[1.9] text-[#6b7570]">
+          <span className="font-bold text-[#3d4742]">{name}</span>
+          {branding.email.footerNote && (
+            <>
+              <br />
+              <span className="whitespace-pre-wrap">{branding.email.footerNote}</span>
+            </>
+          )}
+          {branding.showHovidaCredit && (
+            <>
+              <br />
+              ساخته‌شده با هویدا
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function BrandingTab() {
   const { org } = useAuth();
   const { branding: live, reload } = useBranding();
@@ -269,6 +330,8 @@ export default function BrandingTab() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [mailSending, setMailSending] = useState(false);
+  const [mailResult, setMailResult] = useState<{ ok: boolean; text: string } | null>(null);
 
   // Load the saved identity once (the provider may not have it yet), then keep
   // the draft local: every keystroke is the customer's, not the server's.
@@ -283,15 +346,16 @@ export default function BrandingTab() {
   const dirty = useMemo(() => JSON.stringify({ ...draft, updatedAtISO: null, updatedByName: null }) !== JSON.stringify({ ...live, updatedAtISO: null, updatedByName: null }), [draft, live]);
   const buttonContrast = contrast(brandTokens(draft).vars['--color-brand-strong'], '#FFFFFF');
 
-  const save = async () => {
+  const save = async (opts: { silent?: boolean } = {}) => {
     setSaving(true);
     setError(null);
     try {
       await api.branding.save(draft);
       await reload();
-      toast('هویت سازمانی ذخیره شد؛ پنل همهٔ اعضا همین حالا تغییر کرد.');
+      if (!opts.silent) toast('هویت سازمانی ذخیره شد؛ پنل همهٔ اعضا همین حالا تغییر کرد.');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'ذخیرهٔ هویت سازمانی ممکن نشد.');
+      throw err;
     } finally {
       setSaving(false);
     }
@@ -569,6 +633,69 @@ export default function BrandingTab() {
               </p>
             </div>
           </Card>
+
+          {/* ------------------------------------------------------------ e-mail */}
+          <Card>
+            <CardHeader title="نامهٔ سازمان" subtitle="هر ایمیلی که از طرف شما می‌رود، با هویت خودتان" icon={Mail} />
+            <div className="flex flex-col gap-4">
+              <Switch
+                checked={draft.email.includeLogo}
+                onChange={(v) => set('email', { ...draft.email, includeLogo: v })}
+                label="نمایش لوگو در سربرگ نامه"
+                description="لوگو به نامه پیوست می‌شود (نه لینک) — صندوق‌های Gmail، Outlook و Yandex آن را نشان می‌دهند."
+              />
+              <TextArea
+                label="امضای پایانی نامه"
+                optional
+                rows={2}
+                maxLength={200}
+                value={draft.email.signoff}
+                placeholder={'با احترام،\nواحد منابع انسانی'}
+                onChange={(e) => set('email', { ...draft.email, signoff: e.target.value })}
+                hint="زیر متن هر نامه اضافه می‌شود؛ خالی بگذارید تا چیزی اضافه نشود."
+              />
+              <TextArea
+                label="زیرنویس نامه"
+                optional
+                rows={2}
+                maxLength={300}
+                value={draft.email.footerNote}
+                placeholder="نشانی، تلفن یا جملهٔ حقوقی خودتان"
+                onChange={(e) => set('email', { ...draft.email, footerNote: e.target.value })}
+                hint="در پانویس کوچک نامه می‌آید؛ مناسب نشانی و شمارهٔ تماس."
+              />
+              <MailPreview branding={draft} />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  loading={mailSending}
+                  onClick={async () => {
+                    setMailSending(true);
+                    setMailResult(null);
+                    try {
+                      await save({ silent: true });
+                      const r = await api.branding.emailTest();
+                      setMailResult({ ok: true, text: `نامهٔ آزمایشی به ${r.to} فرستاده شد؛ صندوق خود را ببینید.` });
+                    } catch (err) {
+                      setMailResult({ ok: false, text: err instanceof ApiError ? err.message : 'فرستادن نامهٔ آزمایشی ممکن نشد.' });
+                    } finally {
+                      setMailSending(false);
+                    }
+                  }}
+                >
+                  فرستادن یک نامهٔ آزمایشی به خودم
+                </Button>
+                {mailResult && (
+                  <span className={`text-[11.5px] font-semibold ${mailResult.ok ? 'text-brand-ink' : 'text-low-ink'}`}>{mailResult.text}</span>
+                )}
+              </div>
+              <p className="text-[11.5px] text-ink-3 leading-relaxed">
+                نامهٔ آزمایشی اول این صفحه را ذخیره می‌کند و بعد به نشانی حساب خودتان می‌رود؛ به هیچ کارجویی فرستاده نمی‌شود. اگر صندوق ایمیل سازمان در
+                «تنظیمات ← اتصال‌ها» وصل نباشد، همین‌جا صادقانه می‌گوییم.
+              </p>
+            </div>
+          </Card>
         </div>
 
         {/* ---------------------------------------------------------- preview */}
@@ -595,7 +722,7 @@ export default function BrandingTab() {
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <Button icon={Save} onClick={() => void save()} loading={saving} disabled={!dirty}>
+            <Button icon={Save} onClick={() => void save().catch(() => undefined)} loading={saving} disabled={!dirty}>
               ذخیرهٔ هویت سازمانی
             </Button>
             <Button variant="secondary" icon={RotateCcw} onClick={() => setConfirmReset(true)} disabled={saving}>

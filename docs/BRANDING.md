@@ -30,6 +30,7 @@ day, the sign-in screen its staff see, and the career portal its candidates open
 | Words | where people land after signing in | the redirect after login |
 | Sign-in | headline, subtitle, background style (gradient / plain / mesh) | `/login?ws=<career-slug>` |
 | Public portal | heading, wide cover image | `/careers/<slug>` |
+| E-mail | logo in the letterhead (on/off), sign-off line, footer note | every letter: offers, invites, reminders, status links, surveys, assessments, video invites, onboarding |
 
 Two deliberate limits, stated in the UI:
 
@@ -38,6 +39,32 @@ Two deliberate limits, stated in the UI:
 * **Colours are a contract, not free text.** A pale brand colour cannot become
   white text on a button; HOVIDA derives the button shade until it reaches
   WCAG AA (4.5:1) and tells the admin, in Persian, that it did.
+
+---
+
+## The letterhead — `server/mail-brand.ts`
+
+E-mail is the one surface where "just use CSS variables" fails, so it is built
+for the constraints of real inboxes instead of a browser:
+
+| Decision | Why |
+|---|---|
+| **Table layout + inline styles** | Outlook (desktop) drops `<style>` blocks and flexbox; tables and inline attributes survive in Gmail, Outlook, Apple Mail, Yandex. |
+| **The logo is an *attachment* referenced by `cid:`** | Gmail blocks `data:` URIs outright; a remote URL needs a public asset host and can be read as a tracking pixel. A cid attachment shows up everywhere, and the company's logo never sits on a public URL. |
+| **Only PNG/JPEG/GIF are embedded** | Outlook renders neither SVG nor WebP. For those, the header draws the workspace's wordmark instead of an empty box — and the editor says so in plain Persian. |
+| **The accessible shade is used, not the raw brand colour** | `--color-brand-strong` is already walked to 4.5:1 on white; a pale yellow that looks fine on a dashboard is unreadable at 12px in an inbox. |
+| **Plain text is always sent alongside the HTML** | Some clients block HTML; both parts carry the same words. |
+| **No remote pixels, no tracking** | Nothing loads when a candidate opens the letter. |
+
+One sender (`server/mailer.ts → sendMail`) serves all thirteen places that mail
+leaves the product — offer, invite, reminder, status link, survey, assessment,
+video invite, onboarding, automation, referral and the portal auto-reply — so
+there is no way to add a new letter that forgets the letterhead.
+
+**Prove it in a real inbox:** `تنظیمات → هویت سازمانی → نامهٔ سازمان →
+«فرستادن یک نامهٔ آزمایشی به خودم»`. It saves the page first, then mails the
+signed-in admin — never a candidate — and answers honestly when the workspace
+mailbox is not connected yet.
 
 ---
 
@@ -123,7 +150,7 @@ sees in the preview is what the team gets.
 | Not covered | Honest reason |
 |---|---|
 | Custom domain (`hr.company.ir`) | Needs DNS + TLS automation on the deployment; the branding is ready, the hosting step is not. |
-| E-mail templates (logo inside the letter) | The mail settings already own the signature and sender; adding a branded HTML wrapper needs the same per-tenant asset serving decision as the domain above. |
+| ~~E-mail templates~~ | **Done** — see «The letterhead» above. |
 | Per-role themes | Deliberate: one workspace, one identity. A member seeing different colours than their manager is a bug, not a feature. |
 | Arbitrary CSS / custom fonts uploaded | Would let one workspace break the shared bundle and (with a font URL) leak visitor IPs. Offered alternatives: system font or Vazirmatn, plus full colour and geometry control. |
 | Dashboard card choice | The dashboard is still HOVIDA's composition; hiding cards is the next candidate in this area. |

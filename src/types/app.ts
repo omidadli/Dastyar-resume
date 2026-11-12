@@ -1,3 +1,4 @@
+import type { OrgBranding } from './branding';
 import type { OfferApprovalConfig } from './offers';
 // ================================================================
 // HOVIDA — workspace (multi-tenant SaaS) types shared by client & server.
@@ -56,6 +57,11 @@ export interface OrgPublic {
   eeo?: { enabled: boolean; threshold: number };
   /** «گردش تأیید پیشنهاد»: who must sign off before an offer goes to the candidate. */
   offerApproval?: OfferApprovalConfig;
+  /**
+   * «هویت سازمانی» — logo, colours, corners, font, sidebar, the words, the login
+   * screen and the portal cover. Absent means «HOVIDA's own identity».
+   */
+  branding?: OrgBranding;
   createdAtISO: string;
   /** Suspended by a platform admin — members cannot sign in. */
   suspended?: boolean;

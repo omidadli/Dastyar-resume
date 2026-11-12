@@ -38,6 +38,7 @@ import type {
   PagedResult,
   Recommendation,
 } from '../src/types/screening';
+import { DEFAULT_BRANDING } from '../src/types/branding';
 import type {
   ActivityItem,
   ActivityType,
@@ -932,6 +933,17 @@ function normalizeOrg(o: OrgRecord): OrgRecord {
     offerApproval: o.offerApproval && typeof o.offerApproval === 'object'
       ? { enabled: Boolean(o.offerApproval.enabled), steps: Array.isArray(o.offerApproval.steps) ? o.offerApproval.steps : [] }
       : { enabled: false, steps: [] },
+    // A stored identity is merged over the defaults on every load: a field added
+    // in a later version must never make an old workspace's panel unreadable.
+    branding: o.branding && typeof o.branding === 'object' ? {
+      ...DEFAULT_BRANDING,
+      ...o.branding,
+      colors: { ...DEFAULT_BRANDING.colors, ...(o.branding.colors || {}) },
+      login: { ...DEFAULT_BRANDING.login, ...(o.branding.login || {}) },
+      portal: { ...DEFAULT_BRANDING.portal, ...(o.branding.portal || {}) },
+      terms: { ...DEFAULT_BRANDING.terms, ...(o.branding.terms || {}) },
+      nav: { hidden: Array.isArray(o.branding.nav?.hidden) ? o.branding.nav.hidden : [], labels: { ...(o.branding.nav?.labels || {}) } },
+    } : undefined,
   };
 }
 
@@ -1176,7 +1188,7 @@ export function updateOrg(
   patch: Partial<
     Pick<
       OrgRecord,
-      'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'careerLanguages' | 'careerDefaultLang' | 'blindScreening' | 'offerApproval' | 'eeo' | 'scim'
+      'name' | 'messageSignature' | 'departments' | 'careerSlug' | 'careerAbout' | 'careerLanguages' | 'careerDefaultLang' | 'blindScreening' | 'offerApproval' | 'eeo' | 'scim' | 'branding'
     >
   >
 ): OrgRecord | null {
@@ -1193,6 +1205,7 @@ export function updateOrg(
   if (patch.offerApproval && typeof patch.offerApproval === 'object') org.offerApproval = patch.offerApproval;
   if (patch.eeo && typeof patch.eeo === 'object') org.eeo = patch.eeo;
   if (patch.scim !== undefined) org.scim = patch.scim;
+  if (patch.branding !== undefined) org.branding = patch.branding;
   scheduleSave();
   return org;
 }

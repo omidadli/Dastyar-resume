@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import {
   Braces,
   Building2,
@@ -9,6 +9,7 @@ import {
   LayoutGrid,
   LogOut,
   MessageSquareText,
+  Palette,
   PlugZap,
   Plus,
   RefreshCw,
@@ -22,6 +23,10 @@ import {
   Wand2,
 } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
+import { Skeleton } from '../components/ui';
+
+// The identity editor is heavy (colour maths + preview); load it only when opened.
+const BrandingTab = lazy(() => import('./settings/BrandingTab'));
 import { Button, ButtonLink, Callout, Card, CardHeader, Chip, ConfirmDialog, ErrorState, IconButton, Modal, Monogram, Select, Spinner, Switch, Tabs, TextArea, TextInput, toast } from '../components/ui';
 import { api } from '../lib/api';
 import { copyText } from '../lib/clipboard';
@@ -39,7 +44,7 @@ import { ReferralCard } from '../components/settings/ReferralCard';
 import { EeoCard } from '../components/settings/EeoCard';
 import { DeveloperTab } from './settings/DeveloperTab';
 
-type SettingsTab = 'org' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'developer' | 'account';
+type SettingsTab = 'org' | 'branding' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'developer' | 'account';
 const ROLE_LABEL: Record<Role, string> = { owner: 'مالک', admin: 'مدیر', member: 'عضو' };
 
 function ReadOnlyNote() {
@@ -1242,6 +1247,7 @@ function RetentionCard() {
 
 const TAB_LABELS: Record<SettingsTab, string> = {
   org: 'سازمان',
+  branding: 'هویت سازمانی',
   departments: 'دپارتمان‌ها',
   team: 'تیم',
   messages: 'پیام‌ها',
@@ -1268,6 +1274,7 @@ export default function Settings({ tab }: { tab: string }) {
         onChange={(t) => navigate(`/app/settings/${t}`, { keepScroll: true })}
         items={[
           { id: 'org', label: TAB_LABELS.org, icon: Building2 },
+          { id: 'branding', label: TAB_LABELS.branding, icon: Palette },
           { id: 'departments', label: TAB_LABELS.departments, icon: LayoutGrid },
           { id: 'team', label: TAB_LABELS.team, icon: Users },
           { id: 'messages', label: TAB_LABELS.messages, icon: MessageSquareText },
@@ -1286,6 +1293,11 @@ export default function Settings({ tab }: { tab: string }) {
           <ReferralCard />
           <RetentionCard />
         </>
+      )}
+      {current === 'branding' && (
+        <Suspense fallback={<Skeleton className="h-64" />}>
+          <BrandingTab />
+        </Suspense>
       )}
       {current === 'departments' && <DepartmentsTab />}
       {current === 'team' && <TeamTab />}

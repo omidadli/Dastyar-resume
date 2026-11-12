@@ -16,6 +16,7 @@ import { aiStatus } from '../ai/provider';
 import { demoAllowed, demoTtlMs, isEnvAdmin, isPlatformAdmin, publicConfig, systemSettings } from '../platform';
 import { createDemoWorkspace } from '../demo-seed';
 import { orgRequiresSso } from './sso';
+import { publicBrandingOf } from './branding';
 import { h, str } from './util';
 import {
   TwoFactorError,
@@ -152,6 +153,25 @@ export function authRoutes(): express.Router {
   r.get('/config', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     res.json(publicConfig());
+  });
+
+  /**
+   * The identity of one public workspace, for the sign-in screen.
+   *
+   * Staff of a branded workspace open `/login?ws=<career-slug>`: the page then
+   * wears their logo, colours and words instead of HOVIDA's. Only information
+   * that is already public on the career portal is returned — never the member
+   * list, never whether a given e-mail exists.
+   */
+  r.get('/workspace', (req, res) => {
+    const slug = str(req.query?.ws, 80).toLowerCase();
+    res.setHeader('Cache-Control', 'no-store');
+    if (!slug) return res.json({ workspace: null });
+    const org = db.findOrgByCareerSlug(slug);
+    if (!org || org.suspended) return res.json({ workspace: null });
+    const branding = publicBrandingOf(org);
+    if (!branding) return res.json({ workspace: null });
+    res.json({ workspace: { name: org.name, slug: org.careerSlug, branding } });
   });
 
   r.post('/logout', requireAuth, (req, res) => {

@@ -17,6 +17,7 @@ import type {
   ResumeRecord,
   ScreeningAnswers,
 } from '../types/screening';
+import type { BrandingPayload, OrgBranding } from '../types/branding';
 import type { InterviewKit } from '../types/interview-kit';
 import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
 import type { EeoReport } from '../types/eeo';
@@ -352,6 +353,12 @@ export const api = {
       ),
     runRetention: (b: { days?: number; dryRun?: boolean }) =>
       post<{ result: RetentionRunResult; policy: RetentionPolicy }>('/api/org/retention/run', b, { timeoutMs: 120_000 }),
+  },
+  /** «هویت سازمانی»: read, save and reset the workspace's own look. */
+  branding: {
+    get: () => get<BrandingPayload>('/api/org/branding', { timeoutMs: 20_000 }),
+    save: (branding: OrgBranding) => put<BrandingPayload>('/api/org/branding', branding, { timeoutMs: 45_000 }),
+    reset: () => post<BrandingPayload>('/api/org/branding/reset', {}),
   },
   ai: {
     status: () => get<AiStatus>('/api/ai/status'),

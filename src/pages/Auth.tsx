@@ -1,55 +1,141 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Building2, CheckCircle2, KeyRound, Mail, ShieldCheck, Sparkles, UserRound, Workflow } from 'lucide-react';
 import { HovidaLogo, HovidaMark } from '../components/brand/Logo';
 import { Button, Callout, TextInput } from '../components/ui';
 import { api, ApiError } from '../lib/api';
 import type { AuthPayload } from '../types/app';
+import type { PublicOrgBranding } from '../types/careers';
 import { useAuth } from '../lib/auth';
 import { usePublicConfig } from '../lib/config';
 import { Link, navigate, useLocation } from '../lib/router';
 import { useDemoLogin } from '../lib/useDemo';
 import { useTitle } from '../lib/useTitle';
 
+/**
+ * «هویت سازمانی» on the sign-in screen.
+ *
+ * A workspace can point its people at `/login?ws=<its career slug>`; the page
+ * then uses that company's logo, colours, corners and words. Nothing is shown
+ * for a slug that is not a public workspace — the fallback is HOVIDA itself.
+ */
+interface WorkspaceLook {
+  name: string;
+  slug: string;
+  branding: PublicOrgBranding;
+}
+
+function useWorkspaceLook(): { look: WorkspaceLook | null } {
+  const { query } = useLocation();
+  const slug = (query.get('ws') || '').trim().toLowerCase();
+  const [look, setLook] = useState<WorkspaceLook | null>(null);
+  useEffect(() => {
+    if (!slug) return setLook(null);
+    let alive = true;
+    fetch(`/api/auth/workspace?ws=${encodeURIComponent(slug)}`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : { workspace: null }))
+      .then((d) => {
+        if (alive) setLook(d.workspace || null);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [slug]);
+  return { look };
+}
+
 function AuthLayout({ children, title, subtitle }: { children: React.ReactNode; title: string; subtitle: React.ReactNode }) {
+  const { look } = useWorkspaceLook();
+  const b = look?.branding || null;
+  const heading = b?.login.title || title;
+  const sub = b?.login.subtitle || subtitle;
+  const bg = b?.login.background || 'gradient';
+  const asideClass = b ? (bg === 'mesh' ? 'hv-login-mesh' : bg === 'plain' ? 'hv-login-plain' : 'hv-login-gradient') : '';
   return (
-    <div className="min-h-screen grid lg:grid-cols-[1fr_1.05fr] bg-surface" dir="rtl">
+    <div
+      className={`min-h-screen grid lg:grid-cols-[1fr_1.05fr] bg-surface ${b?.theme === 'dark' ? 'hv-dark' : ''}`}
+      dir="rtl"
+      style={(b?.tokens || undefined) as React.CSSProperties | undefined}
+    >
       <div className="flex flex-col px-5 sm:px-10 py-8">
         <header className="self-start">
-          <Link to="/" aria-label="بازگشت به صفحه اصلی هویدا" className="inline-flex">
-            <HovidaLogo height={32} />
+          <Link to="/" aria-label={b ? `بازگشت به صفحهٔ اصلی ${look?.name}` : 'بازگشت به صفحه اصلی هویدا'} className="inline-flex min-w-0">
+            {b?.logoDataUrl ? (
+              <img src={b.logoDataUrl} alt={look?.name || ''} style={{ height: b.logoHeight || 32 }} className="w-auto max-w-[220px] object-contain" />
+            ) : look?.name ? (
+              <span className="text-[18px] font-extrabold text-ink">{look.name}</span>
+            ) : (
+              <HovidaLogo height={32} />
+            )}
           </Link>
         </header>
         <main className="flex-1 flex items-center justify-center py-10">
           <div className="w-full max-w-[400px]">
-            <h1 className="text-[26px] font-extrabold text-ink leading-snug">{title}</h1>
-            <p className="text-[14px] text-ink-3 mt-2 leading-relaxed">{subtitle}</p>
+            <h1 className="text-[26px] font-extrabold text-ink leading-snug">{heading}</h1>
+            <p className="text-[14px] text-ink-3 mt-2 leading-relaxed">{sub}</p>
             <div className="mt-8">{children}</div>
           </div>
         </main>
         <footer>
-          <p className="text-[12px] text-ink-4 text-center">هویدا، تحلیل دقیق‌تر، تصمیم بهتر</p>
+          <p className="text-[12px] text-ink-4 text-center">
+            {look?.name ? (
+              <>
+                ورود امن به فضای کاری <b className="font-semibold text-ink-3">{look.name}</b>
+              </>
+            ) : (
+              'هویدا، تحلیل دقیق‌تر، تصمیم بهتر'
+            )}
+          </p>
         </footer>
       </div>
-      <aside aria-label="درباره هویدا" className="hidden lg:flex relative overflow-hidden bg-brand-soft items-center justify-center p-12">
-        <div className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full bg-white/50" />
-        <div className="absolute -bottom-32 -right-20 w-[360px] h-[360px] rounded-full bg-[#dcebe0]" />
-        <div className="relative max-w-[440px]">
-          <HovidaMark size={84} />
-          <p className="mt-8 text-[34px] font-black text-ink leading-[1.4]">
-            آنچه مهم است،
-            <br />
-            روشن می‌شود.
-          </p>
-          <p className="mt-4 text-[15px] text-ink-2 leading-[1.95]">تحلیل هوشمند رزومه‌ها برای تصمیم‌های بهتر در منابع انسانی.</p>
-          <ul className="mt-8 flex flex-col gap-3.5">
-            {['هر امتیاز همراه با شاهدی از متن رزومه', 'تصمیم نهایی همیشه با شماست', 'فضای کاری اختصاصی و جداگانه برای سازمان شما'].map((t) => (
-              <li key={t} className="flex items-center gap-2.5 text-[14px] font-semibold text-ink-2">
-                <CheckCircle2 className="w-5 h-5 text-brand-strong" />
-                {t}
-              </li>
-            ))}
-          </ul>
-        </div>
+      <aside
+        aria-label={look?.name ? `دربارهٔ ${look.name}` : 'درباره هویدا'}
+        className={`hidden lg:flex relative overflow-hidden items-center justify-center p-12 ${b ? asideClass : 'bg-brand-soft'}`}
+      >
+        {b ? (
+          <>
+            {b.portal.coverDataUrl && (
+              <img src={b.portal.coverDataUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-40" />
+            )}
+            <div className="relative max-w-[440px] text-white">
+              {b.logoDataUrl ? (
+                <img src={b.logoDataUrl} alt="" className="h-16 w-auto object-contain bg-white/90 rounded-xl px-3 py-2" />
+              ) : (
+                <span className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/15 text-3xl font-black">
+                  {(look?.name || 'ه').charAt(0)}
+                </span>
+              )}
+              <p className="mt-8 text-[30px] font-black leading-[1.45] drop-shadow-sm">
+                {b.portal.heading || `به ${look?.name} خوش آمدید`}
+              </p>
+              <p className="mt-4 text-[15px] leading-[1.95] text-white/85">
+                این فضای کاری با هویت سازمانی خودش کار می‌کند؛ همه‌چیز، از رنگ‌ها تا واژه‌ها، همان چیزی است که سازمان شما انتخاب کرده.
+              </p>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="absolute -top-24 -left-24 w-[420px] h-[420px] rounded-full bg-white/50" />
+            <div className="absolute -bottom-32 -right-20 w-[360px] h-[360px] rounded-full bg-brand-soft" />
+            <div className="relative max-w-[440px]">
+              <HovidaMark size={84} />
+              <p className="mt-8 text-[34px] font-black text-ink leading-[1.4]">
+                آنچه مهم است،
+                <br />
+                روشن می‌شود.
+              </p>
+              <p className="mt-4 text-[15px] text-ink-2 leading-[1.95]">تحلیل هوشمند رزومه‌ها برای تصمیم‌های بهتر در منابع انسانی.</p>
+              <ul className="mt-8 flex flex-col gap-3.5">
+                {['هر امتیاز همراه با شاهدی از متن رزومه', 'تصمیم نهایی همیشه با شماست', 'فضای کاری اختصاصی و جداگانه برای سازمان شما'].map((t) => (
+                  <li key={t} className="flex items-center gap-2.5 text-[14px] font-semibold text-ink-2">
+                    <CheckCircle2 className="w-5 h-5 text-brand-strong" />
+                    {t}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </>
+        )}
       </aside>
     </div>
   );

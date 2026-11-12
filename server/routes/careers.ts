@@ -11,6 +11,7 @@
 import express from 'express';
 import * as db from '../db';
 import { ctxOf, requireRole } from '../auth';
+import { publicBrandingOf } from './branding';
 import { h, str } from './util';
 import { evaluateResume } from '../ai/screening';
 import { ingestDocument } from '../ingest';
@@ -415,7 +416,12 @@ export function careerPublicRoutes() {
         .filter((j) => j.isPublic && j.status === 'open' && !isExpired(j))
         .sort((a, b) => (b.publishedAtISO || '').localeCompare(a.publishedAtISO || ''));
       const page: PublicCareersPage = {
-        org: { name: org.name, about: org.careerAbout || '', slug: org.careerSlug },
+        org: {
+          name: org.name,
+          about: org.careerAbout || '',
+          slug: org.careerSlug,
+          branding: publicBrandingOf(org),
+        },
         jobs: jobs.map(publicSummary),
         // The optional self-identification block only appears when HR turned it on.
         portal: { ...portalOf(org), eeoEnabled: eeoConfigOf(org).enabled },

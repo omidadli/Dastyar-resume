@@ -11,6 +11,7 @@ import { LoginPage, SignupPage } from './pages/Auth';
 import NotFound from './pages/NotFound';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { LeaveGuardDialog } from './components/layout/LeaveGuardDialog';
+import { BrandingProvider } from './components/brand/BrandingProvider';
 
 const CHUNK_RELOAD_KEY = 'hovida.chunk-reload';
 
@@ -269,11 +270,13 @@ export default function App() {
     <ErrorBoundary>
       <ConfigProvider>
         <AuthProvider>
-          <AnalysisProvider>
-            <Routes />
-            <Toaster />
-            <LeaveGuardDialog />
-          </AnalysisProvider>
+          <BrandingProvider>
+            <AnalysisProvider>
+              <Routes />
+              <Toaster />
+              <LeaveGuardDialog />
+            </AnalysisProvider>
+          </BrandingProvider>
         </AuthProvider>
       </ConfigProvider>
     </ErrorBoundary>

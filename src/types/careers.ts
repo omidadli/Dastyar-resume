@@ -33,6 +33,25 @@ export interface PublicOrg {
   name: string;
   about: string;
   slug: string;
+  /**
+   * «هویت سازمانی» as the candidate sees it: logo, colours, portal cover and
+   * the workspace's own name. Null = this workspace kept HOVIDA's identity.
+   */
+  branding?: PublicOrgBranding | null;
+}
+
+export interface PublicOrgBranding {
+  logoDataUrl: string | null;
+  markDataUrl: string | null;
+  logoHeight: number;
+  colors: { brand: string; accent: string };
+  theme: 'light' | 'dark';
+  radius: 'sharp' | 'soft' | 'round';
+  font: 'vazirmatn' | 'system';
+  nickname: string;
+  login: { title: string; subtitle: string; background: 'gradient' | 'plain' | 'mesh' };
+  portal: { heading: string; coverDataUrl: string | null };
+  tokens: Record<string, string>;
 }
 
 /** Which languages this workspace publishes in, and which one a newcomer lands on. */

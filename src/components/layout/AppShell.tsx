@@ -28,7 +28,10 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { HovidaLogo, HovidaMark } from '../brand/Logo';
+import { BrandCredit, BrandLock, BrandMark } from '../brand/BrandLock';
+import { useBranding } from '../brand/BrandingProvider';
+import type { NavKey } from '../../types/branding';
+import { landingPath } from '../../lib/brand';
 import { Link, navigate, useLocation } from '../../lib/router';
 import { useAuth } from '../../lib/auth';
 import { usePublicConfig } from '../../lib/config';
@@ -48,25 +51,44 @@ const ROLE_LABEL = { owner: 'مالک فضای کاری', admin: 'مدیر', mem
 
 interface NavItem {
   to: string;
+  /** Stable key: what «هویت سازمانی» renames and hides (never the path). */
+  key: NavKey;
   label: string;
   icon: LucideIcon;
   match: (p: string) => boolean;
 }
 
 const NAV: NavItem[] = [
-  { to: '/app', label: 'داشبورد', icon: LayoutDashboard, match: (p) => p === '/app' || p === '/app/' },
-  { to: '/app/approvals', label: 'کارتابل تأیید', icon: Inbox, match: (p) => p.startsWith('/app/approvals') },
-  { to: '/app/jobs', label: 'فرصت‌های شغلی', icon: BriefcaseBusiness, match: (p) => p.startsWith('/app/jobs') },
-  { to: '/app/candidates', label: 'رزومه‌ها', icon: Users, match: (p) => p.startsWith('/app/candidates') || p.startsWith('/app/compare') },
-  { to: '/app/sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch, match: (p) => p.startsWith('/app/sourcing') },
-  { to: '/app/automation', label: 'اتوماسیون جذب', icon: Sparkles, match: (p) => p.startsWith('/app/automation') },
-  { to: '/app/video', label: 'مصاحبهٔ ویدئویی', icon: Video, match: (p) => p.startsWith('/app/video') },
-  { to: '/app/onboarding', label: 'تحویل پس از استخدام', icon: PackageCheck, match: (p) => p.startsWith('/app/onboarding') },
-  { to: '/app/payroll', label: 'حقوق و دستمزد', icon: Wallet, match: (p) => p.startsWith('/app/payroll') },
-  { to: '/app/talent', label: 'بانک استعداد', icon: Library, match: (p) => p.startsWith('/app/talent') },
-  { to: '/app/reports', label: 'گزارش‌ها', icon: BarChart3, match: (p) => p.startsWith('/app/reports') },
-  { to: '/app/settings', label: 'تنظیمات', icon: Settings, match: (p) => p.startsWith('/app/settings') },
+  { to: '/app', key: 'dashboard', label: 'داشبورد', icon: LayoutDashboard, match: (p) => p === '/app' || p === '/app/' },
+  { to: '/app/approvals', key: 'approvals', label: 'کارتابل تأیید', icon: Inbox, match: (p) => p.startsWith('/app/approvals') },
+  { to: '/app/jobs', key: 'jobs', label: 'فرصت‌های شغلی', icon: BriefcaseBusiness, match: (p) => p.startsWith('/app/jobs') },
+  { to: '/app/candidates', key: 'candidates', label: 'رزومه‌ها', icon: Users, match: (p) => p.startsWith('/app/candidates') || p.startsWith('/app/compare') },
+  { to: '/app/sourcing', key: 'sourcing', label: 'جست‌وجوی استعداد', icon: UserSearch, match: (p) => p.startsWith('/app/sourcing') },
+  { to: '/app/automation', key: 'automation', label: 'اتوماسیون جذب', icon: Sparkles, match: (p) => p.startsWith('/app/automation') },
+  { to: '/app/video', key: 'video', label: 'مصاحبهٔ ویدئویی', icon: Video, match: (p) => p.startsWith('/app/video') },
+  { to: '/app/onboarding', key: 'onboarding', label: 'تحویل پس از استخدام', icon: PackageCheck, match: (p) => p.startsWith('/app/onboarding') },
+  { to: '/app/payroll', key: 'payroll', label: 'حقوق و دستمزد', icon: Wallet, match: (p) => p.startsWith('/app/payroll') },
+  { to: '/app/talent', key: 'talent', label: 'بانک استعداد', icon: Library, match: (p) => p.startsWith('/app/talent') },
+  { to: '/app/reports', key: 'reports', label: 'گزارش‌ها', icon: BarChart3, match: (p) => p.startsWith('/app/reports') },
+  { to: '/app/settings', key: 'settings', label: 'تنظیمات', icon: Settings, match: (p) => p.startsWith('/app/settings') },
 ];
+
+/**
+ * The navigation this workspace actually shows: items it hid are gone, items it
+ * renamed carry its words. «تنظیمات» is never hidden — hiding the place where
+ * navigation is configured would be a trap with no way out.
+ */
+function useNav(): NavItem[] {
+  const { branding } = useBranding();
+  return React.useMemo(() => {
+    const hidden = new Set(branding.nav?.hidden || []);
+    const labels = branding.nav?.labels || {};
+    return NAV.filter((n) => n.key === 'settings' || !hidden.has(n.key)).map((n) => ({
+      ...n,
+      label: (labels[n.key] || '').trim() || n.label,
+    }));
+  }, [branding.nav]);
+}
 
 function AiStatusChip() {
   const { ai } = useAuth();
@@ -136,15 +158,20 @@ function UserCard() {
 
 function Sidebar() {
   const { pathname } = useLocation();
+  const nav = useNav();
+  const { branding, appName } = useBranding();
   return (
-    <aside aria-label="نوار کناری" className="hidden lg:flex fixed inset-y-0 right-0 z-30 w-[256px] flex-col bg-surface border-l border-line">
-      <div className="h-[72px] flex items-center px-6 border-b border-line-2">
-        <Link to="/app" aria-label="هویدا — داشبورد" className="inline-flex">
-          <HovidaLogo height={34} />
+    <aside
+      aria-label="نوار کناری"
+      className="hidden lg:flex fixed inset-y-0 right-0 z-30 w-[var(--hv-sidebar-w)] flex-col bg-[var(--hv-sidebar-bg)] border-l border-[var(--hv-sidebar-border)] transition-colors"
+    >
+      <div className="h-[72px] flex items-center px-6 border-b border-[var(--hv-sidebar-border)]">
+        <Link to="/app" aria-label={`${appName} — داشبورد`} className="inline-flex min-w-0">
+          <BrandLock />
         </Link>
       </div>
       <nav className="flex-1 overflow-y-auto hv-scroll px-3 py-4 flex flex-col gap-1" aria-label="ناوبری اصلی">
-        {NAV.map((item) => {
+        {nav.map((item) => {
           const active = item.match(pathname);
           const Icon = item.icon;
           return (
@@ -153,7 +180,7 @@ function Sidebar() {
               to={item.to}
               aria-current={active ? 'page' : undefined}
               className={`relative flex items-center gap-3 h-11 px-3.5 rounded-[11px] text-[14px] font-semibold transition-colors ${
-                active ? 'bg-brand-soft text-brand-stronger' : 'text-ink-2 hover:bg-line-2 hover:text-ink'
+                active ? 'hv-nav-active' : 'text-[var(--hv-sidebar-ink-2)] hover:bg-[var(--hv-sidebar-hover)] hover:text-[var(--hv-sidebar-ink)]'
               }`}
             >
               {active && <span className="absolute right-0 top-2.5 bottom-2.5 w-[3px] rounded-l-full bg-brand" />}
@@ -163,9 +190,12 @@ function Sidebar() {
           );
         })}
       </nav>
-      <div className="p-3 border-t border-line-2 flex flex-col gap-2">
+      <div className="p-3 border-t border-[var(--hv-sidebar-border)] flex flex-col gap-2">
         <AiStatusChip />
         <UserCard />
+        <div className="px-1.5 pb-0.5">
+          <BrandCredit />
+        </div>
       </div>
     </aside>
   );
@@ -185,8 +215,8 @@ function AnalysisPill() {
     >
       <span className="relative w-5 h-5">
         <svg viewBox="0 0 20 20" className="w-5 h-5 -rotate-90">
-          <circle cx="10" cy="10" r="8" fill="none" stroke="#cfe5d5" strokeWidth="2.5" />
-          <circle cx="10" cy="10" r="8" fill="none" stroke="#2DBA4E" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${(pct / 100) * 50.3} 50.3`} />
+          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--color-brand-soft)" strokeWidth="2.5" />
+          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--color-brand)" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${(pct / 100) * 50.3} 50.3`} />
         </svg>
       </span>
       <span className="max-w-[180px] truncate">
@@ -199,21 +229,22 @@ function AnalysisPill() {
 
 function Topbar({ onSearch, onBell }: { onSearch: () => void; onBell: () => void }) {
   const { unread, org } = useAuth();
+  const { branding, terms } = useBranding();
   return (
     <header className="sticky top-0 z-20 bg-canvas/85 backdrop-blur-md border-b border-line lg:border-transparent">
       <div className="h-16 lg:h-[72px] flex items-center gap-3 px-4 sm:px-6 lg:px-8">
         <div className="lg:hidden flex items-center gap-2.5 min-w-0 flex-1">
           <Link to="/app" aria-label="داشبورد" className="shrink-0">
-            <HovidaMark size={30} />
+            <BrandMark size={30} />
           </Link>
-          <span className="text-[14px] font-bold text-ink truncate">{org?.name}</span>
+          <span className="text-[14px] font-bold text-ink truncate">{branding.nickname || org?.name}</span>
         </div>
         <button
           onClick={onSearch}
           className="hidden lg:flex items-center gap-2.5 h-11 w-full max-w-[460px] px-3.5 rounded-control bg-surface border border-line text-ink-4 text-sm hover:border-line-strong transition-colors"
         >
           <Search className="w-[18px] h-[18px]" strokeWidth={1.8} />
-          <span className="flex-1 text-right">جست‌وجوی کاندید، فرصت شغلی یا مهارت…</span>
+          <span className="flex-1 text-right">جست‌وجوی {terms.candidate}، {terms.job} یا مهارت…</span>
           <kbd className="hv-latin text-[11px] font-semibold text-ink-3 border border-line rounded-md px-1.5 py-0.5 bg-canvas">Ctrl K</kbd>
         </button>
         <div className="flex items-center gap-1.5 sm:gap-2 mr-auto">
@@ -221,7 +252,7 @@ function Topbar({ onSearch, onBell }: { onSearch: () => void; onBell: () => void
           <IconButton icon={Search} label="جست‌وجو" className="lg:hidden" onClick={onSearch} />
           <IconButton icon={Bell} label={unread ? `اعلان‌ها (${toPersianDigits(unread)} خوانده‌نشده)` : 'اعلان‌ها'} badge={unread > 0} onClick={onBell} />
           <ButtonLink to="/app/jobs/new" icon={Plus} className="max-sm:hidden">
-            ایجاد فرصت شغلی
+            ایجاد {terms.job}
           </ButtonLink>
         </div>
       </div>
@@ -485,6 +516,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [moreOpen, setMoreOpen] = useState(false);
   const { pathname } = useLocation();
   const trayVisible = useCompareTrayVisible();
+  const { branding } = useBranding();
+
+  // «هویت سازمانی»: a workspace may choose where its people land after signing
+  // in — a team that lives in the approval inbox lands there, not on the
+  // dashboard. Replaced (not pushed), so Back never bounces between the two.
+  useEffect(() => {
+    if (pathname !== '/app' && pathname !== '/app/') return;
+    const home = landingPath(branding);
+    if (home && home !== '/app') navigate(home, { replace: true });
+  }, [pathname, branding.landing]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -524,7 +565,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-canvas" dir="rtl">
       <SkipToMain />
       <Sidebar />
-      <div className="lg:pr-[256px] min-h-screen flex flex-col">
+      <div className="lg:pr-[var(--hv-sidebar-w)] min-h-screen flex flex-col transition-[padding]">
         <PlatformBanners />
         <DemoBanner />
         <Topbar onSearch={() => setSearchOpen(true)} onBell={() => setBellOpen(true)} />

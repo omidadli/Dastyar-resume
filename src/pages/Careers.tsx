@@ -7,7 +7,7 @@ import { Link, navigate, setQuery, useLocation } from '../lib/router';
 import { useTitle } from '../lib/useTitle';
 import { useAsync } from '../lib/useAsync';
 import { PORTAL_DIR, portalNumber, t } from '../lib/portal-i18n';
-import type { CareerApplicationInput, PortalLang, PublicJobDetail } from '../types/careers';
+import type { CareerApplicationInput, PortalLang, PublicJobDetail, PublicOrgBranding } from '../types/careers';
 import type { EmploymentType } from '../types/screening';
 
 const TYPE_LABEL: Record<PortalLang, Record<EmploymentType, string>> = {
@@ -52,7 +52,12 @@ export default function Careers({ slug, jobId }: { slug: string; jobId?: string 
   const lang: PortalLang = portal?.languages.includes(asked as PortalLang) ? (asked as PortalLang) : portal?.defaultLang || 'fa';
   useTitle(jobId ? t(lang, 'portal') : pageQ.data?.org.name || t(lang, 'portal'));
 
-  const shell = { lang, languages: portal?.languages || (['fa'] as PortalLang[]), orgName: pageQ.data?.org.name };
+  const shell = {
+    lang,
+    languages: portal?.languages || (['fa'] as PortalLang[]),
+    orgName: pageQ.data?.org.name,
+    branding: pageQ.data?.org.branding || null,
+  };
 
   if (pageQ.error) {
     return (
@@ -88,6 +93,7 @@ export default function Careers({ slug, jobId }: { slug: string; jobId?: string 
         languages={shell.languages}
         ref_={ref}
         eeoEnabled={Boolean(pageQ.data.portal.eeoEnabled)}
+        branding={org.branding}
       />
     );
 
@@ -102,8 +108,18 @@ export default function Careers({ slug, jobId }: { slug: string; jobId?: string 
   return (
     <Shell {...shell}>
       <header className="mb-8">
+        {org.branding?.portal.coverDataUrl && (
+          <img
+            src={org.branding.portal.coverDataUrl}
+            alt=""
+            className="w-full h-40 sm:h-52 object-cover rounded-card border border-line mb-5"
+          />
+        )}
         <p className="text-[12px] font-semibold text-brand-strong mb-2">{t(lang, 'portal')}</p>
-        <h1 className="text-2xl sm:text-[28px] font-extrabold text-ink leading-tight">{org.name}</h1>
+        <h1 className="text-2xl sm:text-[28px] font-extrabold text-ink leading-tight">
+          {org.branding?.portal.heading || org.name}
+        </h1>
+        {org.branding?.portal.heading && <p className="text-[15px] font-bold text-ink-2 mt-1">{org.name}</p>}
         {org.about && <p className="text-[14px] text-ink-2 mt-3 leading-relaxed max-w-2xl whitespace-pre-line">{org.about}</p>}
         <p className="text-[12.5px] text-ink-3 mt-4">
           {jobs.length ? t(lang, 'openRoles', { n: portalNumber(lang, jobs.length) }) : t(lang, 'noRolesHere')}
@@ -159,6 +175,7 @@ function JobPage({
   languages,
   ref_,
   eeoEnabled,
+  branding,
 }: {
   slug: string;
   jobId: string;
@@ -167,6 +184,7 @@ function JobPage({
   languages: PortalLang[];
   ref_: string;
   eeoEnabled: boolean;
+  branding?: PublicOrgBranding | null;
 }) {
   const jobQ = useAsync(() => api.careers.job(slug, jobId), [slug, jobId]);
   const job = jobQ.data?.job;
@@ -174,7 +192,7 @@ function JobPage({
 
   if (jobQ.error) {
     return (
-      <Shell lang={lang} languages={languages} orgName={orgName}>
+      <Shell lang={lang} languages={languages} orgName={orgName} branding={branding}>
         <div className="hv-card p-8 text-center">
           <p className="text-[14px] font-bold text-ink">{t(lang, 'jobClosedTitle')}</p>
           <p className="text-[13px] text-ink-3 mt-2">{jobQ.error}</p>
@@ -187,7 +205,7 @@ function JobPage({
   }
   if (!job) {
     return (
-      <Shell lang={lang} languages={languages} orgName={orgName}>
+      <Shell lang={lang} languages={languages} orgName={orgName} branding={branding}>
         <div className="hv-card h-64 animate-pulse" />
       </Shell>
     );
@@ -199,7 +217,7 @@ function JobPage({
   const needsNotice = lang === 'en' && !job.titleEn && !job.descriptionEn;
 
   return (
-    <Shell lang={lang} languages={languages} orgName={orgName}>
+    <Shell lang={lang} languages={languages} orgName={orgName} branding={branding}>
       <button
         type="button"
         onClick={() => navigate(`/careers/${slug}`)}
@@ -532,11 +550,14 @@ function Shell({
   orgName,
   lang,
   languages,
+  branding,
 }: {
   children: React.ReactNode;
   orgName?: string;
   lang: PortalLang;
   languages: PortalLang[];
+  /** The hiring company's own identity; null when it kept HOVIDA's. */
+  branding?: PublicOrgBranding | null;
 }) {
   useEffect(() => {
     document.documentElement.dir = PORTAL_DIR[lang];
@@ -544,11 +565,18 @@ function Shell({
   }, [lang]);
   const canSwitch = languages.includes('en');
   return (
-    <div className="min-h-screen bg-canvas">
+    <div
+      className={`min-h-screen bg-canvas ${branding?.theme === 'dark' ? 'hv-dark' : ''}`}
+      style={(branding?.tokens || undefined) as React.CSSProperties | undefined}
+    >
       <header className="border-b border-line bg-surface/90 backdrop-blur sticky top-0 z-10">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <HovidaLogo className="h-6 w-auto shrink-0" />
+            {branding?.logoDataUrl ? (
+              <img src={branding.logoDataUrl} alt={orgName || ''} style={{ height: branding.logoHeight || 26 }} className="w-auto max-w-[180px] object-contain shrink-0" />
+            ) : (
+              <HovidaLogo className="h-6 w-auto shrink-0" />
+            )}
             <span className="text-[12px] text-ink-3 hidden sm:inline">{t(lang, 'portal')}</span>
           </div>
           <div className="flex items-center gap-3 min-w-0">

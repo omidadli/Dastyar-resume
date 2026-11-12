@@ -184,6 +184,9 @@ export type ActivityType =
   | 'reference.recorded'
   | 'reference.answered'
   | 'reference.declined'
+  | 'code.sent'
+  | 'code.submitted'
+  | 'code.cancelled'
   | 'settings.changed';
 
 export interface ActivityItem {

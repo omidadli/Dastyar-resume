@@ -40,6 +40,7 @@ import { roomRoutes, roomsPublicRoutes } from './server/routes/rooms';
 import { inboxRoutes } from './server/routes/inbox';
 import { brandingRoutes } from './server/routes/branding';
 import { referencePublicRoutes, referenceRoutes } from './server/routes/references';
+import { codingPublicRoutes, codingRoutes } from './server/routes/coding';
 import { jobBoardRoutes } from './server/routes/jobboard';
 import { scimRoutes } from './server/routes/scim';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
@@ -137,6 +138,7 @@ async function startServer() {
   app.use('/api', statusPublicRoutes()); // «پیگیری درخواست» — the candidate's own status page
   app.use('/api', roomsPublicRoutes()); // «اتاق مصاحبهٔ زنده» — the candidate's side of the call
   app.use('/api', referencePublicRoutes()); // «استعلام مرجع» — the referee's page (no session)
+  app.use('/api', codingPublicRoutes()); // «چالش کد» — the candidate's token page (no session)
   app.use('/api', apiV1Routes()); // documented REST API — authenticated by an API key
   app.use('/scim/v2', scimRoutes()); // «SCIM 2.0» — authenticated by the workspace's SCIM token
 
@@ -169,6 +171,7 @@ async function startServer() {
   app.use('/api', inboxRoutes()); // «کارتابل تأیید»: everything waiting on a human
   app.use('/api', brandingRoutes()); // «هویت سازمانی»: logo, colours, words, login copy
   app.use('/api', referenceRoutes()); // «استعلام مرجع»: consent, referees, phone records
+  app.use('/api', codingRoutes()); // «چالش کد»: bank, invitations, graded results
   app.use('/api', jobBoardRoutes()); // «انتشار در جاب‌بورد»: the ad copy + where it went
   app.use('/api', (_req, res) => res.status(404).json({ error: 'مسیر API یافت نشد.' }));
 

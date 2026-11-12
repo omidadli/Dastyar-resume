@@ -19,6 +19,7 @@ import type {
 } from '../types/screening';
 import type { BrandingPayload, OrgBranding } from '../types/branding';
 import type { PublicReference, ReferenceAnswerInput, ReferenceCase, Referee } from '../types/references';
+import type { CodeCaseResult, CodeChallengeSummary, CodeInvite, PublicCodeChallenge } from '../types/coding';
 import type { InterviewKit } from '../types/interview-kit';
 import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
 import type { EeoReport } from '../types/eeo';
@@ -622,6 +623,28 @@ export const api = {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),
     list: (p: { departmentId?: string; q?: string; tags?: string[]; minScore?: number; minYears?: number; sort?: string; page?: number }) =>
       get<PagedResult<ResumeListItem>>(`/api/talent/list${qs({ ...p, tags: p.tags?.length ? p.tags.join(',') : undefined })}`),
+  },
+  /** «چالش کد» — the bank, invitations, and the candidate's token page. */
+  coding: {
+    challenges: () => get<{ challenges: CodeChallengeSummary[]; maxRuns: number }>('/api/code/challenges'),
+    invites: (resumeId?: string) =>
+      get<{ items: CodeInvite[] }>(`/api/code/invites${resumeId ? `?resumeId=${encodeURIComponent(resumeId)}` : ''}`),
+    invite: (id: string) => get<{ invite: CodeInvite; rubric: string; tests: { name: string; hidden: boolean }[] }>(`/api/code/invites/${encodeURIComponent(id)}`),
+    create: (b: { resumeId: string; challengeId: string }) => post<{ invite: CodeInvite }>('/api/code/invites', b),
+    send: (id: string) => post<{ invite: CodeInvite }>(`/api/code/invites/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    cancel: (id: string) => post<{ invite: CodeInvite }>(`/api/code/invites/${encodeURIComponent(id)}/cancel`, {}),
+    public: {
+      get: (token: string) => get<{ challenge: PublicCodeChallenge }>(`/api/code/public/${encodeURIComponent(token)}`),
+      run: (token: string, code: string) =>
+        post<{ run: { ok: boolean; outcomes: CodeCaseResult[]; passed: number; total: number; error: string | null }; challenge: PublicCodeChallenge; runsLeft: number }>(
+          `/api/code/public/${encodeURIComponent(token)}/run`,
+          { code },
+          { timeoutMs: 30_000 }
+        ),
+      submit: (token: string, code: string) =>
+        post<{ challenge: PublicCodeChallenge }>(`/api/code/public/${encodeURIComponent(token)}/submit`, { code }, { timeoutMs: 45_000 }),
+      decline: (token: string) => post<{ challenge: PublicCodeChallenge }>(`/api/code/public/${encodeURIComponent(token)}/decline`, {}),
+    },
   },
   /** «استعلام مرجع» — consent, referees and the referee's own page. */
   references: {

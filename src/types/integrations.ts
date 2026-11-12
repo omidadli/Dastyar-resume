@@ -306,6 +306,9 @@ export const CHAT_EVENT_LABEL: Record<string, string> = {
   'reference.recorded': 'ثبت پاسخ تلفنی مرجع',
   'reference.answered': 'پاسخ مرجع',
   'reference.declined': 'عذر مرجع',
+  'code.sent': 'ارسال چالش کد',
+  'code.submitted': 'ارسال پاسخ چالش کد',
+  'code.cancelled': 'لغو چالش کد',
   'survey.answered': 'پاسخ کارجو به نظرسنجی',
 };
 

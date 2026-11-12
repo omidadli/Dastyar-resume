@@ -39,6 +39,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trash2,
+  Code2,
   UserRoundCheck,
   Wallet,
   X,
@@ -908,6 +909,10 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   {/* «استعلام مرجع» has a page of its own — consent, referees, answers. */}
                   <Button size="sm" variant="ghost" icon={UserRoundCheck} onClick={() => navigate(`/app/candidates/${record.id}/references`)} disabled={hidden}>
                     استعلام مرجع
+                  </Button>
+                  {/* «چالش کد» runs the candidate's own code against tests. */}
+                  <Button size="sm" variant="ghost" icon={Code2} onClick={() => navigate(`/app/candidates/${record.id}/coding`)} disabled={hidden}>
+                    چالش کد
                   </Button>
                   <Button size="sm" variant="ghost" icon={Link2} onClick={() => setStatusLinkOpen(true)} disabled={hidden}>
                     پیگیری درخواست

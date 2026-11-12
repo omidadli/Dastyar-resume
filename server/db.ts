@@ -39,6 +39,7 @@ import type {
   Recommendation,
 } from '../src/types/screening';
 import { DEFAULT_BRANDING } from '../src/types/branding';
+import type { ReferenceAnswers, RefereeRelation, RefereeStatus } from '../src/types/references';
 import type {
   ActivityItem,
   ActivityType,
@@ -169,6 +170,9 @@ export interface StoreSnapshot {
   schedulingLinks?: SchedulingLinkRow[];
   /** «تجربهٔ کارجو» — survey invitations and the answers that came back. */
   surveys?: SurveyInviteRow[];
+  /** «استعلام مرجع» — candidate consent and every referee asked. */
+  referenceCases?: ReferenceCaseRow[];
+  referees?: RefereeRow[];
   /** «آزمون و ارزیابی» — invitations, answers and scores. */
   assessments?: AssessmentInviteRow[];
   /** «مصاحبهٔ ویدئویی» — invitations, questions and the recorded answers. */
@@ -409,6 +413,50 @@ export type VideoInviteRow = Omit<VideoInvite, 'url'> & {
 export type SurveyInviteRow = SurveyInvite & { orgId: string; token: string; expiresAtISO: string };
 
 /**
+ * «استعلام مرجع» — one referee, one token, one answer.
+ * `source: 'phone'` means HR typed what they heard; the record never pretends
+ * the referee submitted it themselves.
+ */
+export type RefereeRow = {
+  id: string;
+  orgId: string;
+  caseId: string;
+  resumeId: string;
+  name: string;
+  title: string;
+  company: string;
+  email: string | null;
+  phone: string | null;
+  relation: RefereeRelation;
+  status: RefereeStatus;
+  token: string;
+  answers: ReferenceAnswers;
+  source: 'self' | 'phone';
+  recordedByName: string | null;
+  createdAtISO: string;
+  sentAtISO: string | null;
+  openedAtISO: string | null;
+  completedAtISO: string | null;
+  declinedAtISO: string | null;
+  declinedReason: string | null;
+  remindCount: number;
+  expiresAtISO: string;
+};
+
+/** Consent + note for one candidate's reference checks (one row per resume). */
+export type ReferenceCaseRow = {
+  id: string;
+  orgId: string;
+  resumeId: string;
+  consentAtISO: string | null;
+  consentByName: string | null;
+  consentNote: string;
+  note: string;
+  createdAtISO: string;
+  createdByName: string;
+};
+
+/**
  * An assessment invitation. The token opens the public page, and the raw
  * answers stay on the server — the workspace sees the result, never the
  * candidate's keystrokes.
@@ -461,6 +509,8 @@ const offers = new Map<string, OfferRow>();
 const schedulingLinks = new Map<string, SchedulingLinkRow>();
 const comments = new Map<string, CommentRow>();
 const surveys = new Map<string, SurveyInviteRow>();
+const referenceCases = new Map<string, ReferenceCaseRow>();
+const referees = new Map<string, RefereeRow>();
 const assessments = new Map<string, AssessmentInviteRow>();
 const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
@@ -527,6 +577,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.schedulingLinks?.forEach((x) => schedulingLinks.set(x.id, x));
   snap.comments?.forEach((x) => comments.set(x.id, x));
   snap.surveys?.forEach((x) => surveys.set(x.id, x));
+  snap.referenceCases?.forEach((x) => referenceCases.set(x.id, x));
+  snap.referees?.forEach((x) => referees.set(x.id, x));
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
   snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
@@ -575,6 +627,8 @@ function clearMemory() {
   schedulingLinks.clear();
   comments.clear();
   surveys.clear();
+  referenceCases.clear();
+  referees.clear();
   assessments.clear();
   videoInvites.clear();
   videoSettings.clear();
@@ -711,6 +765,8 @@ function snapshot(): StoreSnapshot {
     schedulingLinks: Array.from(schedulingLinks.values()),
     comments: Array.from(comments.values()),
     surveys: Array.from(surveys.values()),
+    referenceCases: Array.from(referenceCases.values()),
+    referees: Array.from(referees.values()),
     assessments: Array.from(assessments.values()),
     videoInvites: Array.from(videoInvites.values()),
     videoSettings: Object.fromEntries(videoSettings),
@@ -1227,6 +1283,8 @@ export function deleteOrg(id: string) {
   for (const [k, v] of schedulingLinks) if (v.orgId === id) schedulingLinks.delete(k);
   for (const [k, v] of comments) if (v.orgId === id) comments.delete(k);
   for (const [k, v] of surveys) if (v.orgId === id) surveys.delete(k);
+  for (const [k, v] of referees) if (v.orgId === id) referees.delete(k);
+  for (const [k, v] of referenceCases) if (v.orgId === id) referenceCases.delete(k);
   for (const [k, v] of assessments) if (v.orgId === id) assessments.delete(k);
   for (const [k, v] of videoInvites) if (v.orgId === id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${id}/${k}/`); }
   for (const k of Array.from(videoSettings.keys())) if (k.startsWith(`${id}:`)) videoSettings.delete(k);
@@ -1904,6 +1962,8 @@ export function deleteResume(rec: ResumeRecord) {
   for (const [k, v] of schedulingLinks) if (v.resumeId === rec.id) schedulingLinks.delete(k);
   for (const [k, v] of comments) if (v.resumeId === rec.id) comments.delete(k);
   for (const [k, v] of surveys) if (v.resumeId === rec.id) surveys.delete(k);
+  for (const [k, v] of referees) if (v.resumeId === rec.id) referees.delete(k);
+  for (const [k, v] of referenceCases) if (v.resumeId === rec.id) referenceCases.delete(k);
   // The original may itself have been a duplicate, so the whole scope is rebuilt.
   refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
@@ -2435,6 +2495,54 @@ export function saveSurvey(row: SurveyInviteRow): SurveyInviteRow {
   return row;
 }
 
+// -------------------------------------------------------------- references --
+
+export function listReferees(orgId: string, filter: { resumeId?: string } = {}): RefereeRow[] {
+  return Array.from(referees.values())
+    .filter((r) => r.orgId === orgId)
+    .filter((r) => (filter.resumeId ? r.resumeId === filter.resumeId : true))
+    .sort((a, b) => a.createdAtISO.localeCompare(b.createdAtISO));
+}
+
+export function getReferee(orgId: string, id: string): RefereeRow | null {
+  const r = referees.get(id);
+  return r && r.orgId === orgId ? r : null;
+}
+
+export function findRefereeByToken(token: string): RefereeRow | null {
+  if (!token) return null;
+  for (const r of referees.values()) if (r.token === token) return r;
+  return null;
+}
+
+export function saveReferee(row: RefereeRow): RefereeRow {
+  referees.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deleteReferee(id: string): boolean {
+  const had = referees.delete(id);
+  if (had) scheduleSave();
+  return had;
+}
+
+export function getReferenceCase(orgId: string, resumeId: string): ReferenceCaseRow | null {
+  for (const c of referenceCases.values()) if (c.orgId === orgId && c.resumeId === resumeId) return c;
+  return null;
+}
+
+export function saveReferenceCase(row: ReferenceCaseRow): ReferenceCaseRow {
+  referenceCases.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+/** Every referee of one candidate — also used when the candidate is erased. */
+export function refereesOfResume(orgId: string, resumeId: string): RefereeRow[] {
+  return Array.from(referees.values()).filter((r) => r.orgId === orgId && r.resumeId === resumeId);
+}
+
 /** The newest unanswered survey for a candidate — the one to resend. */
 export function openSurveyFor(orgId: string, resumeId: string): SurveyInviteRow | null {
   return listSurveys(orgId, { resumeId }).find((s) => s.status === 'sent' || s.status === 'opened') || null;
@@ -2812,6 +2920,7 @@ export interface ErasedCounts {
   summaries: number;
   statusLinks: number;
   rooms: number;
+  referees: number;
 }
 
 /**
@@ -2822,7 +2931,7 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0, summaries: 0, statusLinks: 0, rooms: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0, summaries: 0, statusLinks: 0, rooms: 0, referees: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
   for (const [k, v] of interviewRooms) if (v.orgId === orgId && v.resumeId === resumeId) { interviewRooms.delete(k); counts.rooms++; }
@@ -2832,6 +2941,10 @@ export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | 
   for (const [k, v] of interviewFeedback) if (v.orgId === orgId && v.resumeId === resumeId) { interviewFeedback.delete(k); counts.scorecards++; }
   for (const [k, v] of schedulingLinks) if (v.orgId === orgId && v.resumeId === resumeId) { schedulingLinks.delete(k); counts.links++; }
   for (const [k, v] of surveys) if (v.orgId === orgId && v.resumeId === resumeId) { surveys.delete(k); counts.surveys++; }
+  // A referee is a third party: their phone number and their words go with the
+  // candidate's data-subject request, and so does the consent record.
+  for (const [k, v] of referees) if (v.orgId === orgId && v.resumeId === resumeId) { referees.delete(k); counts.referees++; }
+  for (const [k, v] of referenceCases) if (v.orgId === orgId && v.resumeId === resumeId) referenceCases.delete(k);
   for (const [k, v] of assessments) if (v.orgId === orgId && v.resumeId === resumeId) { assessments.delete(k); counts.assessments++; }
   for (const [k, v] of summaries)
     if (v.orgId === orgId && v.resumeId === resumeId) {
@@ -3077,6 +3190,10 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of schedulingLinks) if (v.orgId === job.orgId && v.jobId === job.id) schedulingLinks.delete(k);
   for (const [k, v] of comments) if (v.orgId === job.orgId && v.jobId === job.id) comments.delete(k);
   for (const [k, v] of surveys) if (v.orgId === job.orgId && v.jobId === job.id) surveys.delete(k);
+  // Referees belong to a candidate, and the candidate belongs to this job.
+  const doomedResumes = new Set(Array.from(resumes.values()).filter((r) => r.orgId === job.orgId && r.jobId === job.id).map((r) => r.id));
+  for (const [k, v] of referees) if (v.orgId === job.orgId && doomedResumes.has(v.resumeId)) referees.delete(k);
+  for (const [k, v] of referenceCases) if (v.orgId === job.orgId && doomedResumes.has(v.resumeId)) referenceCases.delete(k);
   for (const [k, v] of assessments) if (v.orgId === job.orgId && v.jobId === job.id) assessments.delete(k);
   for (const [k, v] of videoInvites) if (v.orgId === job.orgId && v.jobId === job.id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${job.orgId}/${k}/`); }
   videoSettings.delete(`${job.orgId}:${job.id}`);
@@ -4065,6 +4182,12 @@ export function validateSnapshot(raw: any): StoreSnapshot {
     assessments: Array.isArray(raw.assessments)
       ? raw.assessments.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.token) && isStr(a.resumeId) && isStr(a.templateId))
       : undefined,
+    referenceCases: Array.isArray(raw.referenceCases)
+      ? raw.referenceCases.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && isStr(c.resumeId))
+      : [],
+    referees: Array.isArray(raw.referees)
+      ? raw.referees.filter((r: any) => r && isStr(r.id) && isStr(r.orgId) && isStr(r.token) && isStr(r.resumeId))
+      : [],
     surveys: Array.isArray(raw.surveys)
       ? raw.surveys.filter((s: any) => s && isStr(s.id) && isStr(s.orgId) && isStr(s.token))
       : [],

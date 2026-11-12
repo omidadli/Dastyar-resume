@@ -1150,6 +1150,89 @@ export async function createDemoWorkspace(ttlMs: number = DEMO_TTL_MS): Promise<
     seedAssessment(pick('شبکه'), 'work-sample-support', 'strong', 1, 'sent');
   }
 
+  // «استعلام مرجع» — one candidate with consent recorded, one referee who
+  // answered and one who is still quiet. Enough to see the feature working,
+  // small enough not to pretend the workspace has a history it does not.
+  if (demoPeople.length) {
+    const target = pick('جذب');
+    const created = daysAgo(5);
+    const consentAt = daysAgo(6).toISOString();
+    db.saveReferenceCase({
+      id: db.uid('rfc'),
+      orgId: org.id,
+      resumeId: target.rec.id,
+      consentAtISO: consentAt,
+      consentByName: people.you.name,
+      consentNote: 'تلفنی، پیش از پایان مصاحبهٔ دوم — گفت با دو مرجع تماس بگیریم.',
+      note: '',
+      createdAtISO: consentAt,
+      createdByName: people.you.name,
+    });
+    db.saveReferee({
+      id: db.uid('ref'),
+      orgId: org.id,
+      caseId: '',
+      resumeId: target.rec.id,
+      name: 'رضا کریمی',
+      title: 'مدیر فنی',
+      company: 'شرکت آلفا',
+      email: 'reza.karimi@example.com',
+      phone: '09121110000',
+      relation: 'manager',
+      status: 'completed',
+      token: crypto.randomBytes(18).toString('base64url'),
+      answers: {
+        relationship: 'manager',
+        duration: 'دو سال، ۱۴۰۱ تا ۱۴۰۳',
+        performance: 5,
+        collaboration: 4,
+        reliability: 5,
+        wouldRehire: 5,
+        strengths: 'کارش را تا آخر تحویل می‌داد و وقتی تیم گیر می‌کرد، خودش جلو می‌افتاد.',
+        concerns: 'گاهی جزئیات مستندسازی را رها می‌کرد؛ برای تیم بعدی چالش بود.',
+      },
+      source: 'self',
+      recordedByName: null,
+      createdAtISO: created.toISOString(),
+      sentAtISO: created.toISOString(),
+      openedAtISO: daysAgo(4).toISOString(),
+      completedAtISO: daysAgo(4, -2).toISOString(),
+      declinedAtISO: null,
+      declinedReason: null,
+      remindCount: 0,
+      expiresAtISO: new Date(created.getTime() + 21 * 86_400_000).toISOString(),
+    });
+    db.saveReferee({
+      id: db.uid('ref'),
+      orgId: org.id,
+      caseId: '',
+      resumeId: target.rec.id,
+      name: 'مینا رضایی',
+      title: 'همکار تیم شبکه',
+      company: 'شرکت آلفا',
+      email: 'mina.rezaei@example.com',
+      phone: null,
+      relation: 'colleague',
+      status: 'sent',
+      token: crypto.randomBytes(18).toString('base64url'),
+      answers: { relationship: 'colleague', duration: '', performance: null, collaboration: null, reliability: null, wouldRehire: null, strengths: '', concerns: '' },
+      source: 'self',
+      recordedByName: null,
+      createdAtISO: created.toISOString(),
+      sentAtISO: created.toISOString(),
+      openedAtISO: null,
+      completedAtISO: null,
+      declinedAtISO: null,
+      declinedReason: null,
+      remindCount: 0,
+      expiresAtISO: new Date(created.getTime() + 21 * 86_400_000).toISOString(),
+    });
+    db.logActivity(org.id, null, 'reference.answered', 'مرجع «رضا کریمی» دربارهٔ یکی از کارجوها پاسخ داد', {
+      resumeId: target.rec.id,
+      at: daysAgo(4, -2),
+    });
+  }
+
   // The internal rate is entered like a real workspace would: the page adds the
   // cost of recorded hours only because someone typed this number.
   db.setCostAssumption(org.id, { hourlyRate: 320_000, minutesPerScorecard: 25, minutesPerComment: 5, minutesPerDecision: 10 });

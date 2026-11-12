@@ -74,6 +74,8 @@ const Careers = lazyPage(() => import('./pages/Careers'));
 const Offer = lazyPage(() => import('./pages/Offer'));
 const Schedule = lazyPage(() => import('./pages/Schedule'));
 const Survey = lazyPage(() => import('./pages/Survey'));
+const ReferenceForm = lazyPage(() => import('./pages/ReferenceForm'));
+const References = lazyPage(() => import('./pages/References'));
 const Assessment = lazyPage(() => import('./pages/Assessment'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
@@ -130,6 +132,15 @@ function appPage(pathname: string): React.ReactNode {
   // Keyed: moving between two openings (notification, search) starts with fresh filters and panels.
   if (m) return RECORD_ID.test(m.id) ? <JobDetail key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/candidates') return <Candidates />;
+  // «استعلام مرجع» has its own page: it needs room for consent, referees and answers.
+  m = matchPath('/app/candidates/:id/references', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <References resumeId={m.id} />
+      </Suspense>
+    );
+  }
   m = matchPath('/app/candidates/:id', pathname);
   if (m) return RECORD_ID.test(m.id) ? <CandidatePage key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/compare') return <Compare />;
@@ -217,6 +228,15 @@ function Routes() {
     return (
       <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
         <Survey token={m.token} />
+      </Suspense>
+    );
+  }
+  // «استعلام مرجع» — the referee's page, opened by someone outside the company.
+  m = matchPath('/reference/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <ReferenceForm token={m.token} />
       </Suspense>
     );
   }

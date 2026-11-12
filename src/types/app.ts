@@ -178,6 +178,12 @@ export type ActivityType =
   | 'hris.push'
   | 'room.opened'
   | 'room.closed'
+  | 'reference.consent'
+  | 'reference.sent'
+  | 'reference.reminded'
+  | 'reference.recorded'
+  | 'reference.answered'
+  | 'reference.declined'
   | 'settings.changed';
 
 export interface ActivityItem {

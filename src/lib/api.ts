@@ -18,6 +18,7 @@ import type {
   ScreeningAnswers,
 } from '../types/screening';
 import type { BrandingPayload, OrgBranding } from '../types/branding';
+import type { PublicReference, ReferenceAnswerInput, ReferenceCase, Referee } from '../types/references';
 import type { InterviewKit } from '../types/interview-kit';
 import type { CostAssumption, CostEntry, CostKind, CostReport, TeamReport } from '../types/reports';
 import type { EeoReport } from '../types/eeo';
@@ -621,6 +622,31 @@ export const api = {
     overview: () => get<{ departments: TalentDepartment[]; tags: string[]; total: number }>('/api/talent'),
     list: (p: { departmentId?: string; q?: string; tags?: string[]; minScore?: number; minYears?: number; sort?: string; page?: number }) =>
       get<PagedResult<ResumeListItem>>(`/api/talent/list${qs({ ...p, tags: p.tags?.length ? p.tags.join(',') : undefined })}`),
+  },
+  /** «استعلام مرجع» — consent, referees and the referee's own page. */
+  references: {
+    get: (resumeId: string) => get<ReferenceCase>(`/api/references/${encodeURIComponent(resumeId)}`),
+    consent: (resumeId: string, b: { note?: string } = {}) =>
+      post<ReferenceCase>(`/api/references/${encodeURIComponent(resumeId)}/consent`, b),
+    add: (resumeId: string, b: { name: string; title?: string; company?: string; email?: string; phone?: string; relation?: string }) =>
+      post<ReferenceCase>(`/api/references/${encodeURIComponent(resumeId)}/referees`, b),
+    update: (id: string, b: { name?: string; title?: string; company?: string; email?: string; phone?: string; relation?: string }) =>
+      patch<{ referee: Referee }>(`/api/references/referees/${encodeURIComponent(id)}`, b),
+    remove: (id: string) => del<{ ok: boolean }>(`/api/references/referees/${encodeURIComponent(id)}`),
+    send: (id: string) =>
+      post<{ referee: Referee; emailed: boolean }>(`/api/references/referees/${encodeURIComponent(id)}/send`, {}, { timeoutMs: 60_000 }),
+    remind: (id: string) =>
+      post<{ referee: Referee; emailed: boolean }>(`/api/references/referees/${encodeURIComponent(id)}/remind`, {}, { timeoutMs: 60_000 }),
+    record: (id: string, b: ReferenceAnswerInput) =>
+      post<{ referee: Referee }>(`/api/references/referees/${encodeURIComponent(id)}/record`, b),
+    public: {
+      get: (token: string) => get<{ reference: PublicReference }>(`/api/reference/public/${encodeURIComponent(token)}`),
+      open: (token: string) => post<{ reference: PublicReference }>(`/api/reference/public/${encodeURIComponent(token)}/open`, {}),
+      answer: (token: string, b: ReferenceAnswerInput) =>
+        post<{ reference: PublicReference }>(`/api/reference/public/${encodeURIComponent(token)}/answer`, b),
+      decline: (token: string, b: { reason?: string } = {}) =>
+        post<{ reference: PublicReference }>(`/api/reference/public/${encodeURIComponent(token)}/decline`, b),
+    },
   },
   surveys: {
     list: (p: { jobId?: string; resumeId?: string } = {}) =>

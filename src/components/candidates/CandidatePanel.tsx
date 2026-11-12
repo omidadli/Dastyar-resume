@@ -39,6 +39,7 @@ import {
   ThumbsDown,
   ThumbsUp,
   Trash2,
+  UserRoundCheck,
   Wallet,
   X,
   type LucideIcon,
@@ -903,6 +904,10 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   </Button>
                   <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)} disabled={hidden}>
                     نظرسنجی تجربه
+                  </Button>
+                  {/* «استعلام مرجع» has a page of its own — consent, referees, answers. */}
+                  <Button size="sm" variant="ghost" icon={UserRoundCheck} onClick={() => navigate(`/app/candidates/${record.id}/references`)} disabled={hidden}>
+                    استعلام مرجع
                   </Button>
                   <Button size="sm" variant="ghost" icon={Link2} onClick={() => setStatusLinkOpen(true)} disabled={hidden}>
                     پیگیری درخواست

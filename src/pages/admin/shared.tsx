@@ -103,6 +103,7 @@ export const PURPOSE_LABEL: Record<AiPurpose, string> = {
   understand: 'پرسش‌نامه شغل',
   calibrate: 'هم‌سنجی',
   message: 'پیش‌نویس پیام',
+  transcribe: 'رونویسی گفتار',
   test: 'آزمایش اتصال',
   lab: 'آزمایشگاه رفتار',
   other: 'سایر',

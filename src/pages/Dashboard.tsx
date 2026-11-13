@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ArrowLeft,
   BriefcaseBusiness,
@@ -25,8 +25,14 @@ import { candidateName, faNumber, greeting, toPersianDigits } from '../lib/forma
 import { Link, useLocation } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
+import { useBranding } from '../components/brand/BrandingProvider';
 
 export default function Dashboard() {
+  // «هویت سازمانی»: a workspace can hide the blocks it never reads. «چهار عدد
+  // اصلی» is never hidden (the server enforces it too) — a dashboard with no
+  // numbers is not a dashboard.
+  const { branding } = useBranding();
+  const hidden = useMemo(() => new Set(branding.hiddenCards || []), [branding.hiddenCards]);
   useTitle('داشبورد');
   const { user, org, ai } = useAuth();
   const { runs } = useAnalysis();
@@ -78,7 +84,7 @@ export default function Dashboard() {
             )}
           </div>
 
-          {isNew ? (
+          {isNew && !hidden.has('onboarding') ? (
             <Card className="mt-5">
               <CardHeader title="سه قدم تا اولین فهرست کاندیداها" subtitle="کمتر از چند دقیقه طول می‌کشد." />
               <div className="grid md:grid-cols-3 gap-3">
@@ -105,7 +111,7 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-5 mt-5">
               <div className="flex flex-col gap-5 min-w-0">
                 {/* Pending decisions */}
-                <Card padded={false}>
+                {!hidden.has('pending') && <Card padded={false}>
                   <div className="px-5 pt-5">
                     <CardHeader
                       title="در انتظار تصمیم شما"
@@ -147,7 +153,7 @@ export default function Dashboard() {
                       ))}
                     </ul>
                   )}
-                </Card>
+                </Card>}
 
                 {/* Active jobs */}
                 <div>
@@ -183,7 +189,7 @@ export default function Dashboard() {
               </div>
 
               <div className="flex flex-col gap-5">
-                {data && (
+                {data && !hidden.has('timeSaved') && (
                   <Card>
                     <div className="flex items-start gap-3">
                       <span className="w-10 h-10 rounded-[11px] bg-brand-soft text-brand-strong flex items-center justify-center shrink-0">
@@ -206,7 +212,7 @@ export default function Dashboard() {
                   </Card>
                 )}
 
-                {ai && (!ai.available || (data && data.aiShare.local > 0)) && (
+                {ai && !hidden.has('aiNote') && (!ai.available || (data && data.aiShare.local > 0)) && (
                   <Callout
                     tone={ai.available ? 'info' : 'warning'}
                     icon={Cpu}
@@ -223,7 +229,7 @@ export default function Dashboard() {
                   </Callout>
                 )}
 
-                <Card padded={false}>
+                {!hidden.has('activity') && <Card padded={false}>
                   <div className="px-5 pt-5">
                     <CardHeader title="فعالیت تیم" subtitle="آخرین رویدادهای فضای کاری" />
                   </div>
@@ -240,7 +246,7 @@ export default function Dashboard() {
                       data!.activity.map((a) => <ActivityRow key={a.id} item={a} />)
                     )}
                   </div>
-                </Card>
+                </Card>}
               </div>
             </div>
           )}

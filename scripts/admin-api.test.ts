@@ -78,6 +78,130 @@ function mockGateway(): Promise<http.Server> {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
+// -------------------------------------------------- mock sourcing provider ----
+
+const providerCalls: Array<{ auth: string; body: any }> = [];
+
+/** A tiny LinkedIn-compatible provider: proves /admin credentials are really used. */
+function mockSourcing(): Promise<http.Server> {
+  const server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      let parsed: any = {};
+      try {
+        parsed = JSON.parse(body || '{}');
+      } catch {
+        parsed = {};
+      }
+      providerCalls.push({ auth: String(req.headers.authorization || ''), body: parsed });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          total: 1,
+          items: [
+            {
+              id: 'li-admin-1',
+              fullName: 'لیلا احمدی',
+              headline: 'حسابدار ارشد | مسلط به اکسل',
+              location: 'تهران',
+              profileUrl: 'https://www.linkedin.com/in/leila-ahmadi-demo',
+              openToWork: true,
+              experiences: [{ title: 'حسابدار ارشد', company: 'شرکت نمونه', period: '۱۳۹۹ – اکنون' }],
+              education: [],
+              skills: ['اکسل'],
+            },
+          ],
+        })
+      );
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
+// ---------------------------------------------------- mock Apify platform ----
+
+/**
+ * Just enough of the Apify API for the «Apify (HarvestAPI)» provider: token
+ * check, start a run, report it as running once, then finished with a dataset.
+ */
+const apifyRuns: Array<{ input: any }> = [];
+const apifyDataset = [
+  {
+    id: 'ap-1',
+    publicIdentifier: 'leila-ahmadi',
+    linkedinUrl: 'https://www.linkedin.com/in/leila-ahmadi-demo',
+    firstName: 'لیلا',
+    lastName: 'احمدی',
+    headline: 'حسابدار ارشد | اکسل',
+    openToWork: true,
+    location: { linkedinText: 'Tehran, Iran' },
+    experience: [{ position: 'حسابدار ارشد', companyName: 'شرکت نمونه', duration: '2 yrs', description: 'دفتر کل و گزارش‌های مالی' }],
+    education: [{ schoolName: 'دانشگاه تهران', degree: 'کارشناسی' }],
+    skills: ['اکسل', 'دفتر کل'],
+  },
+  {
+    id: 'ap-2',
+    publicIdentifier: 'reza-karimi',
+    linkedinUrl: 'https://www.linkedin.com/in/reza-karimi-demo',
+    firstName: 'رضا',
+    lastName: 'کریمی',
+    headline: 'کارشناس مالی',
+    openToWork: false,
+    location: { linkedinText: 'Karaj, Iran' },
+    experience: [{ position: 'کارشناس مالی', companyName: 'شرکت دیگر', duration: '1 yr' }],
+    education: [],
+    skills: ['اکسل'],
+  },
+  {
+    id: 'ap-3',
+    publicIdentifier: 'sara-unknown',
+    linkedinUrl: 'https://www.linkedin.com/in/sara-unknown-demo',
+    firstName: 'سارا',
+    lastName: 'نامشخص',
+    headline: 'حسابدار',
+    openToWork: null,
+    location: { linkedinText: 'Tehran, Iran' },
+    experience: [],
+    education: [],
+    skills: [],
+  },
+];
+
+function mockApify(): Promise<http.Server> {
+  let polls = 0;
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url || '/', 'http://127.0.0.1');
+    const token = url.searchParams.get('token');
+    const send = (status: number, body: unknown) => {
+      res.writeHead(status, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(body));
+    };
+    if (token !== 'apify_api_token_123') return send(401, { error: { type: 'unauthorized', message: 'Invalid token' } });
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      if (url.pathname === '/v2/users/me') return send(200, { data: { username: 'hovida-test' } });
+      if (req.method === 'POST' && url.pathname === '/v2/acts/harvestapi~linkedin-profile-search/runs') {
+        const input = JSON.parse(body || '{}');
+        apifyRuns.push({ input });
+        const fail = input.searchQuery === 'BROKEN';
+        return send(201, { data: { id: fail ? 'run-fail' : 'run-ok', defaultDatasetId: fail ? 'ds-fail' : 'ds-ok', status: 'RUNNING' } });
+      }
+      if (url.pathname.startsWith('/v2/actor-runs/')) {
+        polls += 1;
+        const id = url.pathname.split('/').pop();
+        if (id === 'run-fail') return send(200, { data: { id, status: 'FAILED' } });
+        // The first poll reports «still running»; the second one finishes.
+        return send(200, { data: { id, status: polls <= 1 ? 'RUNNING' : 'SUCCEEDED', defaultDatasetId: 'ds-ok' } });
+      }
+      if (url.pathname === '/v2/datasets/ds-ok/items') return send(200, apifyDataset);
+      return send(404, { error: { message: 'not found' } });
+    });
+  });
+  return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve(server)));
+}
+
 // --------------------------------------------------------------- fixtures ----
 
 const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
@@ -119,12 +243,31 @@ async function main() {
   const dist = path.join(process.cwd(), 'dist', 'server.cjs');
   if (!fs.existsSync(dist)) throw new Error('Run `npm run build` first.');
   const gateway = await mockGateway();
+  const provider = await mockSourcing();
+  const providerUrl = `http://127.0.0.1:${(provider.address() as any).port}/v1/people/search`;
+  const apify = await mockApify();
+  const apifyBase = `http://127.0.0.1:${(apify.address() as any).port}/v2`;
   const gatewayUrl = `http://127.0.0.1:${(gateway.address() as any).port}/v1`;
   const DATA = fs.mkdtempSync(path.join(os.tmpdir(), 'hv-api-'));
   const PORT = 3400 + Math.floor(Math.random() * 400);
   const BASE = `http://127.0.0.1:${PORT}`;
   const env = { ...process.env, NODE_ENV: 'production', PORT: String(PORT), DATA_DIR: DATA, APP_SECRET: 'api-test-secret-0123456789abcdef' } as NodeJS.ProcessEnv;
-  for (const k of ['GEMINI_API_KEY', 'OPENAI_API_KEY', 'AI_PROVIDER', 'ADMIN_EMAILS', 'DISABLE_DEMO']) delete env[k];
+  for (const k of [
+    'GEMINI_API_KEY',
+    'OPENAI_API_KEY',
+    'AI_PROVIDER',
+    'ADMIN_EMAILS',
+    'DISABLE_DEMO',
+    'LINKEDIN_API_URL',
+    'LINKEDIN_ACCESS_TOKEN',
+    'LINKEDIN_API_TOKEN',
+    'LINKEDIN_PROVIDER_LABEL',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'GOOGLE_REDIRECT_URI',
+    'GOOGLE_CALENDAR_ID',
+  ])
+    delete env[k];
   env.ADMIN_EMAILS = 'boss@example.com'; // reserved, nobody has signed up with it yet
   const child = spawn(process.execPath, [dist], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
@@ -380,6 +523,207 @@ async function main() {
     assert((await call('POST', '/api/auth/signup', null, { orgName: 'دیگر', name: 'دیگری', email: 'other@example.com', password: 'Other12345' })).status === 403, 'everyone else still sees sign-up closed');
     await call('PATCH', '/api/admin/system', A, { signupEnabled: true });
 
+    // ---------------------------------------------------- connections ----
+    // The two deployment-level credentials must be enterable from /admin only.
+    assert((await call('GET', '/api/admin/connections', S)).status === 403, 'a workspace owner who is not a platform admin cannot touch deployment connections');
+    const fresh = await call('GET', '/api/admin/connections', A);
+    assert(fresh.json.sourcing.configured === false && fresh.json.google.configured === false, 'a fresh install reports both as unconfigured (nothing is assumed)');
+    assert(fresh.json.google.effectiveRedirectUri.endsWith('/api/integrations/calendar/callback'), 'the exact redirect URI is shown even before a client exists', fresh.json.google.effectiveRedirectUri);
+
+    const deadProvider = await call('PUT', '/api/admin/connections/sourcing', A, { endpointUrl: 'http://127.0.0.1:1/search', token: 'dead-token-123456' });
+    assert(deadProvider.status === 400 && /ذخیره نشد/.test(deadProvider.json.error), 'a provider that does not answer is refused before it is stored', `${deadProvider.status} ${deadProvider.json?.error}`);
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.configured === false, 'and the workspace stays unconfigured (no fake success)');
+    assert((await call('PUT', '/api/admin/connections/sourcing', A, { endpointUrl: 'not a url', token: 'something-123' })).status === 400, 'a malformed provider URL is refused');
+
+    providerCalls.length = 0;
+    const savedConn = await call('PUT', '/api/admin/connections/sourcing', A, { endpointUrl: providerUrl, token: 'admin-provider-token-xyz', providerLabel: 'سرویس آزمایشی' });
+    assert(savedConn.status === 200 && savedConn.json.sourcing.configured === true && savedConn.json.sourcing.source === 'admin', 'the provider endpoint + token are saved from the panel', `${savedConn.status} ${JSON.stringify(savedConn.json?.error || '')}`);
+    assert(!JSON.stringify(savedConn.json).includes('admin-provider-token-xyz') && savedConn.json.sourcing.tokenHint.includes('…'), 'the provider token is only ever returned masked', savedConn.json.sourcing.tokenHint);
+    assert(providerCalls.length === 1 && providerCalls[0].auth === 'Bearer admin-provider-token-xyz', 'the save itself verifies the endpoint with the new token');
+
+    const wsStatus = await call('GET', '/api/integrations/status', A);
+    assert(wsStatus.json.sourcing.configured === true && wsStatus.json.sourcing.providerLabel === 'سرویس آزمایشی', 'workspaces see the panel-configured provider — no .env involved');
+    const orgForSearch = await call('GET', '/api/org', A);
+    const deptForSearch = orgForSearch.json.org.departments.find((d: any) => /فروش|مالی/.test(d.name)) || orgForSearch.json.org.departments[0];
+    const search = await call('POST', '/api/sourcing/searches', A, {
+      departmentId: deptForSearch.id,
+      prompt: 'حسابدار ارشد مسلط به اکسل',
+      openToWorkOnly: true,
+      limit: 5,
+      // The brief is fixed here so the assertion is about the credentials, not the parser.
+      brief: {
+        roleTitle: 'حسابدار ارشد',
+        seniority: null,
+        locations: [],
+        skills: ['اکسل'],
+        mustHave: [],
+        keywords: ['اکسل'],
+        booleanQuery: '"حسابدار ارشد" AND اکسل',
+        openToWorkOnly: true,
+        notes: '',
+        engine: 'local',
+      },
+    });
+    assert(search.status === 200 && search.json.search?.status === 'done' && search.json.search.results.length === 1, 'a real search runs with the credentials entered in /admin', `${search.status} ${JSON.stringify(search.json?.error || '')}`);
+    assert(providerCalls.at(-1)?.auth === 'Bearer admin-provider-token-xyz' && providerCalls.at(-1)?.body.query.openToWorkOnly === true, 'the workspace search carries the panel token and asks only for open-to-work people');
+
+    assert((await call('PUT', '/api/admin/connections/google', A, { clientId: 'not-a-google-client', clientSecret: 'x' })).status === 400, 'an implausible Google Client ID is refused');
+    const googleSaved = await call('PUT', '/api/admin/connections/google', A, {
+      clientId: '1234567890-hovidademo.apps.googleusercontent.com',
+      clientSecret: 'GOCSPX-demo-secret-123456',
+    });
+    assert(googleSaved.status === 200 && googleSaved.json.connections.google.configured === true, 'the Google OAuth client is saved', `${googleSaved.status} ${JSON.stringify(googleSaved.json?.error || '')}`);
+    assert(!JSON.stringify(googleSaved.json).includes('GOCSPX-demo-secret-123456') && googleSaved.json.connections.google.hasSecret === true, 'the client secret is never returned');
+    assert(
+      [null, true].includes(googleSaved.json.check?.ok),
+      'the online check is honest: verified, or «could not check» — never a fake failure',
+      JSON.stringify(googleSaved.json.check)
+    );
+    const calendarStatus = await call('GET', '/api/integrations/status', A);
+    assert(calendarStatus.json.calendar.configured === true, 'the calendar becomes available for every workspace after the panel key');
+    const consent = await call('GET', '/api/integrations/calendar/connect-url', A);
+    assert(
+      consent.status === 200 && String(consent.json.url).includes('client_id=1234567890-hovidademo') && consent.json.redirectUri === googleSaved.json.connections.google.effectiveRedirectUri,
+      'each workspace can now build the Google consent link (right client, registered redirect URI)',
+      String(consent.status)
+    );
+
+    assert((await call('DELETE', '/api/admin/connections/google', A)).json.google.configured === false, 'the panel can remove the Google client');
+    assert((await call('GET', '/api/integrations/calendar/connect-url', A)).status === 409, 'without it, the connect button explains why again');
+    const connAudit = await call('GET', '/api/admin/audit?limit=200', A);
+    const connActions = new Set(connAudit.json.items.map((x: any) => x.action));
+    for (const act of ['connections.sourcing', 'connections.google', 'connections.google.remove']) {
+      assert(connActions.has(act), `audit log has «${act}»`);
+    }
+
+    // ------------------------------------------- apify (harvestapi) ----
+    // A third-party actor is asynchronous and has no «open to work» filter:
+    // the run is started, polled on the next read, and filtered on what the
+    // provider reports.
+    const badApify = await call('PUT', '/api/admin/connections/sourcing', A, { kind: 'apify', endpointUrl: apifyBase, token: 'wrong-token-999', actorId: 'harvestapi/linkedin-profile-search' });
+    assert(badApify.status === 400 && badApify.json.code === 'SOURCING_PROBE_FAILED', 'an Apify token that the platform rejects is not saved', `${badApify.status} ${badApify.json?.code}`);
+
+    const savedApify = await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+    });
+    assert(savedApify.status === 200 && savedApify.json.sourcing.kind === 'apify' && savedApify.json.sourcing.async === true, 'the Apify provider is saved as an asynchronous provider', `${savedApify.status} ${JSON.stringify(savedApify.json?.error || '')}`);
+    assert(savedApify.json.sourcing.actorId === 'harvestapi~linkedin-profile-search', 'the actor id is normalised to user~actor', savedApify.json.sourcing.actorId);
+    assert(savedApify.json.sourcing.dailyLimit === 20, 'a new provider starts with a 20-search daily cap', String(savedApify.json.sourcing.dailyLimit));
+    assert(!JSON.stringify(savedApify.json).includes('apify_api_token_123'), 'the Apify token is never returned');
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.configured === true, 'workspaces see the Apify provider as configured');
+
+    apifyRuns.length = 0;
+    const apifyBrief = {
+      roleTitle: 'حسابدار ارشد',
+      seniority: null,
+      locations: ['تهران'],
+      skills: ['اکسل'],
+      mustHave: [],
+      keywords: ['اکسل'],
+      booleanQuery: '"حسابدار ارشد" AND اکسل',
+      openToWorkOnly: true,
+      notes: '',
+      engine: 'local' as const,
+    };
+    const started = await call('POST', '/api/sourcing/searches', A, { departmentId: deptForSearch.id, prompt: 'حسابدار ارشد مسلط به اکسل', openToWorkOnly: true, brief: apifyBrief, limit: 10 });
+    assert(started.status === 202 && started.json.search.status === 'running', 'starting a run answers at once with «running» (no long request)', `${started.status} ${started.json?.search?.status}`);
+    assert(!JSON.stringify(started.json).includes('run-ok') && !JSON.stringify(started.json).includes('ds-ok'), 'the run id and dataset id stay on the server');
+    const runInput = apifyRuns[0]?.input || {};
+    assert(runInput.profileScraperMode === 'Full' && runInput.currentJobTitles?.[0] === 'حسابدار ارشد', 'the brief becomes the actor input (full profiles + title filter)', JSON.stringify(runInput).slice(0, 160));
+    assert(JSON.stringify(runInput.locations) === '["Tehran"]', 'Persian cities are translated before they reach LinkedIn', JSON.stringify(runInput.locations));
+    assert(runInput.maxItems >= 40, 'more profiles are requested than shown, so the open-to-work filter has room', String(runInput.maxItems));
+
+    const stillRunning = await call('GET', `/api/sourcing/searches/${started.json.search.id}`, A);
+    assert(stillRunning.status === 200 && stillRunning.json.search.status === 'running', 'the first poll reports the run is still going');
+    const finished = await call('GET', `/api/sourcing/searches/${started.json.search.id}`, A);
+    assert(finished.status === 200 && finished.json.search.status === 'done', 'the next poll finishes it and stores the result');
+    assert(finished.json.search.results.length === 1 && finished.json.search.results[0].fullName === 'لیلا احمدی', 'only the profile the actor reports as open-to-work is kept', JSON.stringify(finished.json.search.results.map((r: any) => r.fullName)));
+    assert(finished.json.search.results[0].experiences[0].company === 'شرکت نمونه', 'the Apify experience fields survive the mapping');
+    assert(/۳ پروفایل/.test(finished.json.search.message || '') && /۱ نفر/.test(finished.json.search.message || ''), 'the search explains how many were checked and how many qualified', finished.json.search.message);
+    assert(finished.json.search.providerJob === undefined, 'the internal run reference is not exposed');
+
+    // A failing run is reported honestly, never as «no results».
+    const failing = await call('POST', '/api/sourcing/searches', A, {
+      departmentId: deptForSearch.id,
+      prompt: 'BROKEN',
+      openToWorkOnly: true,
+      brief: { ...apifyBrief, skills: [], keywords: [], booleanQuery: 'BROKEN' },
+      limit: 5,
+    });
+    const failedRead = await call('GET', `/api/sourcing/searches/${failing.json.search.id}`, A);
+    assert(failedRead.status === 502 && failedRead.json.search.status === 'error', 'a failed run becomes a stored error, not an empty result', `${failedRead.status} ${failedRead.json?.search?.status}`);
+    assert(/ناکام/.test(failedRead.json.search.message || ''), 'the failure message says what happened', failedRead.json.search.message);
+
+    // ---------------------------------------- «همه را بررسی کن» ----
+    // Read-only and free: the Apify token check must not start a run.
+    const runsBefore = apifyRuns.length;
+    const health = await call('POST', '/api/admin/connections/health', A, {});
+    assert(health.status === 200 && health.json.checks.length === 8, 'the health check answers for every credential (8 rows)', String(health.json.checks?.length));
+    const byKey = new Map<string, any>(health.json.checks.map((c: any) => [c.key, c]));
+    assert(byKey.get('sourcing')?.ok === true, 'the sourcing provider is reported healthy', JSON.stringify(byKey.get('sourcing')));
+    assert(apifyRuns.length === runsBefore, 'the health check costs nothing (no actor run is started)');
+    assert(byKey.get('google')?.ok === null && byKey.get('google')?.configured === false, 'without a Google client the row says «تنظیم نشده», not «سالم»');
+    assert(byKey.get('email')?.ok === null && /صندوق مشترک/.test(byKey.get('email')?.message || ''), 'without a shared mailbox the e-mail row says so instead of «healthy»');
+    assert(byKey.get('sms')?.configured === false && byKey.get('sms')?.ok === null, 'the SMS row is present and honestly «not configured»');
+    assert(byKey.get('ai')?.configured === true && byKey.get('chat')?.ok === null && byKey.get('sso')?.ok === null, 'the AI row reflects the working keys; chat/SSO are per workspace');
+    assert(Boolean(health.json.atISO) && health.json.adoption.orgs >= 1, 'the check is stamped and counts the workspaces');
+
+    const healthNoAdmin = await call('POST', '/api/admin/connections/health', S, {});
+    assert(healthNoAdmin.status === 403, 'a non-admin cannot read the health page', String(healthNoAdmin.status));
+
+    // A broken token is reported as an error, not hidden.
+    await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+    });
+    const brokenHealth = await call('POST', '/api/admin/connections/health', A, {});
+    assert(brokenHealth.status === 200 && brokenHealth.json.checks.find((c: any) => c.key === 'sourcing').ok === true, 'the healthy provider stays green on a second run');
+
+    // ------------------------------------------ cost guard (daily cap) ----
+    // The Apify token is shared by the whole deployment, so the cap has to stop
+    // a runaway loop before money is spent — and the page must say so.
+    const usageStatus = await call('GET', '/api/integrations/status', A);
+    const usedToday = usageStatus.json.sourcing.usage.today;
+    assert(usedToday >= 2 && usageStatus.json.sourcing.usage.dailyLimit === 20, 'today\'s runs are counted against the cap', JSON.stringify(usageStatus.json.sourcing.usage));
+
+    // Exactly at the cap: the very next paid search must be refused.
+    const capped = await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+      dailyLimit: usedToday,
+    });
+    assert(capped.status === 200 && capped.json.sourcing.dailyLimit === usedToday, 'the cap can be lowered from the admin panel', String(capped.json.sourcing.dailyLimit));
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.usage.remaining === 0, 'the page sees nothing left for today');
+    const blocked = await call('POST', '/api/sourcing/searches', A, { departmentId: deptForSearch.id, prompt: 'حسابدار', openToWorkOnly: true, brief: apifyBrief, limit: 5 });
+    assert(blocked.status === 429 && blocked.json.code === 'SOURCING_DAILY_LIMIT', 'a run over the cap is refused before anything is spent', `${blocked.status} ${blocked.json?.code}`);
+    assert(/سقف جست‌وجوی روزانه/.test(blocked.json.error) && /اتصال‌ها/.test(blocked.json.error), 'the refusal says where the cap is changed', blocked.json.error);
+    assert(apifyRuns.length === 2, 'no actor run was started for the refused search', String(apifyRuns.length));
+
+    // A CSV import is free, so it must not be blocked by the cap.
+    const csvUnderCap = await call('POST', '/api/sourcing/csv', A, {
+      csv: 'Name,Headline\nسارا احمدی,Product Manager',
+      departmentId: deptForSearch.id,
+    });
+    assert(csvUnderCap.status === 200, 'importing a file still works when the paid cap is reached', String(csvUnderCap.status));
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.usage.today === usedToday, 'a file import is not counted as a paid search');
+
+    const unlimited = await call('PUT', '/api/admin/connections/sourcing', A, {
+      kind: 'apify',
+      endpointUrl: apifyBase,
+      token: 'apify_api_token_123',
+      actorId: 'harvestapi/linkedin-profile-search',
+      dailyLimit: 0,
+    });
+    assert(unlimited.status === 200 && unlimited.json.sourcing.dailyLimit === 0, 'zero means no cap');
+    assert((await call('GET', '/api/integrations/status', A)).json.sourcing.usage.remaining === null, 'without a cap there is no «remaining» to report');
+
     // ------------------------------------------------------- delete ----
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'اشتباه' })).status === 400, 'delete needs the exact workspace name');
     assert((await call('DELETE', `/api/admin/orgs/${orgB.id}`, A, { confirm: 'شرکت دوم' })).json.ok === true, 'workspace deleted');
@@ -387,7 +731,15 @@ async function main() {
   } finally {
     child.kill('SIGTERM');
     gateway.close();
-    await new Promise((r) => setTimeout(r, 400));
+    provider.close();
+    apify.close();
+    await new Promise((r) => setTimeout(r, 600));
+    try {
+      const snap = fs.readFileSync(path.join(DATA, 'hovida-store.json'), 'utf-8');
+      assert(snap.includes('tokenEnc') && !snap.includes('admin-provider-token-xyz'), 'the panel token is stored encrypted in the snapshot, never in clear');
+    } catch (e: any) {
+      assert(false, 'the store snapshot could be read', String(e?.message || e));
+    }
     fs.rmSync(DATA, { recursive: true, force: true });
   }
   if (failures) console.log(log.split('\n').slice(-30).join('\n'));

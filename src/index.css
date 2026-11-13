@@ -202,6 +202,45 @@
   }
 }
 
+/* =====================================================================
+   Print — «کیت مصاحبه» prints on paper and on a phone's «save as PDF».
+   The app chrome (sidebar, sticky header, bottom nav, the compare tray) is
+   removed; cards stop breaking across pages; nothing else changes colour.
+   ===================================================================== */
+@media print {
+  @page {
+    margin: 14mm 12mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  aside[aria-label="نوار کناری"],
+  header[class*="sticky"],
+  nav[aria-label="ناوبری"],
+  .print-hide,
+  .hv-compare-tray,
+  [role="dialog"] {
+    display: none !important;
+  }
+  main#main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+  .print-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* Cards lose their shadow and borders stay hairline: readable on paper. */
+  .hv-card {
+    box-shadow: none !important;
+    border-color: #d9dedb !important;
+  }
+  a[href]::after {
+    content: ''; /* no URL noise after every link */
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -210,5 +249,84 @@
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
+  }
+}
+
+/* =====================================================================
+   «هویت سازمانی» — one workspace's identity, painted at runtime.
+
+   The tokens above are the *defaults*. When a company sets its own logo,
+   colours, corners, font or dark panel, `BrandingProvider` writes the same
+   custom properties onto <html>. Tailwind utilities already read those
+   variables, so the whole panel follows without per-component changes; the
+   rules below cover the few places that must know *which* theme is on.
+   ===================================================================== */
+
+/* Lightweight scope used by the settings editor's live preview: the same
+   tokens, applied to a box instead of the whole page. */
+.hv-preview-scope {
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  font-family: var(--font-sans);
+}
+
+.hv-dark .hv-skeleton {
+  background: linear-gradient(90deg, #1c2521 0%, #242f2a 50%, #1c2521 100%);
+  background-size: 200% 100%;
+}
+.hv-dark .hv-scroll {
+  scrollbar-color: #33413b transparent;
+}
+.hv-dark .hv-scroll::-webkit-scrollbar-thumb {
+  background: #33413b;
+}
+.hv-dark img.hv-invert {
+  filter: invert(0.92) hue-rotate(180deg);
+}
+
+/* The login aside: three backgrounds the workspace may choose. */
+.hv-login-gradient {
+  background:
+    radial-gradient(120% 90% at 85% 10%, color-mix(in srgb, var(--color-brand) 42%, transparent) 0%, transparent 58%),
+    linear-gradient(155deg, var(--color-accent) 0%, color-mix(in srgb, var(--color-accent) 55%, #050807) 100%);
+}
+.hv-login-plain {
+  background: var(--color-accent);
+}
+.hv-login-mesh {
+  background:
+    radial-gradient(42% 46% at 20% 18%, color-mix(in srgb, var(--color-brand) 55%, transparent) 0%, transparent 70%),
+    radial-gradient(50% 55% at 82% 30%, color-mix(in srgb, var(--color-accent) 62%, transparent) 0%, transparent 72%),
+    radial-gradient(60% 60% at 55% 92%, color-mix(in srgb, var(--color-brand) 30%, transparent) 0%, transparent 70%),
+    #0d1210;
+}
+
+/* The sidebar's active item: a soft tint of the brand, guaranteed readable. */
+.hv-nav-active {
+  background: var(--hv-sidebar-active);
+  color: var(--color-brand-stronger);
+}
+[data-hv-theme] .hv-nav-active {
+  color: var(--hv-sidebar-ink);
+}
+
+/* Sidebar defaults. `BrandingProvider` overwrites these on <html>; the panel
+   still looks exactly like the design when a workspace has not branded it. */
+:root {
+  --hv-sidebar-w: 256px;
+  --hv-sidebar-bg: var(--color-surface);
+  --hv-sidebar-ink: var(--color-ink);
+  --hv-sidebar-ink-2: var(--color-ink-2);
+  --hv-sidebar-muted: var(--color-ink-4);
+  --hv-sidebar-border: var(--color-line);
+  --hv-sidebar-hover: var(--color-line-2);
+  --hv-sidebar-active: var(--color-brand-soft);
+}
+
+/* Printing a workspace's own colours would waste ink; keep paper neutral. */
+@media print {
+  .hv-brand-surface {
+    background: #fff !important;
+    color: #111 !important;
   }
 }

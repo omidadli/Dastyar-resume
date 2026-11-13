@@ -8,6 +8,16 @@ import { safeExt } from '../server/db';
 import { matchesSearch, normalizeForSearch, normalizePersianText } from '../src/lib/normalizeFa';
 import { faRelative } from '../src/lib/format';
 import { assemblePageText, restoreZwnj, type PdfTextItem } from '../src/lib/pdfLayout';
+import { blindLabel, maskText, redactRecord } from '../server/blind';
+import { bankSummary, matchPacksByCriteria, matchRole } from '../server/interview-kit';
+import { buildTeamReport } from '../server/team-report';
+import { COST_KINDS, byKind, normalizeAssumption, readAssumptionInput, readCostInput } from '../server/costs';
+import { ASSESSMENT_TEMPLATES, QUESTION_COUNT, TEMPLATE_COUNT, templateById } from '../server/assessment-bank';
+import { bandOf, scoreAnswers, suggestTemplateId } from '../server/assessments';
+import { OidcError, decodeJwt, safeEndpoint, verifyIdToken, clearOidcCaches } from '../server/oidc';
+import { emailDomain, identityFromClaims, normalizeDomains } from '../server/sso';
+import crypto from 'crypto';
+import { base32Decode, base32Encode, generateRecoveryCodes, generateSecret, hashRecoveryCode, hotp, otpauthUrl, secondsLeft, stepAt, verifyTotp } from '../server/totp';
 import fs from 'fs';
 import path from 'path';
 import type { JobUnderstanding } from '../src/types/screening';
@@ -161,6 +171,397 @@ const u: JobUnderstanding = {
   } finally {
     Date.now = realNow;
   }
+}
+
+// ---- ورود دومرحله‌ای: TOTP matches the RFC and the apps in people's pockets ----
+{
+  // RFC 6238, appendix B: the ASCII secret "12345678901234567890" at T=59 is 94287082.
+  const rfcSecret = base32Encode(Buffer.from('12345678901234567890', 'ascii'));
+  assert(hotp(rfcSecret, Math.floor(59 / 30), 8) === '94287082', 'TOTP follows the RFC 6238 vector (T=59)', hotp(rfcSecret, 1, 8));
+  assert(hotp(rfcSecret, Math.floor(1111111109 / 30), 8) === '07081804', 'TOTP follows the RFC 6238 vector (T=1111111109)');
+  // Base32 is what the app reads off the screen: it must survive the round trip.
+  const raw = Buffer.from([0, 1, 2, 250, 251, 252, 253]);
+  assert(base32Decode(base32Encode(raw)).equals(raw), 'base32 round-trips arbitrary bytes');
+  assert(!/[^A-Z2-7]/.test(generateSecret()), 'a generated secret is clean base32');
+  assert(base32Decode(generateSecret()).length === 20, 'a secret carries 160 bits');
+
+  // One step of drift is tolerated, two are not: a phone a minute behind works.
+  const secret = generateSecret();
+  const now = 1_700_000_000_000;
+  const step = stepAt(now);
+  const at = (s: number) => hotp(secret, s);
+  assert(verifyTotp(secret, at(step), { at: now }) === step, 'the current code is accepted');
+  assert(verifyTotp(secret, at(step - 1), { at: now }) === step - 1, 'one step in the past is accepted');
+  assert(verifyTotp(secret, at(step + 2), { at: now }) === null, 'two steps ahead is refused');
+  assert(verifyTotp(secret, '12345', { at: now }) === null, 'five digits is not a code');
+  assert(verifyTotp(secret, 'abcdef', { at: now }) === null, 'letters are not a code');
+  assert(verifyTotp(secret, ` ${at(step).slice(0, 3)} ${at(step).slice(3)} `, { at: now }) === step, 'a spaced code still works');
+
+  const url = new URL(otpauthUrl({ secret, account: 'hr@company.ir', issuer: 'شرکت نمونه' }));
+  assert(url.protocol === 'otpauth:' && url.host === 'totp', 'the setup link is an otpauth://totp address');
+  assert(url.searchParams.get('secret') === secret && url.searchParams.get('digits') === '6' && url.searchParams.get('period') === '30', 'it names the secret, six digits and thirty seconds');
+
+  // Recovery codes: unambiguous alphabet, single-use hashes, no clear text.
+  const codes = generateRecoveryCodes();
+  assert(codes.length === 8 && new Set(codes).size === 8, 'eight distinct recovery codes');
+  assert(codes.every((c) => /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/.test(c)), 'no I, O, 0 or 1 to misread on paper', codes[0]);
+  assert(hashRecoveryCode(codes[0]) === hashRecoveryCode(codes[0].toLowerCase().replace('-', '')), 'a typed code normalizes before hashing');
+  assert(hashRecoveryCode(codes[0]) !== hashRecoveryCode(codes[1]), 'different codes hash differently');
+  assert(secondsLeft(now) > 0 && secondsLeft(now) <= 30, 'the window countdown is within one step');
+}
+
+// ---- غربالگری بی‌طرف: masking never leaves the identity behind ----
+{
+  const names = ['مینا رضایی', 'Mina Rezaei'];
+  const masked = maskText('مینا رضایی — mina.rezaei@gmail.com — https://linkedin.com/in/mina — ۰۹۱۲۱۲۳۴۵۶۷ — ۰۲۱۸۸۷۷۶۶۵۵', names);
+  assert(!masked.includes('مینا') && !masked.includes('رضایی'), 'a Persian full name is masked, token by token');
+  assert(!masked.includes('mina.rezaei@') && masked.includes('«ایمیل»'), 'an e-mail becomes a placeholder');
+  assert(!/linkedin\.com/i.test(masked) && masked.includes('«پیوند»'), 'a profile link becomes a placeholder');
+  assert(!masked.includes('۰۹۱۲۱۲۳۴۵۶۷') && masked.includes('«تلفن»'), 'a mobile number in Persian digits is masked');
+  assert(!maskText('تماس: 0912 123 4567', names).includes('4567'), 'and so is one in Latin digits');
+  assert(masked.includes('«نام»'), 'the placeholder is the Persian word for the name');
+
+  // The mask must not eat ordinary words that merely share letters.
+  const kept = maskText('کارشناس شبکه با ۵ سال سابقه در مسیریابی', names);
+  assert(kept === 'کارشناس شبکه با ۵ سال سابقه در مسیریابی', 'unrelated text is untouched');
+
+  // A stuttered pair of placeholders reads as one.
+  const tidy = maskText('پروفایل «مینا رضایی» را دید', names);
+  assert(!/«نام»\s+«نام»/.test(tidy), 'the placeholders do not repeat', tidy);
+
+  // Labels are stable, distinct and carry nothing of the person.
+  const a = blindLabel('res_abc123');
+  assert(a === blindLabel('res_abc123'), 'the blind label is stable for one candidate');
+  assert(a !== blindLabel('res_xyz789'), 'and different for another');
+  assert(/^کارجوی [۰-۹]{4}$/.test(a), 'it looks like «کارجوی ۲۴۸۱»', a);
+
+  // The redacted copy keeps the decision material and drops the identity.
+  const rec = {
+    id: 'res_1',
+    fileName: 'Mina-Rezaei-CV.pdf',
+    filePath: 'resumes/res_1.pdf',
+    fileHash: 'abc',
+    candidateName: 'مینا رضایی',
+    contact: { phone: '09121234567', email: 'mina@example.ir', city: 'تهران' },
+    extractedText: 'مینا رضایی\nmina@example.ir',
+    summary: 'مینا رضایی سابقهٔ شبکه دارد',
+    whyCategory: 'امتیاز بالا',
+    strengths: [{ point: 'مسیریابی', evidence: 'مینا رضایی: OSPF در آلفا' }],
+    weaknesses: [],
+    criterionScores: [{ criterionId: 'c1', score: 80, rationale: 'شاهد دارد', evidence: 'مینا رضایی — OSPF' }],
+    knockoutMisses: [],
+    deepFindings: null,
+    bankNote: null,
+    decisionNote: null,
+    unjudgeableReason: null,
+    errorMessage: null,
+    source: null,
+  } as any;
+  const red = redactRecord(rec);
+  assert(red.fileName.endsWith('.pdf') && !red.fileName.includes('Mina'), 'the file name keeps its extension but loses the name');
+  assert(red.contact.email === null && red.contact.phone === null && red.contact.city === 'تهران', 'contact is null; the city (not identifying) stays');
+  const json = JSON.stringify(red);
+  assert(!json.includes('مینا') && !json.includes('mina@example.ir'), 'nothing identifying survives the redaction');
+  assert(red.strengths[0].point === 'مسیریابی' && red.criterionScores[0].score === 80, 'the evidence and the scores stay');
+}
+
+// ---- کیت مصاحبه: the bank matches work, not words ----
+{
+  const bank = bankSummary();
+  assert(bank.packCount === 30 && bank.roleCount === 30, 'thirty packs and thirty roles', `${bank.packCount}/${bank.roleCount}`);
+  assert(bank.questionCount >= 70, 'the bank holds at least seventy questions', String(bank.questionCount));
+  assert(bank.packs.every((p) => p.questions >= 2), 'no pack is a single question');
+
+  // Role matching prefers the longest alias, so «فرانت‌اند» does not become «بک‌اند».
+  assert(matchRole('کارشناس ارشد شبکه و زیرساخت')?.title === 'کارشناس شبکه', 'a senior network title maps to the network role');
+  assert(matchRole('برنامه‌نویس فرانت‌اند')?.title === 'برنامه‌نویس فرانت‌اند', 'frontend stays frontend');
+  assert(matchRole('برنامه‌نویس بک‌اند')?.title === 'برنامه‌نویس بک‌اند', 'backend stays backend');
+  assert(matchRole('کارشناس فروش تلفنی')?.title === 'کارشناس فروش تلفنی', 'phone sales is its own role, not generic sales');
+  assert(matchRole('هماهنگ‌کنندهٔ رویداد') === null, 'an unknown role is honestly unmatched');
+
+  // Criteria pull packs by the job's own words, and only on word boundaries.
+  const ids = (criteria: Array<{ id: string; title: string; weight: number }>) => matchPacksByCriteria(criteria).map((m) => m.pack.id);
+  assert(ids([{ id: 'c1', title: 'تولید محتوا برای شبکه‌های اجتماعی', weight: 50 }]).includes('content'), '«تولید محتوا» pulls the content pack');
+  assert(!ids([{ id: 'c1', title: 'تولید محتوا برای شبکه‌های اجتماعی', weight: 50 }]).includes('production'), 'and not the factory pack');
+  assert(!ids([{ id: 'c1', title: 'نگهداری مشتریان کلیدی', weight: 50 }]).includes('maintenance'), '«نگهداری مشتری» is not machine maintenance');
+  assert(ids([{ id: 'c1', title: 'مذاکره و بستن قرارداد فروش', weight: 50 }]).includes('negotiation'), 'negotiation is recognised');
+  assert(ids([{ id: 'c1', title: 'برقراری ارتباط مؤثر با همکاران', weight: 50 }]).length === 0, '«برقراری» does not match «برق»');
+  const many = matchPacksByCriteria([
+    { id: 'a', title: 'فروش و مذاکره', weight: 30 },
+    { id: 'b', title: 'تارگت و پورسانت', weight: 80 },
+    { id: 'c', title: 'مدیریت مشتری در CRM', weight: 50 },
+    { id: 'd', title: 'کشف نیاز مشتری', weight: 60 },
+    { id: 'e', title: 'گزارش فروش', weight: 10 },
+  ]);
+  assert(many.length <= 4, 'criteria never pull more than four packs', String(many.length));
+  const top = many.slice(0, 2).map((m) => m.pack.id).sort();
+  assert(top.join(',') === 'negotiation,targets', 'the packs pulled by the heaviest criterion come first', top.join(','));
+  assert(many.every((m) => Boolean(m.criterionId)), 'each matched pack records which criterion pulled it');
+}
+
+// ---- «عملکرد تیم»: counts real work, never ranks people ----
+{
+  const now = new Date().toISOString();
+  const report = buildTeamReport({
+    range: '90',
+    nowISO: now,
+    members: [
+      { id: 'u1', name: 'مریم', role: 'admin', title: 'مدیر منابع انسانی' },
+      { id: 'u2', name: 'حسین', role: 'member', title: 'کارشناس جذب' },
+      { id: 'u3', name: 'رضا', role: 'member', title: 'مدیر فنی' },
+    ],
+    decisions: [
+      { resumeId: 'r1', decidedBy: 'u1', decidedAtISO: now, arrivedAtISO: now, approved: true },
+      { resumeId: 'r2', decidedBy: 'u1', decidedAtISO: now, arrivedAtISO: new Date(Date.now() - 10 * 86400_000).toISOString(), approved: false },
+      { resumeId: 'r3', decidedBy: 'u2', decidedAtISO: now, arrivedAtISO: now, approved: true },
+    ],
+    scorecards: [{ reviewerId: 'u2', atISO: now }],
+    comments: [{ authorId: 'u1', atISO: now }],
+    interviews: [{ interviewerIds: ['u3'], startsAtISO: now, status: 'scheduled' }],
+    offersSent: [{ userId: 'u2', atISO: now }],
+    activity: [{ userId: 'u3', atISO: now }],
+  });
+  const by = (id: string) => report.members.find((m) => m.userId === id)!;
+  assert(report.totals.decisions === 3 && report.totals.approved === 2 && report.totals.rejected === 1, 'decisions are split by outcome');
+  assert(by('u1').decisions === 2 && by('u1').comments === 1, 'each member carries only their own work');
+  assert(by('u2').scorecards === 1 && by('u2').offersSent === 1, 'scorecards and offers land on their author');
+  assert(by('u3').interviews === 1 && by('u3').decisions === 0, 'an interviewer with no decisions still appears');
+  assert(report.members[report.members.length - 1].userId === 'u3', 'the lightest workload sorts last');
+  assert(report.totals.activeMembers === 3 && report.totals.members === 3, 'every member is counted');
+  assert(report.concentration === 67, 'the busiest member holds two of three decisions', String(report.concentration));
+  assert(report.fastShare === 67, 'two of three decisions came within 72 hours', String(report.fastShare));
+  assert(by('u1').medianDecideHours === 120, 'the median sits between immediate and ten days', String(by('u1').medianDecideHours));
+
+  const empty = buildTeamReport({
+    range: '30',
+    nowISO: now,
+    members: [{ id: 'u1', name: 'مریم', role: 'owner', title: '' }],
+    decisions: [],
+    scorecards: [],
+    comments: [],
+    interviews: [],
+    offersSent: [],
+    activity: [],
+  });
+  assert(empty.concentration === null && empty.fastShare === null, 'no decisions ⇒ no percentages, not zero');
+  assert(empty.members[0].totalActions === 0 && empty.members[0].lastActiveISO === null, 'an idle member is shown honestly');
+}
+
+// ---- «هزینهٔ هر استخدام»: money only when a human typed it ----
+{
+  assert(COST_KINDS.length === 7 && new Set(COST_KINDS.map((k) => k.id)).size === 7, 'seven distinct cost kinds');
+  const clamp = normalizeAssumption({ hourlyRate: -5, minutesPerScorecard: 9999, minutesPerComment: 'x', minutesPerDecision: 12 });
+  assert(clamp.hourlyRate === 0, 'a negative rate becomes zero');
+  assert(clamp.minutesPerScorecard === 600, 'absurd minutes are capped');
+  assert(clamp.minutesPerComment === 5 && clamp.minutesPerDecision === 12, 'missing fields fall back, typed ones are kept');
+
+  const ok = readCostInput({ kind: 'advertising', amount: '۲٬۵۰۰٬۰۰۰', note: '  آگهی  ' });
+  assert(!('error' in ok) && ok.amount === 2500000 && ok.note === 'آگهی', 'a Persian-digit amount with separators is accepted, and the note is trimmed');
+  assert(!('error' in ok) && ok.jobId === null && ok.atISO === null, 'empty date and opening stay null');
+
+  const bad = (body: unknown) => 'error' in readCostInput(body);
+  assert(bad({ kind: 'nope', amount: 10 }), 'an unknown kind is refused');
+  assert(bad({ kind: 'tools', amount: -1 }), 'a negative amount is refused');
+  assert(bad({ kind: 'tools', amount: 0 }), 'zero is refused');
+  assert(bad({ kind: 'tools', amount: 1_000_000_000_001 }), 'an absurd amount is refused');
+  assert(bad({ kind: 'tools', amount: 10, atISO: 'not-a-date' }), 'an unreadable date is refused');
+  assert(bad({ kind: 'tools', amount: 10, atISO: new Date(Date.now() + 30 * 86400_000).toISOString() }), 'a future date is refused');
+
+  assert('error' in readAssumptionInput({ hourlyRate: 999_999_999 }, normalizeAssumption({})), 'an absurd hourly rate is refused');
+  const kept = readAssumptionInput({ hourlyRate: 250_000 }, normalizeAssumption({ minutesPerComment: 7 }));
+  assert(!('error' in kept) && kept.value.hourlyRate === 250_000 && kept.value.minutesPerComment === 7, 'saving the rate keeps the minute settings');
+
+  const entries = [
+    { id: 'c1', kind: 'advertising', amount: 3_000_000 },
+    { id: 'c2', kind: 'advertising', amount: 1_000_000 },
+    { id: 'c3', kind: 'agency', amount: 5_000_000 },
+  ] as any[];
+  const kinds = byKind(entries);
+  assert(kinds.length === 2 && kinds[0].kind === 'agency', 'empty kinds are hidden and the biggest comes first');
+  assert(kinds.find((k) => k.kind === 'advertising')!.count === 2, 'kinds also count their rows');
+}
+
+// ---- «ورود سازمانی»: the token checks that keep a session trustworthy ----
+{
+  const key = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const other = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = { ...(key.publicKey.export({ format: 'jwk' }) as any), kid: 'k1', alg: 'RS256', use: 'sig' };
+  const issuer = 'https://idp.example.ir';
+  const doc = {
+    issuer,
+    authorization_endpoint: `${issuer}/authorize`,
+    token_endpoint: `${issuer}/token`,
+    jwks_uri: `${issuer}/jwks`,
+  };
+  const realFetch = globalThis.fetch;
+  // Only the key set is fetched during verification; everything else stays real.
+  (globalThis as any).fetch = async (url: any, init?: any) => {
+    if (String(url) === doc.jwks_uri) return new Response(JSON.stringify({ keys: [jwk] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    return realFetch(url, init);
+  };
+  clearOidcCaches();
+
+  const sign = (claims: Record<string, unknown>, signingKey = key.privateKey, alg = 'RS256') => {
+    const h = Buffer.from(JSON.stringify({ alg, typ: 'JWT', kid: 'k1' })).toString('base64url');
+    const p = Buffer.from(JSON.stringify(claims)).toString('base64url');
+    const sig = crypto.sign('sha256', Buffer.from(`${h}.${p}`), signingKey).toString('base64url');
+    return `${h}.${p}.${sig}`;
+  };
+  const base = {
+    iss: issuer,
+    aud: 'hovida',
+    sub: 'sub-1',
+    exp: Math.floor(Date.now() / 1000) + 300,
+    iat: Math.floor(Date.now() / 1000),
+    nonce: 'n-1',
+    email: 'sara@company.ir',
+    email_verified: true,
+    name: 'سارا محمدی',
+  };
+
+  const good = await verifyIdToken(sign(base), { doc, clientId: 'hovida', nonce: 'n-1' });
+  assert(good.email === 'sara@company.ir', 'a correctly signed token is accepted');
+  const identity = identityFromClaims(good);
+  assert(identity.name === 'سارا محمدی' && identity.subject === 'sub-1', 'the identity keeps the provider name and subject');
+
+  const rejects = async (label: string, token: string, nonce = 'n-1') => {
+    let code = '';
+    try {
+      await verifyIdToken(token, { doc, clientId: 'hovida', nonce });
+    } catch (e) {
+      code = e instanceof OidcError ? e.code : 'OTHER';
+    }
+    assert(Boolean(code), label, code);
+  };
+
+  await rejects('a token signed with an unknown key is refused', sign(base, other.privateKey));
+  await rejects('a token for another audience is refused', sign({ ...base, aud: 'someone-else' }));
+  await rejects('an expired token is refused', sign({ ...base, exp: Math.floor(Date.now() / 1000) - 120 }));
+  await rejects('a token from another issuer is refused', sign({ ...base, iss: 'https://evil.example' }));
+  await rejects('a token issued for another login (nonce) is refused', sign({ ...base, nonce: 'n-2' }));
+  await rejects('an unsigned (alg=none) token is refused', sign(base, undefined, 'none'));
+  await rejects('a malformed token is refused', 'not-a-jwt');
+
+  let emailCode = '';
+  try {
+    identityFromClaims({ ...base, email_verified: false } as any);
+  } catch (e) {
+    emailCode = e instanceof OidcError ? e.code : '';
+  }
+  assert(emailCode === 'EMAIL_UNVERIFIED', 'an unverified e-mail is not a verified identity', emailCode);
+  let noEmail = '';
+  try {
+    identityFromClaims({ ...base, email: undefined, preferred_username: undefined } as any);
+  } catch (e) {
+    noEmail = e instanceof OidcError ? e.code : '';
+  }
+  assert(noEmail === 'NO_EMAIL', 'a token without an e-mail is refused', noEmail);
+
+  (globalThis as any).fetch = realFetch;
+  clearOidcCaches();
+
+  // URLs: https everywhere, except a provider on loopback.
+  assert(safeEndpoint('https://accounts.google.com').host === 'accounts.google.com', 'an https issuer is accepted');
+  assert(safeEndpoint('http://127.0.0.1:8080/realms/x').port === '8080', 'a loopback provider may use http (self-hosted Keycloak)');
+  let insecure = '';
+  try {
+    safeEndpoint('http://idp.example.ir');
+  } catch (e) {
+    insecure = e instanceof OidcError ? e.code : '';
+  }
+  assert(insecure === 'INSECURE_URL', 'a public http issuer is refused', insecure);
+  let badUrl = '';
+  try {
+    safeEndpoint('not a url');
+  } catch (e) {
+    badUrl = e instanceof OidcError ? e.code : '';
+  }
+  assert(badUrl === 'BAD_URL', 'a non-URL is refused', badUrl);
+
+  const parts = decodeJwt(sign(base));
+  assert(parts.header.alg === 'RS256' && parts.payload.aud === 'hovida', 'a JWT can be inspected without trusting it');
+
+  // Domains: what the workspace may claim.
+  assert(JSON.stringify(normalizeDomains(['@Company.IR', 'company.ir', ' x ', 'bad domain', 'sub.company.ir'])) === JSON.stringify(['company.ir', 'sub.company.ir']), 'domains are cleaned, lowercased and de-duplicated');
+  assert(normalizeDomains('a.ir, b.com').length === 2, 'a comma-separated string works too');
+  assert(normalizeDomains([]).length === 0 && normalizeDomains('localhost').length === 0, 'an empty or single-label domain is not accepted');
+  assert(emailDomain('Sara@Company.IR') === 'company.ir' && emailDomain('nope') === null, 'the domain is read from the address, honestly');
+}
+
+// ---- «آزمون و ارزیابی»: a real bank, an honest key, no accidental zeroes ----
+{
+  assert(TEMPLATE_COUNT === 5 && QUESTION_COUNT >= 40, 'the bank holds five templates and at least forty items', `${TEMPLATE_COUNT}/${QUESTION_COUNT}`);
+
+  const ids = new Set<string>();
+  let reverse = 0;
+  let keyed = 0;
+  let scales = 0;
+  for (const tpl of ASSESSMENT_TEMPLATES) {
+    assert(tpl.questions.length >= 6, `${tpl.id} has enough items to mean something`, String(tpl.questions.length));
+    assert(Boolean(tpl.reading && tpl.reading.length > 40), `${tpl.id} explains how its result is read`);
+    const dims = new Set(tpl.dimensions.map((d) => d.id));
+    for (const q of tpl.questions) {
+      assert(!ids.has(`${tpl.id}:${q.id}`), `question ids are unique inside ${tpl.id}`, q.id);
+      ids.add(`${tpl.id}:${q.id}`);
+      if (q.type === 'single') {
+        keyed++;
+        assert(q.options.length === 4, `${q.id} offers four answers`, String(q.options.length));
+        assert(new Set(q.options.map((o) => o.id)).size === 4, `${q.id} option ids are unique`);
+        assert(q.options.every((o) => o.score >= 0 && o.score <= 10), `${q.id} scores stay inside 0–10`);
+        assert(Math.max(...q.options.map((o) => o.score)) === 10, `${q.id} has one clearly best answer`);
+        assert(new Set(q.options.map((o) => o.label)).size === 4, `${q.id} answers are distinct`);
+      } else {
+        scales++;
+        if (q.reverse) reverse++;
+        assert(dims.has(q.dimension), `${q.id} feeds a declared dimension`, q.dimension);
+      }
+    }
+    if (tpl.scored) assert(tpl.questions.every((q) => q.type === 'single'), `${tpl.id} is keyed end to end`);
+    else assert(tpl.dimensions.length > 0, `${tpl.id} declares its dimensions`);
+  }
+  assert(keyed >= 30 && scales > 10 && reverse >= 3, 'both keyed and behavioural items are present', `${keyed}/${scales}/${reverse}`);
+
+  // The key is used here exactly as the server uses it.
+  const recruiting = templateById('situational-recruiting')!;
+  const best: Record<string, string> = {};
+  const worst: Record<string, string> = {};
+  for (const q of recruiting.questions) {
+    if (q.type !== 'single') continue;
+    const ranked = [...q.options].sort((a, b) => b.score - a.score);
+    best[q.id] = ranked[0].id;
+    worst[q.id] = ranked[ranked.length - 1].id;
+  }
+  assert(scoreAnswers(recruiting, best).score === 100, 'the best answer on every item is 100');
+  assert(scoreAnswers(recruiting, best).band === 'strong', 'and it reads as «هم‌راستا با نقش»');
+  const worstResult = scoreAnswers(recruiting, worst);
+  assert((worstResult.score || 0) < 25 && worstResult.band === 'review', 'the weakest set is a low score, not a crash', String(worstResult.score));
+  assert(scoreAnswers(recruiting, {}).score === 0, 'an empty set scores zero instead of throwing');
+  assert(scoreAnswers(recruiting, { ...best, 'rec-1': 'made-up' }).score === scoreAnswers(recruiting, { ...best, 'rec-1': '' }).score, 'an unknown option is ignored, not counted');
+
+  // Bands are a reading, never a verdict.
+  assert([bandOf(100), bandOf(75), bandOf(74), bandOf(55), bandOf(54), bandOf(0)].join(',') === 'strong,strong,medium,medium,review,review', 'band thresholds are exactly 75 and 55');
+
+  // Behavioural: reverse-keyed statements must count in the right direction.
+  const behavioural = templateById('behavioral-core')!;
+  const straight: Record<string, number> = {};
+  const inverted: Record<string, number> = {};
+  for (const q of behavioural.questions) {
+    if (q.type !== 'scale') continue;
+    straight[q.id] = q.reverse ? 1 : 5;
+    inverted[q.id] = q.reverse ? 5 : 1;
+  }
+  const straightDims = scoreAnswers(behavioural, straight).dimensions || [];
+  const invertedDims = scoreAnswers(behavioural, inverted).dimensions || [];
+  assert(straightDims.length === 5, 'five dimensions come back');
+  assert(straightDims.every((d) => d.score === 100), 'agreeing with the positive and rejecting the negative is 100', JSON.stringify(straightDims.map((d) => d.score)));
+  assert(invertedDims.every((d) => d.score === 0), 'the opposite answers are 0, not 100', JSON.stringify(invertedDims.map((d) => d.score)));
+  assert(scoreAnswers(behavioural, straight).score === null, 'a profile never pretends to be a total score');
+
+  // A role is pointed at a sensible starting test, not a random one.
+  assert(suggestTemplateId('کارشناس فروش') === 'situational-sales', 'sales roles start with the sales test');
+  assert(suggestTemplateId('مدیر تیم فنی') === 'situational-management', 'managers start with the leadership test');
+  assert(suggestTemplateId('کارشناس جذب') === 'situational-recruiting', 'recruiters start with the recruiting test');
+  assert(suggestTemplateId('برنامه‌نویس') === 'behavioral-core', 'everything else starts with the behavioural profile');
 }
 
 // ---- file extensions are preserved (bug #4) ----

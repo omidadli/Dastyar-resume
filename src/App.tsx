@@ -11,6 +11,7 @@ import { LoginPage, SignupPage } from './pages/Auth';
 import NotFound from './pages/NotFound';
 import { ErrorBoundary } from './components/layout/ErrorBoundary';
 import { LeaveGuardDialog } from './components/layout/LeaveGuardDialog';
+import { BrandingProvider } from './components/brand/BrandingProvider';
 
 const CHUNK_RELOAD_KEY = 'hovida.chunk-reload';
 
@@ -51,11 +52,39 @@ const Dashboard = lazyPage(() => import('./pages/Dashboard'));
 const Jobs = lazyPage(() => import('./pages/Jobs'));
 const JobNew = lazyPage(() => import('./pages/JobNew'));
 const JobDetail = lazyPage(() => import('./pages/JobDetail'));
+const InterviewKit = lazyPage(() => import('./pages/InterviewKit'));
 const Candidates = lazyPage(() => import('./pages/Candidates'));
 const CandidatePage = lazyPage(() => import('./pages/CandidatePage'));
 const Compare = lazyPage(() => import('./pages/Compare'));
 const Talent = lazyPage(() => import('./pages/Talent'));
 const Reports = lazyPage(() => import('./pages/Reports'));
+const TeamReport = lazyPage(() => import('./pages/TeamReport'));
+const CostReport = lazyPage(() => import('./pages/CostReport'));
+const EeoReport = lazyPage(() => import('./pages/EeoReport'));
+const VideoInterviews = lazyPage(() => import('./pages/VideoInterviews'));
+const Onboarding = lazyPage(() => import('./pages/Onboarding'));
+const Payroll = lazyPage(() => import('./pages/Payroll'));
+const Approvals = lazyPage(() => import('./pages/Approvals'));
+const ApplicationStatus = lazyPage(() => import('./pages/ApplicationStatus'));
+const InterviewRoom = lazyPage(() => import('./pages/InterviewRoom'));
+const VideoRecord = lazyPage(() => import('./pages/VideoRecord'));
+const Sourcing = lazyPage(() => import('./pages/Sourcing'));
+const Automation = lazyPage(() => import('./pages/Automation'));
+const Careers = lazyPage(() => import('./pages/Careers'));
+const Offer = lazyPage(() => import('./pages/Offer'));
+const Schedule = lazyPage(() => import('./pages/Schedule'));
+const Survey = lazyPage(() => import('./pages/Survey'));
+const ReferenceForm = lazyPage(() => import('./pages/ReferenceForm'));
+const References = lazyPage(() => import('./pages/References'));
+const BackgroundCheck = lazyPage(() => import('./pages/BackgroundCheck'));
+const BackgroundConsent = lazyPage(() => import('./pages/BackgroundConsent'));
+const CodeChallenge = lazyPage(() => import('./pages/CodeChallenge'));
+const PsychTest = lazyPage(() => import('./pages/PsychTest'));
+const PsychReview = lazyPage(() => import('./pages/PsychReview'));
+const Requisitions = lazyPage(() => import('./pages/Requisitions'));
+const RequisitionDetail = lazyPage(() => import('./pages/RequisitionDetail'));
+const CodeReview = lazyPage(() => import('./pages/CodeReview'));
+const Assessment = lazyPage(() => import('./pages/Assessment'));
 const Settings = lazyPage(() => import('./pages/Settings'));
 const AdminApp = lazyPage(() => import('./pages/admin/AdminApp'));
 
@@ -104,16 +133,80 @@ function appPage(pathname: string): React.ReactNode {
   if (pathname === '/app' || pathname === '/app/') return <Dashboard />;
   if (pathname === '/app/jobs') return <Jobs />;
   if (pathname === '/app/jobs/new') return <JobNew />;
+  // The kit is a printable page of its own, before the generic job match.
+  let km = matchPath('/app/jobs/:id/kit', pathname);
+  if (km) return RECORD_ID.test(km.id) ? <InterviewKit key={km.id} id={km.id} /> : <NotFound inApp />;
   let m = matchPath('/app/jobs/:id', pathname);
   // Keyed: moving between two openings (notification, search) starts with fresh filters and panels.
   if (m) return RECORD_ID.test(m.id) ? <JobDetail key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/candidates') return <Candidates />;
+  // «استعلام مرجع» has its own page: it needs room for consent, referees and answers.
+  // «نیازمندسنجی» — headcount and approvals.
+  if (pathname === '/app/requisitions') {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <Requisitions />
+      </Suspense>
+    );
+  }
+  m = matchPath('/app/requisitions/:id', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <RequisitionDetail id={m.id} />
+      </Suspense>
+    );
+  }
+  // «سنجش نرم‌شده» for one candidate.
+  m = matchPath('/app/candidates/:id/psychometrics', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <PsychReview resumeId={m.id} />
+      </Suspense>
+    );
+  }
+  // «چالش کد» for one candidate.
+  m = matchPath('/app/candidates/:id/coding', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <CodeReview resumeId={m.id} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/app/candidates/:id/background', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <BackgroundCheck resumeId={m.id} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/app/candidates/:id/references', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <References resumeId={m.id} />
+      </Suspense>
+    );
+  }
   m = matchPath('/app/candidates/:id', pathname);
   if (m) return RECORD_ID.test(m.id) ? <CandidatePage key={m.id} id={m.id} /> : <NotFound inApp />;
   if (pathname === '/app/compare') return <Compare />;
   if (pathname === '/app/talent') return <Talent />;
+  if (pathname === '/app/sourcing') return <Sourcing />;
+  if (pathname === '/app/video') return <VideoInterviews />;
+  if (pathname === '/app/onboarding') return <Onboarding />;
+  if (pathname === '/app/payroll') return <Payroll />;
+  if (pathname === '/app/approvals') return <Approvals />;
+  if (pathname === '/app/automation') return <Automation />;
   m = matchPath('/app/talent/:dept', pathname);
   if (m) return <Talent dept={m.dept} />;
+  // The three reports share a range; the specific paths come before the overview.
+  if (pathname === '/app/reports/team') return <TeamReport />;
+  if (pathname === '/app/reports/cost') return <CostReport />;
+  if (pathname === '/app/reports/eeo') return <EeoReport />;
   if (pathname === '/app/reports') return <Reports />;
   if (pathname === '/app/settings') return <Settings tab="org" />;
   m = matchPath('/app/settings/:tab', pathname);
@@ -126,6 +219,114 @@ function Routes() {
   const { status } = useAuth();
 
   if (pathname === '/') return <Landing />;
+  // The public career portal: no session, no app shell — a candidate's page.
+  let m = matchPath('/careers/:slug/jobs/:jobId', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Careers slug={m.slug} jobId={m.jobId} />
+      </Suspense>
+    );
+  }
+  // «مصاحبهٔ ویدئویی» — the candidate records answers here; the token is the key.
+  m = matchPath('/video/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <VideoRecord token={m.token} />
+      </Suspense>
+    );
+  }
+  // The candidate's offer page, reached from the e-mail: the token is the key.
+  m = matchPath('/offer/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Offer token={m.token} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/schedule/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Schedule token={m.token} />
+      </Suspense>
+    );
+  }
+  // «پیگیری درخواست» — the candidate's own status page; the token is the key.
+  m = matchPath('/status/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <ApplicationStatus token={m.token} />
+      </Suspense>
+    );
+  }
+  // «اتاق مصاحبهٔ زنده» — the same address for both sides; the session decides.
+  m = matchPath('/room/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بازکردن اتاق…" />}>
+        <InterviewRoom token={m.token} />
+      </Suspense>
+    );
+  }
+  // «تجربهٔ کارجو» — the survey the candidate got by e-mail.
+  m = matchPath('/survey/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Survey token={m.token} />
+      </Suspense>
+    );
+  }
+  // «سنجش نرم‌شده» — the candidate's token page.
+  m = matchPath('/psych/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <PsychTest token={m.token} />
+      </Suspense>
+    );
+  }
+  // «چالش کد» — the candidate's token page.
+  m = matchPath('/code/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <CodeChallenge token={m.token} />
+      </Suspense>
+    );
+  }
+  // «استعلام مرجع» — the referee's page, opened by someone outside the company.
+  m = matchPath('/background/:token', pathname);
+  if (m) return <BackgroundConsent token={m.token} />;
+  m = matchPath('/reference/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <ReferenceForm token={m.token} />
+      </Suspense>
+    );
+  }
+  // «آزمون و ارزیابی» — the test link a candidate got by e-mail.
+  m = matchPath('/assess/:token', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Assessment token={m.token} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/careers/:slug', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<FullScreenLoader label="در حال بارگذاری…" />}>
+        <Careers slug={m.slug} />
+      </Suspense>
+    );
+  }
   if (pathname === '/admin' || pathname.startsWith('/admin/')) {
     if (status === 'loading') return <FullScreenLoader />;
     return (
@@ -159,11 +360,13 @@ export default function App() {
     <ErrorBoundary>
       <ConfigProvider>
         <AuthProvider>
-          <AnalysisProvider>
-            <Routes />
-            <Toaster />
-            <LeaveGuardDialog />
-          </AnalysisProvider>
+          <BrandingProvider>
+            <AnalysisProvider>
+              <Routes />
+              <Toaster />
+              <LeaveGuardDialog />
+            </AnalysisProvider>
+          </BrandingProvider>
         </AuthProvider>
       </ConfigProvider>
     </ErrorBoundary>

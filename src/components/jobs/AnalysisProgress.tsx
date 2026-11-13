@@ -46,6 +46,7 @@ export function AnalysisProgress({ run, onCancel, onDismiss }: { run: AnalysisRu
                   run.result.aiCount ? `${toPersianDigits(run.result.aiCount)} با هوش مصنوعی` : '',
                   run.result.localCount ? `${toPersianDigits(run.result.localCount)} با موتور محلی` : '',
                   run.result.unjudgeable ? `${toPersianDigits(run.result.unjudgeable)} اطلاعات ناکافی` : '',
+                  run.result.duplicates ? `${toPersianDigits(run.result.duplicates)} تکراری` : '',
                   run.result.errors ? `${toPersianDigits(run.result.errors)} خطا` : '',
                 ]
                   .filter(Boolean)

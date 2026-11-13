@@ -124,7 +124,26 @@ requisition page lists the over-band offers with their reasons, next to the cost
 - **«کارتابل تأیید»** gains a «نیازمندسنجی» queue. It does **not** decide there:
   the row links to the requisition page, where the justification, the band and the
   remaining seats are on screen (`canAct: false` with that reason).
-- **The job** carries `requisitionId`, so the opening knows what it is spending.
+- **On the opening itself** — «ایجاد فرصت شغلی» step 1 and the «نیازمندسنجی» tab of
+  `/app/jobs/:id`:
+  - creating an opening can attach a requisition in the same request; the check
+    runs **before** anything is written, so a refused link never leaves a
+    half-made opening behind;
+  - the tab shows the seat being spent (code, granted seats, filled, remaining,
+    who approved it and when), lets you switch or detach, and links to the
+    requisition;
+  - the picker lists **every** requisition of that department. Ones that cannot be
+    used are shown with the server's own sentence
+    (`REQUISITION_NOT_OPEN` / «وضعیت … سرفصل باز ندارد») instead of a silent grey
+    row or, worse, disappearing;
+  - the workspace's publishing rule is printed on the tab either way — when it is
+    off it says «این فضا سخت‌گیری نمی‌کند», and when it blocks, the refusal is the
+    server's (`REQUISITION_REQUIRED`), shown before you press publish.
+
+  Attaching from the job **detaches the previous one only after the new target
+  passes** its own checks — a refused switch leaves the opening where it was.
+  Several openings may spend one requisition: it is a pool of seats, and seats are
+  closed by accepted offers, not by counting job records.
 
 ## Privacy / tenancy
 
@@ -145,6 +164,12 @@ granting fewer seats, granting more refused, attaching to unapproved/over-full
 requisitions, department mismatch, the publish gate in all three refusal modes,
 counting a real accepted offer into «filled», rollup arithmetic, hold/resume,
 cancel-with-hire refused, the inbox row, tenant walls, admin-only settings.
+
+`npm run test:job-requisition` — 48 checks from the *opening's* side: a draft
+refused with no job created, the same after approval, wrong department and unknown
+id, the job payload (attached row, department-only options, the gate flag), two
+openings sharing one pool, the publish gate refusing and then passing, the refusal
+that keeps the old link, detach, member can link, tenant walls.
 
 `npm run test:offer-band` — 31 checks: no requisition means no verdict, in-band and
 below-floor, refusal above the ceiling with both numbers on the response, a

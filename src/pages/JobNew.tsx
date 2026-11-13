@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check, FileStack, ListChecks, RefreshCw, Sparkle
 import { PageHeader } from '../components/layout/AppShell';
 import { CriteriaEditor, QuestionsEditor, criterionTitleOk } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
+import { RequisitionPicker } from '../components/jobs/RequisitionPicker';
 import { Button, Callout, Card, CardHeader, Chip, Select, Skeleton, Spinner, TextArea, TextInput, toast } from '../components/ui';
 import { api, type JobInput } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -71,6 +72,8 @@ export default function JobNew() {
   const [files, setFiles] = useState<File[]>([]);
   const [creating, setCreating] = useState(false);
   const [touched, setTouched] = useState(false);
+  const [requisitionId, setRequisitionId] = useState<string | null>(null);
+  const [gateRequired, setGateRequired] = useState(false);
   const lastKey = useRef('');
   const abortRef = useRef<AbortController | null>(null);
 
@@ -80,6 +83,15 @@ export default function JobNew() {
   const departments = org?.departments || [];
   const step1Valid = Boolean(form.departmentId && form.roleTitle.trim().length >= 2);
   const criteriaValid = Boolean(understanding?.criteria.every(criterionTitleOk));
+
+  // The workspace may only publish openings that spend an approved requisition.
+  // Read once here so the picker can say so before anything is created.
+  useEffect(() => {
+    api.requisitions
+      .summary()
+      .then((r) => setGateRequired(Boolean(r.settings?.requireApprovedForPublish)))
+      .catch(() => undefined);
+  }, []);
 
   // Leaving the page cancels a pending suggestion (it would only cost AI quota).
   useEffect(() => () => abortRef.current?.abort(), []);
@@ -214,6 +226,23 @@ export default function JobNew() {
                 })}
               </div>
               {touched && !form.departmentId && <p className="text-xs text-low-ink font-medium mt-1.5">دپارتمان را انتخاب کنید.</p>}
+            </div>
+
+            <div>
+              <p className="text-[13px] font-semibold text-ink-2 mb-2">
+                نیازمندسنجی <span className="text-[11.5px] font-normal text-ink-3">(اختیاری — سرفصل نیرو را از این آگهی کم می‌کند)</span>
+              </p>
+              <RequisitionPicker
+                departmentId={form.departmentId}
+                value={requisitionId}
+                onChange={setRequisitionId}
+              />
+              {gateRequired && !requisitionId && (
+                <Callout tone="warning" className="mt-2">
+                  در این فضای کاری، انتشار در پورتال شغلی فقط با یک نیازمندسنجی تأییدشده ممکن است. آگهی را می‌سازید، اما تا اتصال به سرفصل
+                  تأییدشده منتشر نمی‌شود.
+                </Callout>
+              )}
             </div>
             <TextInput
               label="عنوان فرصت شغلی"

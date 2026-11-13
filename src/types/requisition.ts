@@ -120,6 +120,52 @@ export interface RequisitionApprovers {
   role: 'owner' | 'admin' | 'member';
 }
 
+/**
+ * «نیازمندسنجی» as the *job* page sees it: the attached requisition, the choices
+ * for this department, and the workspace's publishing rule stated even when it
+ * lets the opening through.
+ */
+export interface JobRequisitionInfo {
+  id: string;
+  code: string;
+  title: string;
+  status: RequisitionStatus;
+  approvedSlots: number;
+  filled: number;
+  remaining: number;
+  departmentName: string;
+  decidedAtJalali: string | null;
+  decidedByName: string | null;
+}
+
+export interface RequisitionOption {
+  id: string;
+  code: string;
+  title: string;
+  departmentId: string;
+  departmentName: string;
+  status: RequisitionStatus;
+  approvedSlots: number;
+  filled: number;
+  remaining: number;
+  /** False when a row is shown but cannot be picked — `reason` says why. */
+  selectable: boolean;
+  reason: string | null;
+  /** An opening already spending this requisition, shown as information only. */
+  jobTitle: string | null;
+}
+
+export interface JobRequisitionPayload {
+  requisition: JobRequisitionInfo | null;
+  options: RequisitionOption[];
+  gate: {
+    /** true when this workspace only publishes openings with an approved requisition. */
+    required: boolean;
+    /** The refusal that publishing would hit right now, if any. */
+    blocked: { code: string; message: string } | null;
+  };
+}
+
 /** The editable payload, as the form sends it. */
 export interface RequisitionInput {
   title?: string;

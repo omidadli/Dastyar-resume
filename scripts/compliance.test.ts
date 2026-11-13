@@ -304,7 +304,15 @@ async function main() {
     assert(/SHA-256/.test(packEvent?.text || ''), 'the pack event names the hash, so the feed itself is evidence');
   } finally {
     child.kill('SIGTERM');
-    fs.rmSync(DATA, { recursive: true, force: true });
+    // Wait for the server to finish its shutdown write before removing the data
+    // directory — otherwise the snapshot lands in a half-deleted folder and the
+    // cleanup itself fails the run.
+    await new Promise<void>((resolve) => {
+      if (child.exitCode !== null) return resolve();
+      child.once('exit', () => resolve());
+      setTimeout(resolve, 4000);
+    });
+    fs.rmSync(DATA, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 
   if (failures) {

@@ -14,6 +14,7 @@ import { h, oneOf, str } from './util';
 import { bankSummary, buildInterviewKit } from '../interview-kit';
 import { accessPayload, blockedByJob, canSeeJob, visibleJobIds, visibleJobs } from '../job-access';
 import type { JobAccessMode } from '../../src/types/screening';
+import { RequisitionError, attachJob, checkAttachable, detachJob, jobRequisitionPayload } from '../requisitions';
 
 const EMPLOYMENT: EmploymentType[] = ['full-time', 'part-time', 'contract', 'remote', 'hybrid', 'internship'];
 const STATUS_LABEL: Record<JobStatus, string> = { open: 'باز', paused: 'متوقف', closed: 'بسته‌شده' };
@@ -36,6 +37,11 @@ function sanitizeAnswers(raw: unknown): ScreeningAnswers {
     else if (Array.isArray(v)) out[k] = v.filter((x) => typeof x === 'string').slice(0, 12).map((x) => String(x).slice(0, 60));
   }
   return out;
+}
+
+function requisitionFail(res: express.Response, err: unknown) {
+  if (err instanceof RequisitionError) return res.status(err.status).json({ error: err.message, code: err.code });
+  throw err;
 }
 
 function recommendationFor(score: number, t: { interview: number; review: number }): Recommendation {
@@ -103,6 +109,16 @@ export function jobRoutes(): express.Router {
     if (roleTitle.length < 2) return res.status(400).json({ error: 'عنوان فرصت شغلی را وارد کنید.' });
     const understanding = repairUnderstanding(req.body?.understanding, department, roleTitle, { userEdited: true });
     if (!understanding) return res.status(400).json({ error: 'معیارهای ارزیابی ناقص است؛ دوباره تلاش کنید.' });
+    // «نیازمندسنجی» is checked *before* anything is written: a refused link must
+    // not leave an opening behind that nobody asked for.
+    const requisitionId = str(req.body?.requisitionId, 80);
+    if (requisitionId) {
+      try {
+        checkAttachable(org.id, requisitionId, department.id);
+      } catch (err) {
+        return requisitionFail(res, err);
+      }
+    }
     // createdBy stays the real account (delete permission); the name shows who acted.
     const job = db.createJob(org.id, { id: ctxOf(req).user.id, name: actorOf(req).name }, {
       departmentId: department.id,
@@ -116,7 +132,16 @@ export function jobRoutes(): express.Router {
       criteriaSource: req.body?.criteriaSource === 'template' ? 'template' : 'ai',
     });
     db.logActivity(org.id, actorOf(req), 'job.created', `فرصت شغلی «${job.roleTitle}» را ایجاد کرد`, { jobId: job.id });
-    res.status(201).json({ job });
+    if (requisitionId) {
+      // Already validated above; this writes the history entry and the activity line.
+      try {
+        attachJob(org.id, requisitionId, job.id, actorOf(req));
+      } catch {
+        /* the preflight passed — a race here must not fail the creation */
+      }
+    }
+    const created = db.getJob(org.id, job.id) || job;
+    res.status(201).json({ job: created, requisition: jobRequisitionPayload(org.id, created) });
   });
 
   r.get('/jobs/:id', (req, res) => {
@@ -124,8 +149,7 @@ export function jobRoutes(): express.Router {
     const job = db.getJob(org.id, req.params.id);
     if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
     if (blockedByJob(req, res, job)) return;
-    if (blockedByJob(req, res, job)) return;
-    res.json({ job, access: accessPayload(org.id, job) });
+    res.json({ job, access: accessPayload(org.id, job), requisition: jobRequisitionPayload(org.id, job) });
   });
 
   /**
@@ -221,6 +245,37 @@ export function jobRoutes(): express.Router {
       { jobId: job.id }
     );
     res.json({ job: updated, access: accessPayload(org.id, updated) });
+  });
+
+  /**
+   * «نیازمندسنجی این آگهی» — attach or detach from the job's own page. Attaching
+   * spends a seat, so it goes through the same rules as the requisition page:
+   * approved, same department, still open, one opening per requisition.
+   */
+  r.put('/jobs/:id/requisition', requireRole('member'), (req, res) => {
+    const { org, user } = ctxOf(req);
+    const job = db.getJob(org.id, req.params.id);
+    if (!job) return res.status(404).json({ error: 'فرصت شغلی یافت نشد.' });
+    if (blockedByJob(req, res, job)) return;
+    const actor = { id: user.id, name: user.name };
+    const next = str(req.body?.requisitionId, 80);
+    try {
+      if (!next) {
+        if (!job.requisitionId) return res.json({ job, requisition: jobRequisitionPayload(org.id, job) });
+        detachJob(org.id, job.requisitionId, job.id, actor);
+      } else {
+        if (job.requisitionId === next) return res.json({ job, requisition: jobRequisitionPayload(org.id, job) });
+        // Validate the target before letting go of the current one: a refused
+        // switch must leave the opening attached where it was.
+        checkAttachable(org.id, next, job.departmentId);
+        if (job.requisitionId) detachJob(org.id, job.requisitionId, job.id, actor);
+        attachJob(org.id, next, job.id, actor);
+      }
+    } catch (err) {
+      return requisitionFail(res, err);
+    }
+    const fresh = db.getJob(org.id, job.id) || job;
+    res.json({ job: fresh, requisition: jobRequisitionPayload(org.id, fresh) });
   });
 
   r.delete('/jobs/:id', (req, res) => {

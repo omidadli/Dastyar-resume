@@ -21,6 +21,7 @@ import type { BrandingPayload, OrgBranding } from '../types/branding';
 import type { PublicReference, ReferenceAnswerInput, ReferenceCase, Referee } from '../types/references';
 import type { CodeCaseResult, CodeChallengeSummary, CodeInvite, PublicCodeChallenge } from '../types/coding';
 import type {
+  JobRequisitionPayload,
   Requisition,
   RequisitionApprovers,
   RequisitionInput,
@@ -414,9 +415,14 @@ export const api = {
       post<{ understanding: JobUnderstanding; source: CriteriaSource }>('/api/jobs/understand', b, { timeoutMs: 75_000, ...opts }),
     template: (b: { departmentId: string; roleTitle: string }) =>
       post<{ understanding: JobUnderstanding; source: CriteriaSource }>('/api/jobs/template', b),
-    create: (b: JobInput & { understanding: JobUnderstanding; answers: ScreeningAnswers; criteriaSource: CriteriaSource }) =>
-      post<{ job: Job }>('/api/jobs', b),
-    get: (id: string, opts?: RequestOptions) => get<{ job: Job; access?: JobAccessPayload }>(`/api/jobs/${id}`, opts),
+    create: (
+      b: JobInput & { understanding: JobUnderstanding; answers: ScreeningAnswers; criteriaSource: CriteriaSource; requisitionId?: string | null }
+    ) => post<{ job: Job; requisition?: JobRequisitionPayload }>('/api/jobs', b),
+    get: (id: string, opts?: RequestOptions) =>
+      get<{ job: Job; access?: JobAccessPayload; requisition?: JobRequisitionPayload }>(`/api/jobs/${id}`, opts),
+    /** «نیازمندسنجی این آگهی» — attach a requisition or clear it (null). */
+    setRequisition: (id: string, requisitionId: string | null) =>
+      put<{ job: Job; requisition: JobRequisitionPayload }>(`/api/jobs/${id}/requisition`, { requisitionId }),
     /** «دسترسی به این آگهی» — admins only. */
     setAccess: (id: string, b: { accessMode: JobAccessMode; allowedUserIds: string[] }) =>
       put<{ job: Job; access: JobAccessPayload }>(`/api/jobs/${id}/access`, b),

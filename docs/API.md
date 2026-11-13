@@ -593,6 +593,18 @@ GET  /api/requisitions/settings                # admin
 PUT  /api/requisitions/settings                body: { requireApprovedForPublish, approverUserIds }
 ```
 
+از سمت آگهی:
+
+```http
+POST /api/jobs                body: { …, requisitionId? }   → { job, requisition }
+GET  /api/jobs/:id            → { job, access, requisition }  (bundle: attached, options, gate)
+PUT  /api/jobs/:id/requisition  body: { requisitionId: "req_…" | null } → { job, requisition }
+```
+
+`requisition.gate.blocked` همان ردّی است که انتشار می‌خورد (`REQUISITION_REQUIRED` /
+`REQUISITION_NOT_APPROVED` / `REQUISITION_FILLED`)، از قبل روی صفحه. ساخت آگهی با
+`requisitionId` پیش از نوشتن اعتبارسنجی می‌شود؛ رد شدن، آگهی نیمه‌ساخته باقی نمی‌گذارد.
+
 انتشار آگهی (`POST /api/jobs/:id/publish`) وقتی قاعده روشن باشد با یکی از کدهای
 `REQUISITION_REQUIRED` / `REQUISITION_NOT_APPROVED` / `REQUISITION_FILLED` (۴۰۹) رد
 می‌شود. کدهای دیگر: `TITLE_REQUIRED`، `DEPARTMENT_REQUIRED`، `BAD_SLOTS`،

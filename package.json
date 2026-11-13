@@ -63,6 +63,7 @@
     "test:marketplace": "npm run build && tsx scripts/assessment-marketplace.test.ts",
     "test:background": "npm run build && tsx scripts/background-check.test.ts",
     "test:compliance": "npm run build && tsx scripts/compliance.test.ts",
+    "test:job-requisition": "npm run build && tsx scripts/job-requisition.test.ts",
     "test:hris": "npm run build && tsx scripts/hris-api.test.ts",
     "test:room": "npm run build && tsx scripts/interview-room.test.ts",
     "test:inbox": "npm run build && tsx scripts/inbox-api.test.ts",

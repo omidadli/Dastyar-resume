@@ -18,6 +18,7 @@
 import * as db from './db';
 import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
+import type { Job } from '../src/types/screening';
 import {
   PRIORITY_LABEL,
   type Requisition,
@@ -441,20 +442,29 @@ export function cancelRequisition(orgId: string, id: string, actor: { id: string
 
 // ---------------------------------------------------------------- openings ---
 
+/**
+ * Why an opening cannot be attached right now — one sentence a human can act on,
+ * shared by every door (create-with-requisition, the job page, the requisition
+ * page) so the same refusal is never worded two different ways.
+ */
+export function attachRefusal(row: db.RequisitionRow): { message: string; code: string } | null {
+  if (supportsHeadcount(row)) return null;
+  const status = effectiveStatus(row);
+  const message =
+    status === 'draft'
+      ? 'این نیازمندسنجی هنوز تأیید نشده است؛ اول آن را بفرستید و تأیید بگیرید.'
+      : status === 'pending'
+        ? 'این نیازمندسنجی در انتظار تأیید است؛ پیش از تأیید، آگهی به آن وصل نمی‌شود.'
+        : status === 'filled'
+          ? 'همهٔ پست‌های این نیازمندسنجی پر شده است؛ برای استخدام بیشتر، درخواست تازه بسازید.'
+          : 'این نیازمندسنجی در وضعیت «' + status + '» است و سرفصل باز ندارد.';
+  return { message, code: 'REQUISITION_NOT_OPEN' };
+}
+
 export function attachJob(orgId: string, id: string, jobId: string, actor: { id: string; name: string }): db.RequisitionRow {
   const row = getOrThrow(orgId, id);
-  if (!supportsHeadcount(row)) {
-    const status = effectiveStatus(row);
-    const message =
-      status === 'draft'
-        ? 'این نیازمندسنجی هنوز تأیید نشده است؛ اول آن را بفرستید و تأیید بگیرید.'
-        : status === 'pending'
-          ? 'این نیازمندسنجی در انتظار تأیید است؛ پیش از تأیید، آگهی به آن وصل نمی‌شود.'
-          : status === 'filled'
-            ? 'همهٔ پست‌های این نیازمندسنجی پر شده است؛ برای استخدام بیشتر، درخواست تازه بسازید.'
-            : 'این نیازمندسنجی در وضعیت «' + status + '» است و سرفصل باز ندارد.';
-    throw new RequisitionError(message, 409, 'REQUISITION_NOT_OPEN');
-  }
+  const refusal = attachRefusal(row);
+  if (refusal) throw new RequisitionError(refusal.message, 409, refusal.code);
   const job = db.getJob(orgId, jobId);
   if (!job) throw new RequisitionError('فرصت شغلی پیدا نشد.', 404, 'JOB_NOT_FOUND');
   if (job.departmentId !== row.departmentId) {
@@ -474,6 +484,20 @@ export function attachJob(orgId: string, id: string, jobId: string, actor: { id:
   });
   db.logActivity(orgId, actor, 'requisition.updated', `آگهی «${job.roleTitle}» به نیازمندسنجی «${row.code}» وصل شد`, { jobId: job.id });
   return next;
+}
+
+/**
+ * Preflight for «create an opening against this requisition». Runs before the
+ * job exists, so a refused link never leaves a half-created opening behind.
+ */
+export function checkAttachable(orgId: string, requisitionId: string, departmentId: string): db.RequisitionRow {
+  const row = getOrThrow(orgId, requisitionId);
+  const refusal = attachRefusal(row);
+  if (refusal) throw new RequisitionError(refusal.message, 409, refusal.code);
+  if (row.departmentId !== departmentId) {
+    throw new RequisitionError('این آگهی برای دپارتمان دیگری است؛ سرفصل نیروی این نیازمندسنجی قابل استفاده نیست.', 400, 'DEPARTMENT_MISMATCH');
+  }
+  return row;
 }
 
 export function detachJob(orgId: string, id: string, jobId: string, actor: { id: string; name: string }): db.RequisitionRow {
@@ -517,6 +541,86 @@ export function publishGate(orgId: string, jobId: string): { code: string; messa
     };
   }
   return null;
+}
+
+// ------------------------------------------------------------- job linkage ---
+
+/** One choice in the «نیازمندسنجی» picker on the job page. */
+export interface RequisitionOption {
+  id: string;
+  code: string;
+  title: string;
+  departmentId: string;
+  departmentName: string;
+  status: RequisitionStatus;
+  approvedSlots: number;
+  filled: number;
+  remaining: number;
+  /** True when an opening may be attached right now. */
+  selectable: boolean;
+  /** Why not — printed next to a disabled option, never a silent grey row. */
+  reason: string | null;
+  /** The opening already attached to it, when one is. */
+  jobTitle: string | null;
+}
+
+export function optionsFor(orgId: string, departmentId: string, currentJobId: string | null): RequisitionOption[] {
+  return db
+    .listRequisitions(orgId, { departmentId })
+    .map((row) => {
+      const filled = filledOf(row);
+      const granted = row.approvedSlots ?? row.slots;
+      const refusal = attachRefusal(row);
+      // A requisition may carry several openings — it is a pool of seats, and
+      // filled seats are counted from accepted offers. So an existing opening is
+      // information for the picker, not a reason to refuse.
+      const holder = jobsOf(row).find((j) => j.id !== currentJobId) || null;
+      const reason = refusal?.message || null;
+      return {
+        id: row.id,
+        code: row.code,
+        title: row.title,
+        departmentId: row.departmentId,
+        departmentName: row.departmentName,
+        status: effectiveStatus(row, filled),
+        approvedSlots: granted,
+        filled,
+        remaining: Math.max(0, granted - filled),
+        selectable: !reason,
+        reason,
+        jobTitle: holder?.roleTitle || null,
+      };
+    })
+    .sort((a, b) => Number(b.selectable) - Number(a.selectable) || b.code.localeCompare(a.code));
+}
+
+/**
+ * What the job page needs about its requisition, in one read: the attached row,
+ * the options for the same department, and whether publishing is gated.
+ */
+export function jobRequisitionPayload(orgId: string, job: Job) {
+  const row = job.requisitionId ? db.getRequisition(orgId, job.requisitionId) : null;
+  const settings = db.getRequisitionSettings(orgId);
+  const gate = publishGate(orgId, job.id);
+  return {
+    requisition: row
+      ? {
+          id: row.id,
+          code: row.code,
+          title: row.title,
+          status: effectiveStatus(row),
+          approvedSlots: row.approvedSlots ?? row.slots,
+          filled: filledOf(row),
+          remaining: Math.max(0, (row.approvedSlots ?? row.slots) - filledOf(row)),
+          departmentName: row.departmentName,
+          decidedAtJalali: row.decidedAtISO ? formatJalaliDate(tehranJalaliOf(new Date(row.decidedAtISO)), true) : null,
+          decidedByName: row.decidedByName,
+        }
+      : null,
+    options: optionsFor(orgId, job.departmentId, job.id),
+    /* The workspace's rule, stated even when it lets this opening through. */
+    gate: { required: settings.requireApprovedForPublish, blocked: gate },
+  };
 }
 
 // ------------------------------------------------------------------ rollup ---

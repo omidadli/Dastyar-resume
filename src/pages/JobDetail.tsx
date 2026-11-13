@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  FileCheck2,
   Globe2,
   CalendarClock,
   CheckCircle2,
@@ -38,6 +39,7 @@ import { CriteriaEditor, QuestionsEditor } from '../components/jobs/JobEditors';
 import { UploadDropzone } from '../components/jobs/UploadDropzone';
 import { JobAccessModal } from '../components/jobs/JobAccessModal';
 import { PublicationCard } from '../components/jobs/PublicationCard';
+import { RequisitionPanel } from '../components/jobs/RequisitionPanel';
 import {
   Button,
   ButtonLink,
@@ -78,7 +80,7 @@ import { useAsync, useDebounced, useMediaQuery } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
 import type { DecisionFilter, DecisionStatus, Job, JobAccessPayload, MatchFilter, NoveltyFilter, ResumeListItem, ResumeSort } from '../types/screening';
 
-type JobTab = 'candidates' | 'board' | 'interviews' | 'criteria' | 'publish';
+type JobTab = 'candidates' | 'board' | 'interviews' | 'requisition' | 'criteria' | 'publish';
 
 function EditJobModal({ job, open, onClose, onSaved }: { job: Job; open: boolean; onClose: () => void; onSaved: (j: Job) => void }) {
   const [roleTitle, setRoleTitle] = useState(job.roleTitle);
@@ -660,6 +662,7 @@ export default function JobDetail({ id }: { id: string }) {
           { id: 'candidates', label: 'کاندیداها', count: s.total },
           { id: 'board', label: 'تختهٔ جذب', icon: Columns3, count: s.total },
           { id: 'interviews', label: 'جلسه‌های مصاحبه', icon: CalendarClock, count: interviews.length || undefined },
+          { id: 'requisition', label: 'نیازمندسنجی', icon: FileCheck2 },
           { id: 'criteria', label: 'معیارها و پرسش‌نامه', icon: ListChecks },
           { id: 'publish', label: 'انتشار', icon: Globe2 },
         ]}
@@ -733,6 +736,10 @@ export default function JobDetail({ id }: { id: string }) {
             <InterviewList items={interviews} onCancel={(iid) => void cancelInterview(iid)} />
           )}
         </Card>
+      )}
+
+      {tab === 'requisition' && (
+        <RequisitionPanel jobId={id} departmentId={job.departmentId} payload={jobQ.data?.requisition} onChange={() => jobQ.refresh()} />
       )}
 
       {tab === 'publish' && <PublicationCard jobId={id} isPublic={Boolean(job.isPublic)} />}

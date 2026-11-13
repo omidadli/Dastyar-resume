@@ -49,6 +49,7 @@ import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
 import { assessmentProviderRoutes } from './server/routes/assessment-providers';
 import { backgroundPublicRoutes, backgroundRoutes } from './server/routes/background';
+import { complianceRoutes } from './server/routes/compliance';
 import { videoPublicRoutes, videoRoutes } from './server/routes/video';
 import { transcriptPublicRoutes, transcriptRoutes } from './server/routes/transcripts';
 import { onboardingRoutes } from './server/routes/onboarding';
@@ -167,6 +168,7 @@ async function startServer() {
   app.use('/api', assessmentRoutes()); // «آزمون و ارزیابی»: catalogue, send, result
   app.use('/api', assessmentProviderRoutes()); // «بازارچهٔ آزمون»: outside test services
   app.use('/api', backgroundRoutes()); // «استعلام سوءپیشینه»: the manual ledger
+  app.use('/api', complianceRoutes()); // «بستهٔ شواهد انطباق»: ISO 27001 / SOC 2 evidence
   app.use('/api', videoRoutes()); // «مصاحبهٔ ویدئویی»: questions, invite, watch, rate
   app.use('/api', transcriptRoutes()); // «رونویسی گفتار»: audio, subtitle, manual text
   app.use('/api', onboardingRoutes()); // «تحویل پس از استخدام»: checklist, start date, welcome mail

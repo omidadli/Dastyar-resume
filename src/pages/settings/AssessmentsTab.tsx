@@ -226,7 +226,7 @@ export default function AssessmentsTab() {
                 <div className="flex gap-1">
                   <dt>دعوت‌ها:</dt>
                   <dd>
-                    {toPersianDigits(p.invites)} دعوت · {toPersianDigits(p.completed)} نتیجه
+                    {toPersianDigits(p.invites)} دعوت ، {toPersianDigits(p.completed)} نتیجه
                   </dd>
                 </div>
                 {p.lastCheck && (

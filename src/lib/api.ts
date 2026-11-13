@@ -95,6 +95,15 @@ import type {
   PublicBackgroundConsent,
 } from '../types/background-check';
 import type {
+  AccessReview,
+  ComplianceControl,
+  CompliancePayload,
+  ComplianceSummary,
+  EvidenceAttachment,
+  Framework,
+  IssuedPack,
+} from '../types/compliance';
+import type {
   AssessmentProviderPublic,
   ProviderCatalog,
   ProviderInput,
@@ -833,6 +842,30 @@ export const api = {
       decline: (token: string, b: { reason?: string } = {}) =>
         post<{ background: PublicBackgroundConsent }>(`/api/background/public/${encodeURIComponent(token)}/decline`, b),
     },
+  },
+  /** «بستهٔ شواهد انطباق» — ISO 27001 / SOC 2 controls, reviews and packs. */
+  compliance: {
+    load: (framework: Framework) => get<CompliancePayload>(`/api/compliance?framework=${framework}`),
+    preview: (framework: Framework) => get<{ summary: ComplianceSummary }>(`/api/compliance/preview?framework=${framework}`),
+    uploadEvidence: (controlId: string, b: { fileName: string; fileBase64: string }) =>
+      post<{ attachment: EvidenceAttachment }>(`/api/compliance/controls/${encodeURIComponent(controlId)}/evidence`, b, { timeoutMs: 60_000 }),
+    evidenceUrl: (id: string) => `/api/compliance/evidence/${encodeURIComponent(id)}`,
+    deleteEvidence: (controlId: string, id: string) =>
+      del<{ ok: boolean }>(`/api/compliance/controls/${encodeURIComponent(controlId)}/evidence/${encodeURIComponent(id)}`),
+    declare: (controlId: string, text: string) =>
+      post<{ declaration: ComplianceControl['declaration'] }>(`/api/compliance/controls/${encodeURIComponent(controlId)}/declaration`, { text }),
+    clearDeclaration: (controlId: string) => del<{ ok: boolean }>(`/api/compliance/controls/${encodeURIComponent(controlId)}/declaration`),
+    startReview: (b: { framework: Framework; note: string }) => post<{ review: AccessReview }>('/api/compliance/access-reviews', b),
+    confirmMember: (id: string, b: { userId: string; confirmed: boolean }) =>
+      post<{ review: AccessReview }>(`/api/compliance/access-reviews/${encodeURIComponent(id)}/confirm`, b),
+    completeReview: (id: string, note: string) =>
+      post<{ review: AccessReview }>(`/api/compliance/access-reviews/${encodeURIComponent(id)}/complete`, { note }),
+    issuePack: (b: { framework: Framework; scopeNote: string }) =>
+      post<{ pack: IssuedPack }>('/api/compliance/packs', b, { timeoutMs: 60_000 }),
+    packs: (framework: Framework) => get<{ items: IssuedPack[] }>(`/api/compliance/packs?framework=${framework}`),
+    packUrl: (id: string, format: 'md' | 'json' | 'zip') =>
+      `/api/compliance/packs/${encodeURIComponent(id)}/download?format=${format}`,
+    deletePack: (id: string) => del<{ ok: boolean }>(`/api/compliance/packs/${encodeURIComponent(id)}`),
   },
   /** «بازارچهٔ آزمون» — outside test services and their tests. */
   assessmentProviders: {

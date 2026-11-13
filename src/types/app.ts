@@ -205,7 +205,10 @@ export type ActivityType =
   | 'requisition.rejected'
   | 'requisition.settings'
   | 'offer.band_override'
-  | 'settings.changed';
+  | 'settings.changed'
+  | 'compliance.review'
+  | 'compliance.evidence'
+  | 'compliance.pack';
 
 export interface ActivityItem {
   id: string;

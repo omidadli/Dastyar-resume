@@ -73,6 +73,13 @@ import type { SchedulingLink } from '../src/types/scheduling';
 import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
 import type { ProviderCheck, ProviderTest } from '../src/types/assessment-provider';
 import type { BackgroundCheck } from '../src/types/background-check';
+import type {
+  AccessReview,
+  ControlState,
+  EvidenceAttachment,
+  Framework,
+  IssuedPack,
+} from '../src/types/compliance';
 import type { VideoAnswer, VideoInvite, VideoQuestion, VideoSettings } from '../src/types/video';
 import type { Transcript } from '../src/types/transcript';
 import type { MeetingSummary } from '../src/types/summary';
@@ -202,6 +209,14 @@ export interface StoreSnapshot {
   assessmentProviders?: AssessmentProviderRow[];
   /** «استعلام سوءپیشینه» — a manual ledger of criminal-record checks. */
   backgroundChecks?: BackgroundCheckRow[];
+  /** «بستهٔ شواهد انطباق» — files the customer uploaded as control evidence. */
+  complianceAttachments?: ComplianceAttachmentRow[];
+  /** Written attestations («این خط‌مشی تصویب شده است») keyed `<orgId>:<controlId>`. */
+  complianceDeclarations?: Record<string, ComplianceDeclarationRow>;
+  /** «بازنگری دسترسی» — frozen rosters with who confirmed whom, and when. */
+  accessReviews?: AccessReviewRow[];
+  /** «بستهٔ شواهد» that were actually issued — hash, date, file keys. */
+  issuedPacks?: IssuedPackRow[];
   /** «مصاحبهٔ ویدئویی» — invitations, questions and the recorded answers. */
   videoInvites?: VideoInviteRow[];
   /** Per-job video questions, keyed `<orgId>:<jobId>`. */
@@ -613,6 +628,57 @@ export type BackgroundCheckRow = Omit<BackgroundCheck, 'consentUrl' | 'restricte
   updatedByName: string | null;
 };
 
+/**
+ * One uploaded piece of evidence attached to a control. `key` is where the bytes
+ * live in the storage driver; `sha256` is printed in the pack so the auditor can
+ * verify that the file they received is the file that was issued.
+ */
+export interface ComplianceAttachmentRow {
+  id: string;
+  orgId: string;
+  controlId: string;
+  fileName: string;
+  contentType: string;
+  bytes: number;
+  sha256: string;
+  key: string;
+  uploadedById: string | null;
+  uploadedByName: string;
+  uploadedAtISO: string;
+}
+
+/** A customer's written statement for one control, with the name behind it. */
+export interface ComplianceDeclarationRow {
+  orgId: string;
+  controlId: string;
+  text: string;
+  byId: string | null;
+  byName: string;
+  atISO: string;
+}
+
+/**
+ * An issued evidence pack. The artefacts themselves (Markdown + JSON) live in
+ * storage; the row keeps the hash and the counts, so the record of «what we gave
+ * the auditor on that day» cannot be rewritten by later changes in the account.
+ */
+export type IssuedPackRow = IssuedPack & {
+  orgId: string;
+  scopeNote: string;
+  frameworkLabel: string;
+  markdownKey: string;
+  jsonKey: string;
+  /** The two CSVs are frozen at issue time, so the ZIP never drifts from the report. */
+  rosterKey: string;
+  activityKey: string;
+  counts: Record<ControlState, number>;
+  /** Hash of the canonical JSON body, printed on the cover. */
+  sha256: string;
+};
+
+/** The stored row carries its workspace; the API view does not need to. */
+export type AccessReviewRow = AccessReview & { orgId: string };
+
 export type OfferRow = JobOffer & {
   orgId: string;
   /** Random, unguessable; the public link is /offer/<token>. */
@@ -664,6 +730,10 @@ const requisitionSettings = new Map<string, RequisitionSettings>();
 const assessments = new Map<string, AssessmentInviteRow>();
 const assessmentProviders = new Map<string, AssessmentProviderRow>();
 const backgroundChecks = new Map<string, BackgroundCheckRow>();
+const complianceAttachments = new Map<string, ComplianceAttachmentRow>();
+const complianceDeclarations = new Map<string, ComplianceDeclarationRow>();
+const accessReviews = new Map<string, AccessReviewRow>();
+const issuedPacks = new Map<string, IssuedPackRow>();
 const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
 const transcripts = new Map<string, TranscriptRow>();
@@ -739,6 +809,10 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
   snap.assessmentProviders?.forEach((x) => assessmentProviders.set(x.id, x));
   snap.backgroundChecks?.forEach((x) => backgroundChecks.set(x.id, x));
+  snap.complianceAttachments?.forEach((x) => complianceAttachments.set(x.id, x));
+  for (const [k, v] of Object.entries(snap.complianceDeclarations || {})) complianceDeclarations.set(k, v);
+  snap.accessReviews?.forEach((x) => accessReviews.set(x.id, x));
+  snap.issuedPacks?.forEach((x) => issuedPacks.set(x.id, x));
   snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
   snap.transcripts?.forEach((x) => transcripts.set(x.id, x));
@@ -792,6 +866,10 @@ function clearMemory() {
   assessments.clear();
   assessmentProviders.clear();
   backgroundChecks.clear();
+  complianceAttachments.clear();
+  complianceDeclarations.clear();
+  accessReviews.clear();
+  issuedPacks.clear();
   videoInvites.clear();
   videoSettings.clear();
   transcripts.clear();
@@ -937,6 +1015,10 @@ function snapshot(): StoreSnapshot {
     assessments: Array.from(assessments.values()),
     assessmentProviders: Array.from(assessmentProviders.values()),
     backgroundChecks: Array.from(backgroundChecks.values()),
+    complianceAttachments: Array.from(complianceAttachments.values()),
+    complianceDeclarations: Object.fromEntries(complianceDeclarations),
+    accessReviews: Array.from(accessReviews.values()),
+    issuedPacks: Array.from(issuedPacks.values()),
     videoInvites: Array.from(videoInvites.values()),
     videoSettings: Object.fromEntries(videoSettings),
     transcripts: Array.from(transcripts.values()),
@@ -1475,6 +1557,11 @@ export function deleteOrg(id: string) {
       backgroundChecks.delete(k);
       deletePrefixQuietly(`background/${id}/${k}-`);
     }
+  for (const [k, v] of complianceAttachments) if (v.orgId === id) complianceAttachments.delete(k);
+  for (const [k, v] of complianceDeclarations) if (v.orgId === id) complianceDeclarations.delete(k);
+  for (const [k, v] of accessReviews) if (v.orgId === id) accessReviews.delete(k);
+  for (const [k, v] of issuedPacks) if (v.orgId === id) issuedPacks.delete(k);
+  deletePrefixQuietly(`compliance/${id}/`);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
   for (const [k, v] of webhookDeliveries) if (v.orgId === id) webhookDeliveries.delete(k);
   retentionPolicies.delete(id);
@@ -3139,6 +3226,106 @@ export function saveBackgroundCheck(row: BackgroundCheckRow): BackgroundCheckRow
   return row;
 }
 
+// -------------------------------------------------------- compliance packs ----
+
+export function listComplianceAttachments(orgId: string, controlId?: string): ComplianceAttachmentRow[] {
+  return Array.from(complianceAttachments.values())
+    .filter((a) => a.orgId === orgId && (controlId ? a.controlId === controlId : true))
+    .sort((a, b) => b.uploadedAtISO.localeCompare(a.uploadedAtISO));
+}
+
+export function getComplianceAttachment(orgId: string, id: string): ComplianceAttachmentRow | null {
+  const a = complianceAttachments.get(id);
+  return a && a.orgId === orgId ? a : null;
+}
+
+export function saveComplianceAttachment(row: ComplianceAttachmentRow): ComplianceAttachmentRow {
+  complianceAttachments.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function removeComplianceAttachment(orgId: string, id: string): boolean {
+  const a = complianceAttachments.get(id);
+  if (!a || a.orgId !== orgId) return false;
+  complianceAttachments.delete(id);
+  scheduleSave();
+  return true;
+}
+
+export function listComplianceDeclarations(orgId: string): ComplianceDeclarationRow[] {
+  return Array.from(complianceDeclarations.values()).filter((d) => d.orgId === orgId);
+}
+
+export function getComplianceDeclaration(orgId: string, controlId: string): ComplianceDeclarationRow | null {
+  return complianceDeclarations.get(`${orgId}:${controlId}`) || null;
+}
+
+export function saveComplianceDeclaration(row: ComplianceDeclarationRow): ComplianceDeclarationRow {
+  complianceDeclarations.set(`${row.orgId}:${row.controlId}`, row);
+  scheduleSave();
+  return row;
+}
+
+export function removeComplianceDeclaration(orgId: string, controlId: string): boolean {
+  const key = `${orgId}:${controlId}`;
+  if (!complianceDeclarations.has(key)) return false;
+  complianceDeclarations.delete(key);
+  scheduleSave();
+  return true;
+}
+
+export function listAccessReviews(orgId: string): AccessReviewRow[] {
+  return Array.from(accessReviews.values())
+    .filter((r) => r.orgId === orgId)
+    .sort((a, b) => b.startedAtISO.localeCompare(a.startedAtISO));
+}
+
+export function saveAccessReview(orgId: string, row: AccessReview): AccessReviewRow {
+  const full: AccessReviewRow = { ...row, orgId };
+  accessReviews.set(row.id, full);
+  scheduleSave();
+  return full;
+}
+
+export function getAccessReview(orgId: string, id: string): AccessReviewRow | null {
+  const r = accessReviews.get(id);
+  return r && r.orgId === orgId ? r : null;
+}
+
+export function removeAccessReview(orgId: string, id: string): boolean {
+  const r = accessReviews.get(id);
+  if (!r || r.orgId !== orgId) return false;
+  accessReviews.delete(id);
+  scheduleSave();
+  return true;
+}
+
+export function listIssuedPacks(orgId: string, framework?: Framework): IssuedPackRow[] {
+  return Array.from(issuedPacks.values())
+    .filter((p) => p.orgId === orgId && (framework ? p.framework === framework : true))
+    .sort((a, b) => b.issuedAtISO.localeCompare(a.issuedAtISO));
+}
+
+export function getIssuedPack(orgId: string, id: string): IssuedPackRow | null {
+  const p = issuedPacks.get(id);
+  return p && p.orgId === orgId ? p : null;
+}
+
+export function saveIssuedPack(row: IssuedPackRow): IssuedPackRow {
+  issuedPacks.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function removeIssuedPack(orgId: string, id: string): boolean {
+  const p = issuedPacks.get(id);
+  if (!p || p.orgId !== orgId) return false;
+  issuedPacks.delete(id);
+  scheduleSave();
+  return true;
+}
+
 // ------------------------------------------------------------ retention ----
 
 export function getRetention(orgId: string): RetentionPolicy | null {
@@ -4565,6 +4752,24 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       : undefined,
     backgroundChecks: Array.isArray(raw.backgroundChecks)
       ? raw.backgroundChecks.filter((b: any) => b && isStr(b.id) && isStr(b.orgId) && isStr(b.resumeId) && isStr(b.token) && isStr(b.status))
+      : undefined,
+    complianceAttachments: Array.isArray(raw.complianceAttachments)
+      ? raw.complianceAttachments.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.controlId) && isStr(a.key))
+      : undefined,
+    complianceDeclarations: (() => {
+      const rawDecls = raw.complianceDeclarations;
+      if (!rawDecls || typeof rawDecls !== 'object') return undefined;
+      const out: Record<string, ComplianceDeclarationRow> = {};
+      for (const [k, d] of Object.entries<any>(rawDecls)) {
+        if (k.includes(':') && d && typeof d === 'object' && isStr(d.controlId) && typeof d.text === 'string') out[k] = d as ComplianceDeclarationRow;
+      }
+      return out;
+    })(),
+    accessReviews: Array.isArray(raw.accessReviews)
+      ? raw.accessReviews.filter((r: any) => r && isStr(r.id) && isStr(r.orgId) && Array.isArray(r.members))
+      : undefined,
+    issuedPacks: Array.isArray(raw.issuedPacks)
+      ? raw.issuedPacks.filter((p: any) => p && isStr(p.id) && isStr(p.orgId) && isStr(p.sha256) && isStr(p.markdownKey))
       : undefined,
     assessmentProviders: Array.isArray(raw.assessmentProviders)
       ? raw.assessmentProviders.filter((p: any) => p && isStr(p.id) && isStr(p.orgId) && isStr(p.name) && typeof p.baseUrl === 'string')

@@ -235,7 +235,7 @@ function Preview({ branding }: { branding: OrgBranding }) {
             </div>
             <div className="rounded-[var(--radius-card)] px-2.5 py-2 flex items-center justify-between" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-line)' }}>
               <span className="text-[8.5px] font-semibold" style={{ color: 'var(--color-ink-2)' }}>
-                {branding.terms.interview} فردا · ۱۰:۳۰
+                {branding.terms.interview} فردا ، ۱۰:۳۰
               </span>
               <span className="text-[8px] font-bold px-1.5 py-0.5 rounded-full" style={{ background: 'var(--color-brand-soft)', color: 'var(--color-brand-ink)' }}>
                 تأیید شد

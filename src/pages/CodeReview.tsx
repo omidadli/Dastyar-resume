@@ -140,7 +140,7 @@ export default function CodeReview({ resumeId }: { resumeId: string }) {
                   <p className="text-[11.5px] text-ink-3">
                     ساخته‌شده {inv.createdAtJalali}
                     {inv.sentAtISO ? ' · فرستاده شد' : ' · هنوز فرستاده نشده'}
-                    {inv.runCount > 0 ? ` · ${toPersianDigits(inv.runCount)} اجرای آزمایشی` : ''}
+                    {inv.runCount > 0 ? ` ، ${toPersianDigits(inv.runCount)} اجرای آزمایشی` : ''}
                   </p>
                 </div>
                 <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${STATUS_TONE[inv.status]}`}>{CODE_STATUS_LABEL[inv.status]}</span>
@@ -250,7 +250,7 @@ export default function CodeReview({ resumeId }: { resumeId: string }) {
                       {c.signature}
                     </p>
                     <p className="text-[11.5px] text-ink-3 mt-1.5 leading-relaxed">
-                      حدود {toPersianDigits(c.minutes)} دقیقه · {toPersianDigits(c.testCount)} تست ({toPersianDigits(c.visibleCount)} نمونهٔ قابل‌مشاهده)
+                      حدود {toPersianDigits(c.minutes)} دقیقه ، {toPersianDigits(c.testCount)} تست ({toPersianDigits(c.visibleCount)} نمونهٔ قابل‌مشاهده)
                     </p>
                     <p className="text-[11.5px] text-ink-3 mt-1.5 leading-relaxed">
                       <span className="font-semibold text-ink-2">چه چیزی را نشان می‌دهد: </span>

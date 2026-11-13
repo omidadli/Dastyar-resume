@@ -45,10 +45,23 @@ import { OfferApprovalCard } from '../components/settings/OfferApprovalCard';
 import { ReferralCard } from '../components/settings/ReferralCard';
 import { EeoCard } from '../components/settings/EeoCard';
 import { DeveloperTab } from './settings/DeveloperTab';
+const ComplianceTab = lazy(() => import('./settings/ComplianceTab'));
 const PsychNormsTab = lazy(() => import('./settings/PsychNormsTab'));
 const AssessmentsTab = lazy(() => import('./settings/AssessmentsTab'));
 
-type SettingsTab = 'org' | 'branding' | 'departments' | 'team' | 'messages' | 'ai' | 'integrations' | 'assessments' | 'psych' | 'developer' | 'account';
+type SettingsTab =
+  | 'org'
+  | 'branding'
+  | 'departments'
+  | 'team'
+  | 'messages'
+  | 'ai'
+  | 'integrations'
+  | 'assessments'
+  | 'psych'
+  | 'compliance'
+  | 'developer'
+  | 'account';
 const ROLE_LABEL: Record<Role, string> = { owner: 'مالک', admin: 'مدیر', member: 'عضو' };
 
 function ReadOnlyNote() {
@@ -1259,6 +1272,7 @@ const TAB_LABELS: Record<SettingsTab, string> = {
   integrations: 'اتصال‌ها',
   assessments: 'بازارچهٔ آزمون',
   psych: 'سنجش نرم‌شده',
+  compliance: 'انطباق و شواهد',
   developer: 'توسعه‌دهندگان',
   account: 'حساب کاربری',
 };
@@ -1288,6 +1302,7 @@ export default function Settings({ tab }: { tab: string }) {
           { id: 'integrations', label: TAB_LABELS.integrations, icon: PlugZap },
           { id: 'assessments', label: TAB_LABELS.assessments, icon: FlaskConical },
           { id: 'psych', label: TAB_LABELS.psych, icon: BarChart3 },
+          { id: 'compliance', label: TAB_LABELS.compliance, icon: ShieldCheck },
           { id: 'developer', label: TAB_LABELS.developer, icon: Braces },
           { id: 'account', label: TAB_LABELS.account, icon: UserRound },
         ]}
@@ -1320,6 +1335,11 @@ export default function Settings({ tab }: { tab: string }) {
       {current === 'psych' && (
         <Suspense fallback={<Skeleton className="h-64" />}>
           <PsychNormsTab />
+        </Suspense>
+      )}
+      {current === 'compliance' && (
+        <Suspense fallback={<Skeleton className="h-64" />}>
+          <ComplianceTab />
         </Suspense>
       )}
       {current === 'developer' && <DeveloperTab />}

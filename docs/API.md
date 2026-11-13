@@ -396,7 +396,36 @@ POST /api/background/public/:token/decline    → { background }          body: 
 
 ---
 
-## ۵ذ) آزمون و ارزیابی (داخل برنامه + قرارداد ارائه‌دهنده)
+## ۵ذ) بستهٔ شواهد انطباق (فقط مالک/مدیر)
+
+```http
+GET    /api/compliance?framework=iso27001|soc2  → { controls, summary, reviews, packs, canManage, rosterSize }
+GET    /api/compliance/preview?framework=…      → { summary }          (پیش‌نمایش بدون ثبت)
+POST   /api/compliance/controls/:id/evidence    → { attachment }       body: { fileName, fileBase64 }   (≤۸MB)
+GET    /api/compliance/evidence/:id             → فایل (inline, no-store)
+DELETE /api/compliance/controls/:id/evidence/:evidenceId → { ok }
+POST   /api/compliance/controls/:id/declaration → { declaration }      body: { text }   (≥۲۰ نویسه)
+DELETE /api/compliance/controls/:id/declaration → { ok }
+
+POST   /api/compliance/access-reviews           → { review }           body: { framework, note }
+GET    /api/compliance/access-reviews/:id       → { review }
+POST   /api/compliance/access-reviews/:id/confirm  → { review }        body: { userId, confirmed }
+POST   /api/compliance/access-reviews/:id/complete → { review }        body: { note }   (≥۱۰ نویسه)
+
+POST   /api/compliance/packs                    → { pack }             body: { framework, scopeNote }   ← هش SHA-256
+GET    /api/compliance/packs?framework=…        → { items }
+GET    /api/compliance/packs/:id/download?format=md|json|zip → فایل
+DELETE /api/compliance/packs/:id                → { ok }
+```
+
+`controls[].state` یکی از `met | partial | gap | missing_evidence` است و `reason` همیشه
+نوشته شده. بستهٔ صادرشده منجمد است: `sha256` روی بایت‌های `evidence.json` محاسبه می‌شود و
+تنظیمات بعدی آن را عوض نمی‌کند. کدهای خطا و جدول کنترل‌ها در
+[`COMPLIANCE-EVIDENCE.md`](COMPLIANCE-EVIDENCE.md) است.
+
+---
+
+## ۵ط) آزمون و ارزیابی (داخل برنامه + قرارداد ارائه‌دهنده)
 
 ```http
 GET    /api/assessments/templates?jobTitle=…  → { templates, suggestedId }
@@ -600,4 +629,5 @@ POST  /api/hris/push            → { push: { ok, status, error, rows, … } }
 | دانلود فایل رزومه | فایل با لینک امضاشده و کوتاه‌عمر سرو می‌شود؛ در API عمومی باز نمی‌شود |
 | افزودن عضو یا تغییر نقش | مدیریت هویت از مسیر ورود سازمانی انجام می‌شود |
 | استعلام سوءپیشینه | رضایت کارجو، تصویر گواهی و تصمیم حساس است؛ هیچ کلید API نمی‌تواند استعلام بسازد، نتیجه ثبت کند یا فایل گواهی را بخواند |
+| بستهٔ شواهد انطباق | خروجی آن فهرست همهٔ حساب‌ها و اسناد سازمانی است؛ فقط از داخل برنامه و با نام یک انسان صادر می‌شود |
 | کیت مصاحبه | محتوای مصاحبه با نقش و معیار گره خورده و از نشست کاربر ساخته می‌شود؛ برای یکپارچه‌سازی، فهرست بانک را می‌توان از همین مسیر داخلی خواند |

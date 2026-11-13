@@ -195,7 +195,7 @@ export default function References({ resumeId }: { resumeId: string }) {
           </div>
           <p className="text-[11.5px] text-ink-4 mt-3">
             {toPersianDigits(data.summary.completed)} پاسخ از {toPersianDigits(data.summary.invited)} مرجع
-            {data.summary.declined > 0 ? ` · ${toPersianDigits(data.summary.declined)} نفر عذر خواست` : ''}
+            {data.summary.declined > 0 ? ` ، ${toPersianDigits(data.summary.declined)} نفر عذر خواست` : ''}
           </p>
         </Card>
       )}

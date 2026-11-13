@@ -78,6 +78,11 @@ export interface Requisition {
   complete: boolean;
   /** Monthly cost of the granted seats at the mid point of the band. */
   monthlyCost: number | null;
+  /**
+   * Offers written above the approved ceiling, with the reason someone gave.
+   * Visible on the requisition so cost creep has a face, not just a total.
+   */
+  overBandOffers: { offerId: string; candidateName: string; monthly: number | null; reason: string | null; status: string }[];
   history: RequisitionHistoryEntry[];
 }
 

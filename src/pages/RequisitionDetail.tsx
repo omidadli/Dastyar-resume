@@ -281,6 +281,22 @@ export default function RequisitionDetail({ id }: { id: string }) {
             )}
           </Card>
 
+          {row.overBandOffers.length > 0 && (
+            <Card>
+              <CardHeader title="پیشنهادهای بالاتر از سقف" subtitle="هر کدام با دلیلی که کسی نوشته است" icon={AlertTriangle} />
+              <div className="flex flex-col gap-2">
+                {row.overBandOffers.map((o) => (
+                  <div key={o.offerId} className="rounded-control border border-review/25 bg-review-soft px-3 py-2">
+                    <p className="text-[12px] text-ink font-medium">
+                      {o.candidateName} — <span className="hv-num">{money(o.monthly)}</span> در ماه
+                    </p>
+                    <p className="text-[11.5px] text-ink-2 mt-0.5 leading-relaxed">{o.reason || 'بدون دلیل ثبت‌شده'}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+
           <Card>
             <CardHeader title="تاریخچه" subtitle="هر تغییر با نام و زمان" icon={FileCheck2} />
             <ol className="flex flex-col gap-2.5">

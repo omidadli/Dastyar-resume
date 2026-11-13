@@ -320,6 +320,7 @@ export const CHAT_EVENT_LABEL: Record<string, string> = {
   'requisition.approved': 'تأیید نیازمندسنجی',
   'requisition.rejected': 'رد نیازمندسنجی',
   'requisition.settings': 'تغییر قواعد نیازمندسنجی',
+  'offer.band_override': 'پیشنهاد بالاتر از بازهٔ تأییدشده',
   'survey.answered': 'پاسخ کارجو به نظرسنجی',
 };
 

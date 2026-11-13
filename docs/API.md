@@ -525,7 +525,10 @@ PUT  /api/requisitions/settings                body: { requireApprovedForPublish
 می‌شود. کدهای دیگر: `TITLE_REQUIRED`، `DEPARTMENT_REQUIRED`، `BAD_SLOTS`،
 `BAD_SALARY_RANGE`، `JUSTIFICATION_REQUIRED`، `NOT_EDITABLE`، `NOT_APPROVER`،
 `BAD_APPROVED_SLOTS`، `REQUISITION_NOT_OPEN`، `DEPARTMENT_MISMATCH`، `HAS_HIRES`.
-جزئیات: [`REQUISITIONS.md`](REQUISITIONS.md).
+`bandReason` در `POST /api/offers`، `PATCH /api/offers/:id`، `POST /api/offers/:id/revise` و
+`POST /api/offers/:id/send` لازم است وقتی حقوق از سقف بازهٔ تأییدشده بالاتر است؛ پاسخ رد
+(`409 OFFER_ABOVE_BAND`) خودِ عددها را در `band` برمی‌گرداند. جزئیات:
+[`REQUISITIONS.md`](REQUISITIONS.md).
 
 ---
 

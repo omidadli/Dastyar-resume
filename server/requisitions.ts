@@ -134,6 +134,18 @@ export function viewOf(row: db.RequisitionRow): Requisition {
     remaining: Math.max(0, (row.approvedSlots ?? row.slots) - filled),
     complete: filled >= granted && (row.status === 'approved' || row.status === 'filled'),
     monthlyCost: mid === null ? null : Math.round(mid * granted),
+    overBandOffers: jobs.flatMap((job) =>
+      db
+        .listOffers(row.orgId, { jobId: job.id })
+        .filter((o) => o.band?.status === 'above' && o.status !== 'cancelled' && o.status !== 'superseded')
+        .map((o) => ({
+          offerId: o.id,
+          candidateName: o.candidateName,
+          monthly: o.band?.offerMonthly ?? null,
+          reason: o.band?.overrideReason ?? null,
+          status: o.status,
+        }))
+    ),
     history: row.history || [],
   };
 }

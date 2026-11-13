@@ -87,6 +87,33 @@ the granted seats at the band's mid point** — an estimate, labelled as one, no
 budget commitment. The list header adds the monthly cost of everything still
 unfilled, so «what would filling the plan cost» has an answer.
 
+## کنترل بازهٔ حقوق — the offer is checked against the band
+
+A band nobody checks is a number in a drawer. Every door into an offer runs the
+same check (`server/offer-band.ts`):
+
+| Door | When it runs |
+| --- | --- |
+| `POST /api/offers` | creating the draft |
+| `PATCH /api/offers/:id` | editing a draft (a carried-over reason only survives while the ceiling is unchanged) |
+| `POST /api/offers/:id/revise` | a negotiated new version needs **its own** reason |
+| `POST /api/offers/:id/send` | re-checked last: the opening may have been attached to a requisition after the draft was written |
+
+Verdicts, recorded on the offer as `band`:
+
+| status | meaning | behaviour |
+| --- | --- | --- |
+| `in` | inside the approved band | allowed |
+| `above` | above the approved ceiling | **refused (409 `OFFER_ABOVE_BAND`)** unless a written reason (≥ 10 chars) is given; the reason and the author's name are stored, and the event goes to the activity trail |
+| `below` | below the approved floor | allowed and **flagged** — usually a typo worth a second look |
+| `no_band` | the requisition has no salary numbers | allowed; nothing invented |
+| `no_amount` | the offer has no salary figure | allowed; nothing compared |
+
+Annual salaries are converted to monthly before comparing. The refusal carries the
+numbers (`code`, ceiling, offer amount) so the dialog asks for a reason instead of
+showing a dead end; the candidate's page receives **no band data at all**. The
+requisition page lists the over-band offers with their reasons, next to the cost.
+
 ## Where it shows up
 
 - **Sidebar → «نیازمندسنجی»** (`/app/requisitions`): rollup (approved / filled /
@@ -119,6 +146,14 @@ requisitions, department mismatch, the publish gate in all three refusal modes,
 counting a real accepted offer into «filled», rollup arithmetic, hold/resume,
 cancel-with-hire refused, the inbox row, tenant walls, admin-only settings.
 
+`npm run test:offer-band` — 31 checks: no requisition means no verdict, in-band and
+below-floor, refusal above the ceiling with both numbers on the response, a
+two-word reason rejected, the reason carrying over edits, the reason *not*
+carrying over a raised ceiling, annual conversion, an offer with no number, the
+send re-check when the opening is attached after the draft, a negotiated version
+needing its own reason, no band on the candidate's page, and the over-band list on
+the requisition.
+
 ## Not done yet — by choice
 
 - **Multi-step approval chains** (manager → finance → founder). The offer module
@@ -127,8 +162,8 @@ cancel-with-hire refused, the inbox row, tenant walls, admin-only settings.
   it would take.
 - **A real department budget with burn-down.** We show the cost of the plan; we do
   not claim to know a budget nobody typed in.
-- **Requisition → offer automatic linkage.** The offer reads its numbers from the
-  job today; a band check at offer time (warn when the salary is above the
-  approved band) is the obvious next step and is not built.
+- **Blocking (rather than recording) an over-band offer.** We refuse it until a
+  human writes why; we do not refuse it forever. A hard ceiling needs a policy
+  decision the workspace has not made, and pretending to make it would be worse.
 - **Import from a spreadsheet.** Deliberate: the point is that each seat has an
   approver, and a bulk import would let fifty seats arrive without one.

@@ -14,6 +14,7 @@
 import crypto from 'crypto';
 import express from 'express';
 import * as db from '../db';
+import { BandError, checkOffer, enforceBand, monthlyOf } from '../offer-band';
 import { blockedByJobId, blockedByResume, visibleJobIds } from '../job-access';
 import { ctxOf } from '../auth';
 import { blockedByBlind } from '../blind';
@@ -76,6 +77,16 @@ function buildApprovalChain(org: db.OrgRecord, nowISO: string): OfferApprovalSte
 function withoutToken(row: db.OfferRow): JobOffer {
   const { orgId: _o, token: _t, updatedAtISO: _u, ...rest } = row;
   return rest;
+}
+
+
+/** A band refusal carries the numbers, so the dialog can ask for a reason. */
+function bandFail(res: express.Response, err: unknown): boolean {
+  if (err instanceof BandError) {
+    res.status(err.status).json({ error: err.message, code: err.code, band: err.band });
+    return true;
+  }
+  return false;
 }
 
 function viewOf(req: express.Request, row: db.OfferRow): JobOffer {
@@ -347,6 +358,14 @@ export function offerRoutes() {
       });
       if (!terms.title) return res.status(400).json({ error: 'عنوان شغلی پیشنهاد را بنویسید.' });
       if (!terms.startDate) return res.status(400).json({ error: 'تاریخ شروع همکاری را وارد کنید.' });
+      // «کنترل بازهٔ حقوق»: above the approved ceiling needs a sentence, not a click.
+      let band = null;
+      try {
+        band = enforceBand(org.id, job.id, terms, { reason: req.body?.bandReason, actorName: user.name });
+      } catch (err) {
+        if (bandFail(res, err)) return;
+        throw err;
+      }
 
       const stamp = new Date();
       const row: db.OfferRow = {
@@ -375,9 +394,16 @@ export function offerRoutes() {
         signatureName: null,
         signatureNote: null,
         approvals: buildApprovalChain(org, stamp.toISOString()),
+        band,
         updatedAtISO: stamp.toISOString(),
       };
       db.saveOffer(row);
+      if (band?.status === 'above') {
+        db.logActivity(org.id, user, 'offer.band_override', `پیشنهاد «${row.candidateName}» بالاتر از سقف نیازمندسنجی «${band.code}» نوشته شد — ${band.overrideReason}`, {
+          jobId: row.jobId,
+          resumeId: row.resumeId,
+        });
+      }
       res.status(201).json({ offer: viewOf(req, row) });
     })
   );
@@ -386,18 +412,34 @@ export function offerRoutes() {
   r.patch(
     '/offers/:id',
     h(async (req, res) => {
-      const { org } = ctxOf(req);
+      const { org, user } = ctxOf(req);
       const row = db.getOffer(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'پیشنهاد یافت نشد.' });
       if (blockedByJobId(req, res, row.jobId)) return;
       if (row.status !== 'draft') return res.status(409).json({ error: 'پیشنهاد فرستاده‌شده قابل ویرایش نیست؛ برای تغییر، پیشنهاد تازه بسازید.' });
+      const terms = readTerms(req.body?.terms, row.terms);
+      let band = row.band ?? null;
+      try {
+        band = enforceBand(org.id, row.jobId, terms, { reason: req.body?.bandReason, previous: row.band ?? null, actorName: user.name });
+      } catch (err) {
+        if (bandFail(res, err)) return;
+        throw err;
+      }
+      const previousBand = row.band ?? null;
       const next: db.OfferRow = {
         ...row,
-        terms: readTerms(req.body?.terms, row.terms),
+        terms,
         message: typeof req.body?.message === 'string' ? req.body.message.slice(0, 4000) : row.message,
+        band,
         updatedAtISO: new Date().toISOString(),
       };
       db.saveOffer(next);
+      if (band?.status === 'above' && previousBand?.status !== 'above') {
+        db.logActivity(org.id, user, 'offer.band_override', `پیشنهاد «${row.candidateName}» بالاتر از سقف نیازمندسنجی «${band.code}» شد — ${band.overrideReason}`, {
+          jobId: row.jobId,
+          resumeId: row.resumeId,
+        });
+      }
       res.json({ offer: viewOf(req, next) });
     })
   );
@@ -417,6 +459,17 @@ export function offerRoutes() {
           error: `این پیشنهاد هنوز منتظر تأیید «${waiting.approverName}» (${waiting.label}) است؛ تا تأیید نشود به کارجو نمی‌رود.`,
           code: 'OFFER_APPROVAL_PENDING',
         });
+      }
+      // Re-check the band at the last moment: the requisition may have been edited,
+      // held or filled since the draft was written.
+      let band = checkOffer(org.id, row.jobId, row.terms, row.band ?? null);
+      if (band?.status === 'above') {
+        try {
+          band = enforceBand(org.id, row.jobId, row.terms, { reason: req.body?.bandReason, previous: row.band ?? null, actorName: user.name });
+        } catch (err) {
+          if (bandFail(res, err)) return;
+          throw err;
+        }
       }
       const to = (row.candidateEmail || '').toLowerCase().trim();
       if (!EMAIL_RE.test(to)) return res.status(400).json({ error: 'برای این کارجو ایمیل معتبری ثبت نشده است؛ ابتدا آن را در پروفایل کامل کنید.' });
@@ -461,6 +514,8 @@ export function offerRoutes() {
       const sent: db.OfferRow = {
         ...row,
         status: 'sent',
+        // The verdict the offer actually left with, re-checked a few lines above.
+        band,
         sentAtISO: stamp.toISOString(),
         sentAtJalali: formatJalaliDate(tehranJalaliOf(stamp), true),
         updatedAtISO: stamp.toISOString(),
@@ -568,6 +623,14 @@ export function offerRoutes() {
       if (!terms.title) return res.status(400).json({ error: 'عنوان شغلی پیشنهاد را بنویسید.' });
       if (!terms.startDate) return res.status(400).json({ error: 'تاریخ شروع همکاری را وارد کنید.' });
 
+      let band = null;
+      try {
+        // The new version inherits an override only when the ceiling did not move.
+        band = enforceBand(org.id, row.jobId, terms, { reason: req.body?.bandReason, previous: row.band ?? null, actorName: user.name });
+      } catch (err) {
+        if (bandFail(res, err)) return;
+        throw err;
+      }
       const stamp = new Date();
       const stampISO = stamp.toISOString();
       const version = (row.version || 1) + 1;
@@ -591,6 +654,7 @@ export function offerRoutes() {
         signatureName: null,
         signatureNote: null,
         approvals: buildApprovalChain(org, stampISO),
+        band,
         updatedAtISO: stampISO,
       };
       db.saveOffer({ ...row, status: 'superseded' as OfferStatus, supersededById: next.id, updatedAtISO: stampISO });

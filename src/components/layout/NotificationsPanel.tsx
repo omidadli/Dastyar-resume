@@ -100,6 +100,7 @@ export const ACTIVITY_ICON: Record<ActivityType, LucideIcon> = {
   'requisition.approved': FileCheck2,
   'requisition.rejected': FileCheck2,
   'requisition.settings': FileCheck2,
+  'offer.band_override': FileCheck2,
   'survey.answered': MessageSquareHeart,
   'assessment.sent': ClipboardList,
   'assessment.completed': ClipboardList,

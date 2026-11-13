@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { CheckCircle2, ExternalLink, FileSignature, RefreshCw, Send, Trash2 } from 'lucide-react';
-import type { JobOffer, OfferTerms, SalaryPeriod } from '../../types/offers';
+import type { JobOffer, OfferBandCheck, OfferTerms, SalaryPeriod } from '../../types/offers';
 import { OFFER_STATUS_LABEL, SALARY_PERIOD_LABEL } from '../../types/offers';
 import type { ResumeListItem } from '../../types/screening';
-import { api } from '../../lib/api';
+import { api, ApiError } from '../../lib/api';
 import { useAuth, useCan } from '../../lib/auth';
 import { OFFER_APPROVAL_LABEL } from '../../types/offers';
+import { bandLabel, money, offerBandTone } from '../../lib/offer-band';
 import { emitChange } from '../../lib/events';
 import { candidateName, faNumber, toPersianDigits } from '../../lib/format';
 import { copyText } from '../../lib/clipboard';
@@ -43,6 +44,9 @@ export function OfferModal({
   });
   const [message, setMessage] = useState('');
   const [approvalNote, setApprovalNote] = useState('');
+  /** «کنترل بازهٔ حقوق»: the refusal that asks for a written reason, and the reason. */
+  const [bandAsk, setBandAsk] = useState<{ band: OfferBandCheck; retry: 'create' | 'save' | 'revise' | 'send' } | null>(null);
+  const [bandReason, setBandReason] = useState('');
   const { user } = useAuth();
   const canAdmin = useCan('admin');
 
@@ -63,6 +67,16 @@ export function OfferModal({
       .finally(() => setLoading(false));
   }, [record?.id]);
 
+  /** A band refusal is not an error to toast — it is a question to answer. */
+  const handleBand = (err: unknown, retry: 'create' | 'save' | 'revise' | 'send'): boolean => {
+    if (err instanceof ApiError && err.code === 'OFFER_ABOVE_BAND' && err.data?.band) {
+      setBandAsk({ band: err.data.band as OfferBandCheck, retry });
+      setBandReason('');
+      return true;
+    }
+    return false;
+  };
+
   const applySaved = (o: JobOffer) => {
     setOffer(o);
     setTerms(o.terms);
@@ -73,10 +87,12 @@ export function OfferModal({
     if (!record) return;
     setBusy('save');
     try {
-      const r = await api.offers.create({ resumeId: record.id, terms, message: message || undefined });
+      const r = await api.offers.create({ resumeId: record.id, terms, message: message || undefined, bandReason: bandReason || undefined });
       applySaved(r.offer);
+      setBandAsk(null);
       toast('پیش‌نویس پیشنهاد ساخته شد؛ هنوز چیزی برای کارجو نرفته است.');
     } catch (err: any) {
+      if (handleBand(err, 'create')) return;
       toast(err?.message || 'ساخت پیش‌نویس ممکن نشد.', 'error');
     } finally {
       setBusy(null);
@@ -87,10 +103,12 @@ export function OfferModal({
     if (!offer) return;
     setBusy('save');
     try {
-      const r = await api.offers.update(offer.id, { terms, message });
+      const r = await api.offers.update(offer.id, { terms, message, bandReason: bandReason || undefined });
       applySaved(r.offer);
+      setBandAsk(null);
       toast('پیش‌نویس به‌روزرسانی شد.');
     } catch (err: any) {
+      if (handleBand(err, 'save')) return;
       toast(err?.message || 'ذخیره نشد.', 'error');
     } finally {
       setBusy(null);
@@ -101,12 +119,14 @@ export function OfferModal({
     if (!offer) return;
     setBusy('send');
     try {
-      const r = await api.offers.send(offer.id);
+      const r = await api.offers.send(offer.id, { bandReason: bandReason || undefined });
       applySaved(r.offer);
+      setBandAsk(null);
       emitChange('resumes');
       emitChange('activity');
       toast('پیشنهاد از صندوق ایمیل سازمان برای کارجو فرستاده شد.');
     } catch (err: any) {
+      if (handleBand(err, 'send')) return;
       toast(err?.message || 'ارسال نشد.', 'error');
     } finally {
       setBusy(null);
@@ -137,12 +157,14 @@ export function OfferModal({
     if (!offer) return;
     setBusy('revise');
     try {
-      const r = await api.offers.revise(offer.id, { terms, message });
+      const r = await api.offers.revise(offer.id, { terms, message, bandReason: bandReason || undefined });
       applySaved(r.offer);
+      setBandAsk(null);
       emitChange('resumes');
       emitChange('activity');
       toast(`نسخهٔ ${toPersianDigits(r.offer.version)} ساخته شد؛ نشانی پیشین بسته شد. شرط‌ها را ویرایش و دوباره بفرستید.`);
     } catch (err: any) {
+      if (handleBand(err, 'revise')) return;
       toast(err?.message || 'ساخت نسخهٔ تازه ممکن نشد.', 'error');
     } finally {
       setBusy(null);
@@ -250,6 +272,66 @@ export function OfferModal({
                   لغو پیشنهاد
                 </Button>
               )}
+            </div>
+          )}
+
+          {offer?.band && (
+            <div className="rounded-[12px] border border-line-2 bg-canvas px-3.5 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="text-[12.5px] font-bold text-ink">بازهٔ حقوق تأییدشده</p>
+                <Chip tone={offerBandTone(offer.band.status)}>{bandLabel(offer.band.status)}</Chip>
+                <span className="hv-latin text-[11px] text-ink-4" dir="ltr">{offer.band.code}</span>
+              </div>
+              <p className="text-[11.5px] text-ink-3 mt-1.5 leading-relaxed">
+                بازهٔ تأییدشده: {money(offer.band.minMonthly)} تا {money(offer.band.maxMonthly)} در ماه · حقوق این پیشنهاد:{' '}
+                {offer.band.offerMonthly === null ? 'بدون عدد' : money(offer.band.offerMonthly)}
+              </p>
+              {offer.band.status === 'below' && (
+                <p className="text-[11.5px] text-ink-3 mt-1">پایین‌تر از کف بازه است؛ اگر عدد اشتباه تایپ نشده، اشکالی ندارد — فقط بدانید.</p>
+              )}
+              {offer.band.status === 'above' && offer.band.overrideReason && (
+                <p className="text-[11.5px] text-review-ink mt-1.5 leading-relaxed">
+                  بالاتر از سقف، با دلیل ثبت‌شده — {offer.band.overriddenByName ? `${offer.band.overriddenByName}: ` : ''}«{offer.band.overrideReason}»
+                </p>
+              )}
+            </div>
+          )}
+
+          {bandAsk && (
+            <div className="rounded-[12px] border border-review/30 bg-review-soft px-3.5 py-3">
+              <p className="text-[12.5px] font-bold text-review-ink">این حقوق از سقف تأییدشدهٔ نیازمندسنجی «{bandAsk.band.code}» بالاتر است</p>
+              <p className="text-[11.5px] text-ink-2 mt-1 leading-relaxed hv-num">
+                سقف تأییدشده {money(bandAsk.band.maxMonthly)} در ماه؛ حقوق این پیشنهاد {money(bandAsk.band.offerMonthly)}. برای ادامه، دلیلش را بنویسید: همین جمله در پروندهٔ پیشنهاد می‌ماند و
+                روزی که کسی بپرسد «چرا بالاتر از بازه؟» جواب همان‌جاست.
+              </p>
+              <div className="mt-2">
+                <TextArea
+                  label="دلیل عبور از سقف (دست‌کم ۱۰ نویسه)"
+                  value={bandReason}
+                  onChange={(e) => setBandReason(e.target.value)}
+                  rows={2}
+                  maxLength={800}
+                  placeholder="مثلاً: کارجو پیشنهاد رقیب با ۱۵٪ بالاتر دارد و برای بستن نقش حیاتی، تأیید مدیرعامل گرفته شد."
+                />
+              </div>
+              <div className="flex flex-wrap gap-2 mt-2">
+                <Button
+                  size="sm"
+                  loading={Boolean(busy)}
+                  disabled={bandReason.trim().length < 10}
+                  onClick={() => {
+                    if (bandAsk.retry === 'create') void create();
+                    else if (bandAsk.retry === 'save') void save();
+                    else if (bandAsk.retry === 'send') void send();
+                    else void revise();
+                  }}
+                >
+                  ثبت با همین دلیل
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setBandAsk(null)}>
+                  انصراف
+                </Button>
+              </div>
             </div>
           )}
 

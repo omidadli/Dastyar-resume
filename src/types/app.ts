@@ -198,6 +198,7 @@ export type ActivityType =
   | 'requisition.approved'
   | 'requisition.rejected'
   | 'requisition.settings'
+  | 'offer.band_override'
   | 'settings.changed';
 
 export interface ActivityItem {

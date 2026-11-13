@@ -81,6 +81,29 @@ export interface OfferTerms {
   notes: string;
 }
 
+/** How an offer's salary sits against the requisition's approved band. */
+export type OfferBandStatus = 'in' | 'above' | 'below' | 'no_band' | 'no_amount';
+
+/**
+ * «کنترل بازهٔ حقوق» — recorded on the offer itself, so a year later the answer
+ * to «was this approved above band?» is on the document, not in an inbox.
+ */
+export interface OfferBandCheck {
+  requisitionId: string;
+  /** Human handle of the requisition, e.g. `REQ-1404-003`. */
+  code: string;
+  /** Band in monthly toman, as approved. Null when the requisition had no numbers. */
+  minMonthly: number | null;
+  maxMonthly: number | null;
+  /** The offer's salary converted to monthly toman; null when the offer has no figure. */
+  offerMonthly: number | null;
+  status: OfferBandStatus;
+  /** Why it was allowed above the ceiling — required, and written by a person. */
+  overrideReason: string | null;
+  overriddenByName: string | null;
+  checkedAtISO: string;
+}
+
 export interface JobOffer {
   id: string;
   jobId: string;
@@ -111,6 +134,8 @@ export interface JobOffer {
   signatureNote: string | null;
   /** The approval chain that was live when this offer was written (empty = none). */
   approvals: OfferApprovalStep[];
+  /** The requisition band this offer was checked against; null when the job had none. */
+  band?: OfferBandCheck | null;
   /** Absolute link the workspace can also copy and send by hand. */
   url?: string;
 }

@@ -11,7 +11,7 @@ import { blindOn, maskText } from './blind';
 import { visibleJobIds, type Viewer } from './job-access';
 import { settingsFor } from './automation';
 import { approvalsOf, canApprove, pendingStep } from './requisitions';
-import { formatJalaliDate } from '../src/utils/jalali';
+import { formatJalaliDate, toPersianDigits } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
 import type { InboxItem, InboxView } from '../src/types/inbox';
 
@@ -151,13 +151,17 @@ export function inboxFor(org: db.OrgRecord, user: db.UserRecord): InboxView {
           ? 'شما درخواست داده‌اید؛ تأیید با دیگری است'
           : approverNames;
     const stepNote = step
-      ? ` مرحلهٔ «${step.label}»${chain.length > 1 ? ` (${chain.filter((s) => s.status === 'approved').length + 1} از ${chain.length})` : ''} در انتظار امضاست.`
+      ? ` مرحلهٔ «${step.label}»${
+          chain.length > 1
+            ? ` (${toPersianDigits(chain.filter((s) => s.status === 'approved').length + 1)} از ${toPersianDigits(chain.length)})`
+            : ''
+        } در انتظار امضاست.`
       : '';
     items.push({
       id: `requisition:${row.id}`,
       kind: 'requisition',
       title: `تأیید نیازمندسنجی — ${row.title}`,
-      detail: `${row.slots} پست برای «${row.departmentName}»؛${stepNote} تا تأیید نشود، آگهی به آن وصل و منتشر نمی‌شود.`,
+      detail: `${toPersianDigits(row.slots)} پست برای «${row.departmentName}»؛${stepNote} تا تأیید نشود، آگهی به آن وصل و منتشر نمی‌شود.`,
       candidateName: '',
       jobTitle: row.title,
       jobId: null,

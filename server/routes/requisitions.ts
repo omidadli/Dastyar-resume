@@ -12,6 +12,7 @@ import { ctxOf, requireRole } from '../auth';
 import { h, str } from './util';
 import {
   RequisitionError,
+  approvalViewFor,
   attachJob,
   canApprove,
   cancelRequisition,
@@ -65,12 +66,17 @@ export function requisitionRoutes() {
       const row = db.getRequisition(org.id, str(req.params.id, 80));
       if (!row) return res.status(404).json({ error: 'نیازمندسنجی پیدا نشد.' });
       const gate = canApprove(org.id, row, { id: user.id, role: user.role });
+      const approval = approvalViewFor(org.id, row, { id: user.id, role: user.role });
       res.json({
         requisition: viewOf(row),
+        /** The chain as *this* reader sees it: steps, whose turn, may I act. */
+        approval,
         canApprove: gate.allowed,
         cannotApproveReason: gate.reason,
         /** True when the rule bends because nobody else could sign it. */
         selfApprovalOnly: gate.selfApprovalOnly,
+        /** True when acting means signing «به‌جای» the named approver. */
+        onBehalf: gate.onBehalf,
         // The jobs of the same department that are not attached anywhere yet —
         // the only ones the picker offers.
         attachableJobs: db
@@ -130,7 +136,12 @@ export function requisitionRoutes() {
       const { org, user } = ctxOf(req);
       try {
         const row = decide(org.id, str(req.params.id, 80), user, req.body || {});
-        res.json({ requisition: viewOf(row) });
+        // The decision may have been one step of several: the page needs to know
+        // whose turn is next, not only the row's status.
+        res.json({
+          requisition: viewOf(row),
+          approval: approvalViewFor(org.id, row, { id: user.id, role: user.role }),
+        });
       } catch (err) {
         fail(res, err);
       }

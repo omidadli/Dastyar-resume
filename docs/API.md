@@ -580,18 +580,28 @@ GET  /api/psych/report?jobId=
 ```http
 GET  /api/requisitions?status=&departmentId=   → { items }
 GET  /api/requisitions/summary                 → { rollup, settings }
-GET  /api/requisitions/:id                     → { requisition, canApprove, cannotApproveReason, selfApprovalOnly, attachableJobs }
+GET  /api/requisitions/:id                     → { requisition, approval, canApprove, cannotApproveReason, selfApprovalOnly, onBehalf, attachableJobs }
 POST /api/requisitions                         body: { title, departmentId, slots, salaryMin?, salaryMax?, justification?, … }
 PATCH /api/requisitions/:id                    body: same, only while draft/rejected
-POST /api/requisitions/:id/submit              # needs ≥۲۰ نویسه دلیل
+POST /api/requisitions/:id/submit              # needs ≥۲۰ نویسه دلیل؛ زنجیرهٔ روزِ فرستادن روی ردیف کپی می‌شود
 POST /api/requisitions/:id/decision            body: { decision: "approved"|"rejected", note?, approvedSlots? }
+                                               → { requisition, approval }   # یک مرحله؛ فقط آخرین امضا status=approved
 POST /api/requisitions/:id/hold | /resume
 POST /api/requisitions/:id/cancel              body: { note? }   # refused when a hire exists
 POST /api/requisitions/:id/jobs                body: { jobId }
 DELETE /api/requisitions/:id/jobs/:jobId
 GET  /api/requisitions/settings                # admin
-PUT  /api/requisitions/settings                body: { requireApprovedForPublish, approverUserIds }
+PUT  /api/requisitions/settings                body: { requireApprovedForPublish, approverUserIds, chain }
 ```
+
+`chain: [{ id, label, approverId }]` — حداکثر ۴ مرحله، به ترتیب. عضو ناشناس و تکرار یک نفر حذف
+می‌شود و برچسب خالی با نام خودِ تأییدکننده پر می‌شود. زنجیرهٔ خالی یعنی همان تأیید یک‌مرحله‌ای؛
+`approverUserIds` فقط در همان حالت خوانده می‌شود.
+
+`approval` در پاسخ = `{ steps[], pending, position: { index, total } | null, canAct, reason, onBehalf }`
+— همان چیزی که صفحه رسم می‌کند: چند مرحله، نوبت چه کسی است، و اگر این خواننده نمی‌تواند امضا کند
+دلیلش چیست. کدهای خطا: `NOT_APPROVER` (۴۰۳ برای درخواست‌دهنده، ۴۰۹ برای «نوبت شما نیست»)،
+`BAD_APPROVED_SLOTS` (بیش از سقفی که مراحل قبلی گذاشته‌اند)، `NOTE_REQUIRED`، `APPROVAL_DONE`.
 
 از سمت آگهی:
 

@@ -26,6 +26,7 @@
     "test:coding": "npm run build && npx tsx scripts/coding.test.ts",
     "test:psych": "npm run build && npx tsx scripts/psychometrics.test.ts",
     "test:requisitions": "npm run build && npx tsx scripts/requisitions.test.ts",
+    "test:requisition-chain": "npm run build && npx tsx scripts/requisition-chain.test.ts",
     "test:offer-band": "npm run build && npx tsx scripts/offer-band.test.ts",
     "test:portal-langs": "npm run build && tsx scripts/portal-langs.test.ts",
     "test:eeo": "npm run build && tsx scripts/eeo-api.test.ts",

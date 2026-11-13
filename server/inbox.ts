@@ -10,6 +10,7 @@ import * as db from './db';
 import { blindOn, maskText } from './blind';
 import { visibleJobIds, type Viewer } from './job-access';
 import { settingsFor } from './automation';
+import { approvalsOf, canApprove, pendingStep } from './requisitions';
 import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
 import type { InboxItem, InboxView } from '../src/types/inbox';
@@ -129,28 +130,42 @@ export function inboxFor(org: db.OrgRecord, user: db.UserRecord): InboxView {
   for (const row of db.listRequisitions(org.id)) {
     if (row.status !== 'pending') continue;
     const settings = db.getRequisitionSettings(org.id);
-    const mine =
-      row.requestedById !== user.id &&
-      (settings.approverUserIds.length ? settings.approverUserIds.includes(user.id) : isAdmin(user));
+    const chain = approvalsOf(row);
+    const step = pendingStep(row);
+    const gate = canApprove(org.id, row, user);
     const approverNames = settings.approverUserIds.length
       ? settings.approverUserIds
           .map((id) => db.getUser(id)?.name || '')
           .filter(Boolean)
           .join('، ')
       : 'مدیر یا مالک فضای کاری';
+    // With a chain the queue names the one person whose turn it is, not a list:
+    // «who do I chase?» is the only question an inbox answers.
+    const waitingOn = gate.allowed
+      ? gate.onBehalf && step
+        ? `شما (به‌جای «${step.approverName}»)`
+        : 'شما'
+      : step
+        ? step.approverName
+        : row.requestedById === user.id
+          ? 'شما درخواست داده‌اید؛ تأیید با دیگری است'
+          : approverNames;
+    const stepNote = step
+      ? ` مرحلهٔ «${step.label}»${chain.length > 1 ? ` (${chain.filter((s) => s.status === 'approved').length + 1} از ${chain.length})` : ''} در انتظار امضاست.`
+      : '';
     items.push({
       id: `requisition:${row.id}`,
       kind: 'requisition',
       title: `تأیید نیازمندسنجی — ${row.title}`,
-      detail: `${row.slots} پست برای «${row.departmentName}»؛ تا تأیید نشود، آگهی به آن وصل و منتشر نمی‌شود.`,
+      detail: `${row.slots} پست برای «${row.departmentName}»؛${stepNote} تا تأیید نشود، آگهی به آن وصل و منتشر نمی‌شود.`,
       candidateName: '',
       jobTitle: row.title,
       jobId: null,
       resumeId: null,
       waitingSinceISO: row.submittedAtISO || row.createdAtISO,
       waitingSinceJalali: jalali(row.submittedAtISO || row.createdAtISO),
-      waitingOn: row.requestedById === user.id ? 'شما درخواست داده‌اید؛ تأیید با دیگری است' : approverNames,
-      mine,
+      waitingOn,
+      mine: gate.allowed,
       canAct: false,
       blockedReason: 'تأیید در صفحهٔ نیازمندسنجی گرفته می‌شود، جایی که دلیل، بازهٔ حقوق و سرفصل باقی‌مانده روی صفحه است.',
       href: `/app/requisitions/${row.id}`,

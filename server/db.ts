@@ -43,6 +43,8 @@ import type { ReferenceAnswers, RefereeRelation, RefereeStatus } from '../src/ty
 import type { CodeStatus, CodeSubmissionResult } from '../src/types/coding';
 import type { PsychAnswers, PsychNormConfig, PsychResult, PsychStatus } from '../src/types/psychometrics';
 import type {
+  RequisitionApprovalStep,
+  RequisitionChainStepConfig,
   RequisitionHistoryEntry,
   RequisitionPriority,
   RequisitionSeniority,
@@ -568,6 +570,8 @@ export type RequisitionRow = {
   decidedByName: string | null;
   decisionNote: string | null;
   history: RequisitionHistoryEntry[];
+  /** The approval chain copied onto the row at submit time; empty = one decision. */
+  approvals: RequisitionApprovalStep[];
 };
 
 /** Consent + note for one candidate's reference checks (one row per resume). */
@@ -804,7 +808,8 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.codeInvites?.forEach((x) => codeInvites.set(x.id, x));
   snap.psychInvites?.forEach((x) => psychInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.psychNorms || {})) psychNorms.set(k, v);
-  snap.requisitions?.forEach((x) => requisitions.set(x.id, x));
+  // Rows written before the approval chain existed simply have none.
+  snap.requisitions?.forEach((x) => requisitions.set(x.id, { ...x, approvals: Array.isArray(x.approvals) ? x.approvals : [] }));
   for (const [k, v] of Object.entries(snap.requisitionSettings || {})) requisitionSettings.set(k, v);
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
   snap.assessmentProviders?.forEach((x) => assessmentProviders.set(x.id, x));
@@ -2981,7 +2986,14 @@ export function saveRequisition(row: RequisitionRow): RequisitionRow {
 }
 
 export function getRequisitionSettings(orgId: string): RequisitionSettings {
-  return requisitionSettings.get(orgId) || { requireApprovedForPublish: false, approverUserIds: [] };
+  const stored = requisitionSettings.get(orgId);
+  // Reading is also where old rows are made whole: a snapshot written before
+  // «زنجیرهٔ تأیید» exists must still answer with a chain array, not `undefined`.
+  return {
+    requireApprovedForPublish: Boolean(stored?.requireApprovedForPublish),
+    approverUserIds: Array.isArray(stored?.approverUserIds) ? stored!.approverUserIds : [],
+    chain: Array.isArray(stored?.chain) ? (stored!.chain as RequisitionChainStepConfig[]) : [],
+  };
 }
 
 export function saveRequisitionSettings(orgId: string, next: RequisitionSettings): RequisitionSettings {

@@ -31,6 +31,37 @@ export interface RequisitionHistoryEntry {
   note: string;
 }
 
+export type RequisitionApprovalStatus = 'pending' | 'approved' | 'rejected' | 'skipped';
+
+/**
+ * One signature in the chain. The chain is copied onto the requisition at submit
+ * time — later edits to the settings do not rewrite a request that is already
+ * circulating. `skipped` is written on the steps that never got their turn
+ * because someone earlier said no.
+ */
+export interface RequisitionApprovalStep {
+  id: string;
+  /** «مدیر فنی»، «مالی»، «مدیرعامل» — the label the workspace chose. */
+  label: string;
+  approverId: string;
+  approverName: string;
+  status: RequisitionApprovalStatus;
+  decidedAtISO: string | null;
+  decidedAtJalali: string | null;
+  note: string | null;
+  /** Seats this signature granted; the final approval's number is the one that counts. */
+  approvedSlots: number | null;
+  /** True when an admin decided in the named approver's place (recorded, not hidden). */
+  onBehalf?: boolean;
+}
+
+/** A configured step, before it becomes part of any one requisition. */
+export interface RequisitionChainStepConfig {
+  id: string;
+  label: string;
+  approverId: string;
+}
+
 /** One requisition, as the workspace reads it. */
 export interface Requisition {
   id: string;
@@ -84,6 +115,8 @@ export interface Requisition {
    */
   overBandOffers: { offerId: string; candidateName: string; monthly: number | null; reason: string | null; status: string }[];
   history: RequisitionHistoryEntry[];
+  /** Empty when the workspace has no chain (single decision, as before). */
+  approvals: RequisitionApprovalStep[];
 }
 
 /** The list view adds the two computed flags a dashboard needs. */
@@ -107,11 +140,34 @@ export interface RequisitionSettings {
   /** When true, publishing on the public portal requires an approved requisition. */
   requireApprovedForPublish: boolean;
   /**
-   * Who may approve. Empty = every admin/owner, which is the default because a
-   * small team has nobody else.
+   * Who may approve when there is no chain. Empty = every admin/owner, which is
+   * the default because a small team has nobody else.
    */
   approverUserIds: string[];
+  /**
+   * «زنجیرهٔ تأیید» — when it has steps, a submitted requisition walks them in
+   * order and only turns «تأییدشده» after the last one. Empty = one decision.
+   */
+  chain: RequisitionChainStepConfig[];
 }
+
+/** What the requisition page needs to draw the approval state for this reader. */
+export interface RequisitionApprovalView {
+  /** Steps, in order (empty when the workspace has no chain). */
+  steps: RequisitionApprovalStep[];
+  /** The step waiting right now, if the request is pending. */
+  pending: RequisitionApprovalStep | null;
+  /** 1-based position of the pending step, e.g. 2 of 3. Null when not pending. */
+  position: { index: number; total: number } | null;
+  /** May this reader decide the pending step? */
+  canAct: boolean;
+  /** Why not — the sentence shown instead of a disabled button with no reason. */
+  reason: string | null;
+  /** True when acting would be «به‌جای» the named approver (admin fallback). */
+  onBehalf: boolean;
+}
+
+export const CHAIN_MAX_STEPS = 4;
 
 export interface RequisitionApprovers {
   id: string;

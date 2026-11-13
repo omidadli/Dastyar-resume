@@ -23,7 +23,9 @@ import type { CodeCaseResult, CodeChallengeSummary, CodeInvite, PublicCodeChalle
 import type {
   JobRequisitionPayload,
   Requisition,
+  RequisitionApprovalView,
   RequisitionApprovers,
+  RequisitionChainStepConfig,
   RequisitionInput,
   RequisitionRollup,
   RequisitionSettings,
@@ -681,15 +683,22 @@ export const api = {
     get: (id: string) =>
       get<{
         requisition: Requisition;
+        /** The chain as this reader sees it — steps, whose turn, may I sign. */
+        approval: RequisitionApprovalView;
         canApprove: boolean;
         cannotApproveReason: string | null;
+        selfApprovalOnly: boolean;
+        onBehalf: boolean;
         attachableJobs: { id: string; roleTitle: string; status: string; isPublic: boolean }[];
       }>(`/api/requisitions/${encodeURIComponent(id)}`),
     create: (b: RequisitionInput) => post<{ requisition: Requisition }>('/api/requisitions', b),
     update: (id: string, b: RequisitionInput) => patch<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}`, b),
     submit: (id: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/submit`, {}),
     decide: (id: string, b: { decision: 'approved' | 'rejected'; note?: string; approvedSlots?: number }) =>
-      post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/decision`, b),
+      post<{ requisition: Requisition; approval: RequisitionApprovalView }>(
+        `/api/requisitions/${encodeURIComponent(id)}/decision`,
+        b
+      ),
     hold: (id: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/hold`, {}),
     resume: (id: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/resume`, {}),
     cancel: (id: string, note: string) => post<{ requisition: Requisition }>(`/api/requisitions/${encodeURIComponent(id)}/cancel`, { note }),
@@ -699,7 +708,7 @@ export const api = {
     settings: {
       get: () =>
         get<{ settings: RequisitionSettings; approvers: RequisitionApprovers[] }>('/api/requisitions/settings'),
-      save: (b: { requireApprovedForPublish?: boolean; approverUserIds?: string[] }) =>
+      save: (b: { requireApprovedForPublish?: boolean; approverUserIds?: string[]; chain?: RequisitionChainStepConfig[] }) =>
         put<{ settings: RequisitionSettings }>('/api/requisitions/settings', b),
     },
   },

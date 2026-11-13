@@ -33,6 +33,9 @@ draft ──submit──▶ pending ──approve──▶ approved ──(seats
 | متوقف | approved but paused (budget review, reorg); no new opening attaches |
 | لغو‌شده | closed for good; refused if any hire exists (use «توقف» instead) |
 
+With a chain configured the row is still «در انتظار تأیید» between signatures —
+it only becomes «تأییدشده» after the **last** step. See «زنجیرهٔ تأیید» below.
+
 ## What is enforced, and where
 
 1. **A draft, pending, rejected, held or filled requisition cannot back an
@@ -56,12 +59,65 @@ draft ──submit──▶ pending ──approve──▶ approved ──(seats
 7. **Approving requires a reason to exist.** Submitting with fewer than 20
    characters of justification is refused (`JUSTIFICATION_REQUIRED`).
 
+## زنجیرهٔ تأیید — the approval chain
+
+One decision is the default; a workspace that has to split hiring authority (the
+manager approves the role, finance approves the cost, the founder approves the
+hire) can configure an ordered chain of up to **four** steps:
+
+```json
+{
+  "chain": [
+    { "id": "step-1", "label": "مدیر فنی", "approverId": "usr_…" },
+    { "id": "step-2", "label": "مالی", "approverId": "usr_…" }
+  ]
+}
+```
+
+The rules that make it a control rather than a form with more fields:
+
+- **The chain is copied onto the request at submit time.** Editing the setting
+  afterwards never rewrites a request already circulating: each request is
+  approved by the chain that existed the day it was sent. The copy is on the row
+  (`approvals[]`), step by step, so the history cannot drift from the setting.
+- **Strictly in order.** Only the step whose turn it is can be decided; an earlier
+  approver cannot sign twice, a later one cannot jump the queue (`NOT_APPROVER`,
+  with a sentence naming whose turn it is).
+- **The request stays «در انتظار تأیید» until the last signature.** Intermediate
+  approvals record `step_approved` in the history; only the final one sets
+  `status: approved`, `approvedSlots` and the decision's author and date.
+- **A step may grant fewer seats, and the reduction cascades.** The ceiling for
+  every later step is the smallest number already granted; nobody further down the
+  chain can raise it back up (`BAD_APPROVED_SLOTS` names the ceiling).
+- **A rejection ends the request there.** That step is `rejected` and every later
+  step is written as `skipped` — not left «waiting» on a request nobody will sign.
+  Editing the rejected request clears the old signatures; resubmitting asks
+  everyone again.
+- **The requester never signs their own request**, not even as owner/admin. The
+  only exception is the one-person workspace, which is stated on the page and in
+  the history.
+- **An admin may sign «به‌جای» the named approver** when that person is
+  unreachable. The step records `onBehalf: true`, the history says whose place was
+  taken, and the decision is attributed to the person who actually signed.
+- **The setting is sanitised**: unknown members and duplicate signers are dropped,
+  more than four steps are truncated, and an empty label falls back to the
+  person's own name rather than rendering a blank chip.
+
+The requisition page draws the chain as a timeline (step, person, status, date,
+note, seats granted), with «مرحلهٔ ۲ از ۳» in the header and buttons only for the
+person whose turn it is — otherwise the server's own sentence. The list shows the
+same progress per row («در انتظار «مالی» — مرحلهٔ ۲ از ۳»), and the inbox names the
+one person to chase.
+
+An **empty** `chain` means one decision, exactly as before — the single-decision
+path was not replaced, it is the `chain.length === 0` branch.
+
 ## The publish gate
 
 `GET/PUT /api/requisitions/settings` — per workspace, **off by default**:
 
 ```json
-{ "requireApprovedForPublish": true, "approverUserIds": ["usr_…"] }
+{ "requireApprovedForPublish": true, "approverUserIds": ["usr_…"], "chain": [] }
 ```
 
 When on, `POST /api/jobs/:id/publish` refuses with:
@@ -77,7 +133,10 @@ stated on the settings card, because a rule that silently unpublishes live
 openings would be worse than no rule.
 
 `approverUserIds` names people who may decide even without the admin role; empty
-means admins/owners. Everyone else sees the queue and the reason, not the button.
+means admins/owners. It applies to the **single-decision** path and to a chain that
+has no steps; when a chain exists, the step names the approver and
+`approverUserIds` is not consulted. Everyone else sees the queue and the reason,
+not the button.
 
 ## Money
 
@@ -158,6 +217,16 @@ settings are admin-only, and the whole set is deleted with the workspace.
 
 ## Tests
 
+`npm run test:requisition-chain` — 74 checks: sanitising the chain (unknown
+member, duplicate signer, blank label, five steps truncated), the chain copied at
+submit and **not** rewritten when the setting changes mid-flight, «مرحلهٔ ۱ از ۳»,
+the requester refused, a later step refused with the name of the current one, an
+admin acting «به‌جای» with the note in the history, a step granting fewer seats and
+the ceiling cascading, the request staying pending until the last signature, the
+default on each step being the ceiling, the inbox naming the right person, a
+rejection turning later steps into `skipped`, editing-and-resubmitting asking
+everyone again, an emptied chain keeping the old single decision, and tenant walls.
+
 `npm run test:requisitions` — 67 checks against the built server: validation,
 submit-without-reason, self-approval refused *and* the one-person exception,
 granting fewer seats, granting more refused, attaching to unapproved/over-full
@@ -181,10 +250,9 @@ the requisition.
 
 ## Not done yet — by choice
 
-- **Multi-step approval chains** (manager → finance → founder). The offer module
-  already has chains; requisitions use a single decision because that is what the
-  teams using this product described. Adding a `chain[]` to the row is the shape
-  it would take.
+- **Parallel or conditional steps** (approve by finance only when the band is
+  above a threshold, or two people at once). The chain is a fixed ordered list on
+  purpose: a condition nobody can see on the page is a rule nobody trusts.
 - **A real department budget with burn-down.** We show the cost of the plan; we do
   not claim to know a budget nobody typed in.
 - **Blocking (rather than recording) an over-band offer.** We refuse it until a

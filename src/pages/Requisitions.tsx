@@ -6,10 +6,10 @@
  * list shows every request with the seats it got, the seats it used, and what it
  * costs per month. Nothing here hires anyone; it decides whether hiring is allowed.
  */
-import React, { useMemo, useState } from 'react';
-import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, FileCheck2, Plus, Users, Wallet } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, CheckCircle2, CircleDashed, Clock3, FileCheck2, Plus, Save, Trash2, Users, Wallet, Workflow } from 'lucide-react';
 import { PageHeader } from '../components/layout/AppShell';
-import { Button, Callout, Card, CardHeader, Chip, EmptyState, Skeleton, Stat, Switch, toast } from '../components/ui';
+import { Button, Callout, Card, CardHeader, Chip, EmptyState, Select, Skeleton, Stat, Switch, TextInput, toast } from '../components/ui';
 import RequisitionForm from '../components/requisitions/RequisitionForm';
 import { api, ApiError } from '../lib/api';
 import { useAuth, useCan } from '../lib/auth';
@@ -17,7 +17,15 @@ import { toPersianDigits } from '../lib/format';
 import { navigate } from '../lib/router';
 import { useAsync } from '../lib/useAsync';
 import { useTitle } from '../lib/useTitle';
-import { PRIORITY_LABEL, REQUISITION_STATUS_LABEL, type RequisitionInput, type RequisitionStatus, type RequisitionSummaryRow } from '../types/requisition';
+import {
+  CHAIN_MAX_STEPS,
+  PRIORITY_LABEL,
+  REQUISITION_STATUS_LABEL,
+  type RequisitionChainStepConfig,
+  type RequisitionInput,
+  type RequisitionStatus,
+  type RequisitionSummaryRow,
+} from '../types/requisition';
 
 const TONE: Record<RequisitionStatus, 'brand' | 'warning' | 'neutral' | 'outline'> = {
   draft: 'outline',
@@ -31,6 +39,19 @@ const TONE: Record<RequisitionStatus, 'brand' | 'warning' | 'neutral' | 'outline
 
 const money = (n: number | null | undefined) => (n == null ? '—' : `${toPersianDigits(n.toLocaleString('en-US'))} تومان`);
 
+/** A chain row being edited; `key` exists only so React can keep the inputs apart. */
+interface ChainRow extends RequisitionChainStepConfig {
+  key: string;
+}
+
+let chainSeq = 0;
+const chainRowOf = (step?: Partial<RequisitionChainStepConfig>): ChainRow => ({
+  key: `chain-row-${++chainSeq}`,
+  id: step?.id || '',
+  label: step?.label || '',
+  approverId: step?.approverId || '',
+});
+
 export default function Requisitions() {
   const { org } = useAuth();
   const canAdmin = useCan('admin');
@@ -40,6 +61,17 @@ export default function Requisitions() {
   const [formOpen, setFormOpen] = useState(false);
   const [filter, setFilter] = useState<'all' | RequisitionStatus>('all');
   const [savingRule, setSavingRule] = useState(false);
+  const [chainRows, setChainRows] = useState<ChainRow[]>([]);
+  const [chainLoaded, setChainLoaded] = useState(false);
+  const [savingChain, setSavingChain] = useState(false);
+
+  // The saved chain is the starting point of the editor — filled once, then the
+  // rows on screen are what the admin is editing.
+  useEffect(() => {
+    if (chainLoaded || !settingsQ.data) return;
+    setChainRows((settingsQ.data.settings.chain || []).map((step) => chainRowOf(step)));
+    setChainLoaded(true);
+  }, [settingsQ.data, chainLoaded]);
 
   useTitle('نیازمندسنجی');
 
@@ -74,6 +106,34 @@ export default function Requisitions() {
       toast(err instanceof ApiError ? err.message : 'ذخیرهٔ قاعده ممکن نشد.', 'error');
     } finally {
       setSavingRule(false);
+    }
+  };
+
+  const patchChain = (key: string, next: Partial<ChainRow>) =>
+    setChainRows((list) => list.map((r) => (r.key === key ? { ...r, ...next } : r)));
+
+  const saveChain = async () => {
+    setSavingChain(true);
+    try {
+      const chain = chainRows
+        .filter((r) => r.approverId)
+        .slice(0, CHAIN_MAX_STEPS)
+        .map((r) => ({ id: r.id || '', label: r.label.trim(), approverId: r.approverId }));
+      const res = await api.requisitions.settings.save({ chain });
+      // The server drops duplicates and unknown members and fills empty labels:
+      // show what it actually saved, not what was typed.
+      setChainRows((res.settings.chain || []).map((step) => chainRowOf(step)));
+      settingsQ.reload();
+      summaryQ.reload();
+      toast(
+        chain.length
+          ? `زنجیرهٔ تأیید ذخیره شد (${toPersianDigits(res.settings.chain.length)} مرحله)؛ از این پس درخواست‌های تازه همین مسیر را می‌روند.`
+          : 'زنجیره خالی شد؛ تأیید همچنان یک‌مرحله‌ای است.'
+      );
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : 'ذخیرهٔ زنجیره ممکن نشد.', 'error');
+    } finally {
+      setSavingChain(false);
     }
   };
 
@@ -118,6 +178,83 @@ export default function Requisitions() {
             {gateOn
               ? 'از این پس انتشار آگهی روی پورتال شغلی فقط وقتی ممکن است که آگهی به یک نیازمندسنجی «تأییدشده» با پست باقی‌مانده وصل باشد. آگهی‌های فعلی که از قبل منتشر شده‌اند دست‌نخورده می‌مانند؛ قاعده فقط جلوی انتشار تازه را می‌گیرد.'
               : 'در حالت خاموش، هر عضو می‌تواند آگهی را منتشر کند. نیازمندسنجی همچنان سرفصل و تأیید را نگه می‌دارد، فقط انتشار را قفل نمی‌کند.'}
+          </p>
+        </Card>
+      )}
+
+      {canAdmin && (
+        <Card className="mb-4">
+          <CardHeader
+            title="زنجیرهٔ تأیید"
+            subtitle="هر مرحله را به یک نفر بدهید تا درخواست به ترتیب امضا شود؛ بی‌زنجیره، یک تأیید کافی است"
+            icon={Workflow}
+            action={
+              <Chip tone={chainRows.filter((r) => r.approverId).length ? 'brand' : 'neutral'}>
+                {chainRows.filter((r) => r.approverId).length
+                  ? `${toPersianDigits(chainRows.filter((r) => r.approverId).length)} مرحله`
+                  : 'یک‌مرحله‌ای'}
+              </Chip>
+            }
+          />
+
+          {chainRows.filter((r) => r.approverId).length === 0 && (
+            <p className="text-[12px] text-ink-3 leading-relaxed mb-3">
+              امروز یک تأیید، درخواست را نهایی می‌کند. اگر بودجه و نیرو باید جدا تأیید شوند، مراحل را اضافه کنید: ترتیب از بالا به پایین است و درخواست تا امضای
+              آخرین مرحله «تأییدشده» نمی‌شود.
+            </p>
+          )}
+
+          {chainRows.map((row, i) => (
+            <div key={row.key} className="flex flex-col sm:flex-row sm:items-end gap-2 mb-2">
+              <span className="w-6 h-6 rounded-full bg-line-2 text-ink-3 flex items-center justify-center text-[11px] font-bold shrink-0 sm:mb-2.5 hv-num">
+                {toPersianDigits(i + 1)}
+              </span>
+              <TextInput
+                label={`برچسب مرحله (${toPersianDigits(i + 1)})`}
+                value={row.label}
+                onChange={(e) => patchChain(row.key, { label: e.target.value })}
+                placeholder={i === 0 ? 'مدیر فنی' : i === 1 ? 'مالی' : 'مدیرعامل'}
+                wrapperClassName="flex-1"
+              />
+              <Select
+                label="تأییدکننده"
+                value={row.approverId}
+                onChange={(e) => patchChain(row.key, { approverId: e.target.value })}
+                options={[{ value: '', label: 'انتخاب کنید…' }, ...(settingsQ.data?.approvers || []).map((m) => ({
+                  value: m.id,
+                  label: `${m.name}${m.role === 'owner' ? ' (مالک)' : m.role === 'admin' ? ' (مدیر)' : ''}`,
+                }))]}
+                wrapperClassName="flex-1"
+              />
+              <Button size="sm" variant="ghost" icon={Trash2} onClick={() => setChainRows((list) => list.filter((r) => r.key !== row.key))} aria-label="حذف مرحله">
+                حذف
+              </Button>
+            </div>
+          ))}
+
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              icon={Plus}
+              onClick={() => setChainRows((list) => [...list, chainRowOf()])}
+              disabled={chainRows.length >= CHAIN_MAX_STEPS}
+            >
+              افزودن مرحله
+            </Button>
+            <div className="flex items-center gap-2">
+              {chainRows.length >= CHAIN_MAX_STEPS && (
+                <span className="text-[11px] text-ink-4">بیشتر از {toPersianDigits(CHAIN_MAX_STEPS)} مرحله پشتیبانی نمی‌شود.</span>
+              )}
+              <Button size="sm" icon={Save} loading={savingChain} onClick={() => void saveChain()} disabled={!chainLoaded}>
+                ذخیرهٔ زنجیره
+              </Button>
+            </div>
+          </div>
+
+          <p className="text-[11px] text-ink-4 mt-3 leading-relaxed">
+            زنجیره روی درخواستی که همین حالا در گردش است اثر نمی‌گذارد؛ هر درخواست با زنجیرهٔ روزِ فرستادنش تأیید می‌شود. درخواست‌دهنده هیچ‌گاه تأییدکنندهٔ
+            درخواست خودش نیست و اگر تأییدکنندهٔ یک مرحله در دسترس نباشد، مدیر می‌تواند به‌جای او امضا کند — و همین در تاریخچه ثبت می‌شود.
           </p>
         </Card>
       )}
@@ -232,7 +369,21 @@ function Row({ row }: { row: RequisitionSummaryRow }) {
             <FileCheck2 className="w-3.5 h-3.5" /> {toPersianDigits(row.jobIds.length)} آگهی وصل‌شده
           </span>
           {row.targetStartJalali && <span>شروع هدف: {row.targetStartJalali}</span>}
-          {row.status === 'pending' && row.submittedAtISO && <span className="text-review-ink">در انتظار تأیید از {row.history.find((h) => h.action === 'submitted')?.atJalali || ''}</span>}
+          {row.status === 'pending' &&
+            (() => {
+              const steps = row.approvals || [];
+              const idx = steps.findIndex((st) => st.status === 'pending');
+              if (idx >= 0) {
+                return (
+                  <span className="inline-flex items-center gap-1 text-review-ink">
+                    <Workflow className="w-3.5 h-3.5" /> در انتظار «{steps[idx].label}» — مرحلهٔ {toPersianDigits(idx + 1)} از {toPersianDigits(steps.length)}
+                  </span>
+                );
+              }
+              return row.submittedAtISO ? (
+                <span className="text-review-ink">در انتظار تأیید از {row.history.find((h) => h.action === 'submitted')?.atJalali || ''}</span>
+              ) : null;
+            })()}
           {row.status === 'rejected' && row.decisionNote && (
             <span className="inline-flex items-center gap-1 text-low-ink">
               <AlertTriangle className="w-3.5 h-3.5" /> {row.decisionNote.slice(0, 90)}

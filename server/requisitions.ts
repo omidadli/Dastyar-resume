@@ -20,8 +20,12 @@ import { formatJalaliDate } from '../src/utils/jalali';
 import { tehranJalaliOf } from './tehran-time';
 import type { Job } from '../src/types/screening';
 import {
+  CHAIN_MAX_STEPS,
   PRIORITY_LABEL,
   type Requisition,
+  type RequisitionApprovalStep,
+  type RequisitionApprovalView,
+  type RequisitionChainStepConfig,
   type RequisitionHistoryEntry,
   type RequisitionPriority,
   type RequisitionRollup,
@@ -63,6 +67,59 @@ const PRIORITIES: readonly RequisitionPriority[] = ['low', 'normal', 'high', 'cr
 const SENIORITIES: readonly RequisitionSeniority[] = ['junior', 'mid', 'senior', 'lead'];
 const WORK_MODES: readonly RequisitionWorkMode[] = ['onsite', 'hybrid', 'remote'];
 const BASIS: readonly SalaryBasis[] = ['gross_monthly', 'total_monthly'];
+
+// ------------------------------------------------------------------ chain ---
+
+/**
+ * The chain an old row never had. Reading through this keeps every caller free
+ * of `row.approvals?.length` checks and makes «no chain» mean «one decision».
+ */
+export function approvalsOf(row: db.RequisitionRow): RequisitionApprovalStep[] {
+  return Array.isArray(row.approvals) ? row.approvals : [];
+}
+
+/** The one step whose turn it is — the chain is strictly in order. */
+export function pendingStep(row: db.RequisitionRow): RequisitionApprovalStep | null {
+  return approvalsOf(row).find((step) => step.status === 'pending') || null;
+}
+
+/**
+ * The configured chain, copied onto a request the moment it is sent — later
+ * edits to the setting never rewrite a request that is already circulating.
+ * A named approver who has left the workspace is dropped rather than frozen in.
+ */
+function buildChain(orgId: string): RequisitionApprovalStep[] {
+  const cfg = db.getRequisitionSettings(orgId).chain;
+  if (!Array.isArray(cfg) || !cfg.length) return [];
+  const members = new Map(db.listMembers(orgId).map((u) => [u.id, u]));
+  const out: RequisitionApprovalStep[] = [];
+  for (const configured of cfg.slice(0, CHAIN_MAX_STEPS)) {
+    const member = members.get(configured.approverId);
+    if (!member) continue;
+    out.push({
+      id: configured.id || db.uid('apv'),
+      label: (configured.label || '').trim() || member.name,
+      approverId: member.id,
+      approverName: member.name,
+      status: 'pending',
+      decidedAtISO: null,
+      decidedAtJalali: null,
+      note: null,
+      approvedSlots: null,
+    });
+  }
+  return out;
+}
+
+/**
+ * How many seats may this signature still grant? A step earlier in the chain may
+ * have cut the number; the reduction cascades so nobody can raise it back later.
+ */
+function seatCeiling(row: db.RequisitionRow, chain: RequisitionApprovalStep[]): number {
+  return chain
+    .filter((step) => step.status === 'approved')
+    .reduce((min, step) => Math.min(min, step.approvedSlots ?? row.slots), row.slots);
+}
 
 // ------------------------------------------------------------------- view ---
 
@@ -148,6 +205,7 @@ export function viewOf(row: db.RequisitionRow): Requisition {
         }))
     ),
     history: row.history || [],
+    approvals: approvalsOf(row),
   };
 }
 
@@ -274,6 +332,7 @@ export function createRequisition(orgId: string, actor: { id: string; name: stri
     createdAtISO: now,
     updatedAtISO: now,
     history: [{ atISO: now, atJalali: jalali(now) || '', byName: actor.name, action: 'created', note: '' }],
+    approvals: [],
   };
   db.saveRequisition(row);
   db.logActivity(orgId, actor, 'requisition.created', `نیازمندسنجی «${row.title}» (${row.code}) ساخته شد`, {});
@@ -289,8 +348,10 @@ export function updateRequisition(orgId: string, id: string, actor: { id: string
   const next = db.saveRequisition({
     ...row,
     ...input,
-    // A rejected request that is edited goes back to draft: it has to be submitted again.
+    // A rejected request that is edited goes back to draft: it has to be submitted
+    // again, and the old signatures — right or wrong — no longer apply to it.
     status: 'draft',
+    approvals: [],
     updatedAtISO: new Date().toISOString(),
     history: pushHistory(row, actor.name, 'edited', ''),
   });
@@ -307,26 +368,101 @@ export function submitForApproval(orgId: string, id: string, actor: { id: string
     throw new RequisitionError('دلیل نیاز به این نیرو را بنویسید (دست‌کم ۲۰ نویسه): چه کاری زمین می‌ماند اگر این پست پر نشود؟', 400, 'JUSTIFICATION_REQUIRED');
   }
   const now = new Date().toISOString();
+  const chain = buildChain(orgId);
   const next = db.saveRequisition({
     ...row,
     status: 'pending',
+    approvals: chain,
     submittedAtISO: now,
     updatedAtISO: now,
-    history: pushHistory(row, actor.name, 'submitted', ''),
+    history: pushHistory(
+      row,
+      actor.name,
+      'submitted',
+      chain.length ? `زنجیرهٔ تأیید: ${chain.map((step) => step.label).join(' → ')}` : ''
+    ),
   });
-  db.logActivity(orgId, actor, 'requisition.submitted', `نیازمندسنجی «${row.title}» برای تأیید فرستاده شد`, {});
+  db.logActivity(
+    orgId,
+    actor,
+    'requisition.submitted',
+    chain.length
+      ? `نیازمندسنجی «${row.title}» برای تأیید فرستاده شد (${chain.length} مرحله)`
+      : `نیازمندسنجی «${row.title}» برای تأیید فرستاده شد`,
+    {}
+  );
   return next;
 }
 
-/** May this user decide it? Approvers come from settings; admins/owners by default. */
+/** What a reader may do with the request right now — and why not, if not. */
+export interface ApprovalGate {
+  allowed: boolean;
+  reason: string | null;
+  /** True when the rule bends because nobody else could sign it. */
+  selfApprovalOnly: boolean;
+  /** True when an admin/owner signs in the named approver's place. */
+  onBehalf: boolean;
+  /** The step this reader would decide; null for a chain-less request. */
+  step: RequisitionApprovalStep | null;
+}
+
+/**
+ * May this user decide it?
+ *
+ * With a chain, only *the step whose turn it is* may be decided: its named
+ * approver, or — recorded, never hidden — an admin/owner in their place. Without
+ * a chain the old rule still holds: named approvers, admins and owners, and
+ * never the person who asked (unless they are literally the only one who could).
+ */
 export function canApprove(
   orgId: string,
   row: db.RequisitionRow,
   user: { id: string; role: string }
-): { allowed: boolean; reason: string | null; selfApprovalOnly: boolean } {
-  if (row.status !== 'pending') return { allowed: false, reason: 'این درخواست در انتظار تأیید نیست.', selfApprovalOnly: false };
-  const settings = db.getRequisitionSettings(orgId);
+): ApprovalGate {
+  if (row.status !== 'pending') {
+    return { allowed: false, reason: 'این درخواست در انتظار تأیید نیست.', selfApprovalOnly: false, onBehalf: false, step: null };
+  }
   const isAdmin = user.role === 'admin' || user.role === 'owner';
+  const chain = approvalsOf(row);
+  const step = pendingStep(row);
+
+  if (chain.length) {
+    if (!step) {
+      return { allowed: false, reason: 'همهٔ مراحل تأیید این درخواست انجام شده است.', selfApprovalOnly: false, onBehalf: false, step: null };
+    }
+    if (row.requestedById === user.id) {
+      // The door stays shut for the requester; it only opens when nobody else in
+      // the workspace could possibly sign — and then it says so on the page.
+      const others = db.listMembers(orgId).filter((u) => u.id !== user.id && (u.role === 'admin' || u.role === 'owner')).length;
+      if (others === 0 && (step.approverId === user.id || isAdmin)) {
+        return {
+          allowed: true,
+          reason: 'در این فضای کاری تأییدکنندهٔ دیگری نیست؛ تأیید شما در تاریخچه با همین توضیح ثبت می‌شود.',
+          selfApprovalOnly: true,
+          onBehalf: false,
+          step,
+        };
+      }
+      return {
+        allowed: false,
+        reason: 'شما درخواست‌دهندهٔ این نیازمندسنجی هستید و نمی‌توانید آن را تأیید کنید؛ این مرحله با شخص دیگری است.',
+        selfApprovalOnly: false,
+        onBehalf: false,
+        step,
+      };
+    }
+    if (step.approverId === user.id) return { allowed: true, reason: null, selfApprovalOnly: false, onBehalf: false, step };
+    if (isAdmin) return { allowed: true, reason: null, selfApprovalOnly: false, onBehalf: true, step };
+    return {
+      allowed: false,
+      reason: `این مرحله («${step.label}») در اختیار «${step.approverName}» است.`,
+      selfApprovalOnly: false,
+      onBehalf: false,
+      step,
+    };
+  }
+
+  const settings = db.getRequisitionSettings(orgId);
   const named = settings.approverUserIds;
   const eligible = (id: string, role: string) => id !== row.requestedById && (named.includes(id) || role === 'admin' || role === 'owner');
   const others = db.listMembers(orgId).filter((u) => eligible(u.id, u.role)).length;
@@ -340,15 +476,53 @@ export function canApprove(
         allowed: true,
         reason: 'در این فضای کاری تأییدکنندهٔ دیگری نیست؛ تأیید شما در تاریخچه با همین توضیح ثبت می‌شود.',
         selfApprovalOnly: true,
+        onBehalf: false,
+        step: null,
       };
     }
-    return { allowed: false, reason: 'درخواست‌دهنده نمی‌تواند درخواست خودش را تأیید کند.', selfApprovalOnly: false };
+    return { allowed: false, reason: 'درخواست‌دهنده نمی‌تواند درخواست خودش را تأیید کند.', selfApprovalOnly: false, onBehalf: false, step: null };
   }
-  if (named.includes(user.id)) return { allowed: true, reason: null, selfApprovalOnly: false };
-  if (isAdmin) return { allowed: true, reason: null, selfApprovalOnly: false };
-  return { allowed: false, reason: 'تأیید نیازمندسنجی با مدیران فضای کاری یا تأییدکنندگان تعیین‌شده است.', selfApprovalOnly: false };
+  if (named.includes(user.id)) return { allowed: true, reason: null, selfApprovalOnly: false, onBehalf: false, step: null };
+  if (isAdmin) return { allowed: true, reason: null, selfApprovalOnly: false, onBehalf: false, step: null };
+  return {
+    allowed: false,
+    reason: 'تأیید نیازمندسنجی با مدیران فضای کاری یا تأییدکنندگان تعیین‌شده است.',
+    selfApprovalOnly: false,
+    onBehalf: false,
+    step: null,
+  };
 }
 
+/**
+ * What the request page draws: the steps in order, the one that is waiting, and
+ * whether *this* reader can take it. A refusal is a sentence, never a dead grey
+ * button — the reader must be able to tell «not me» from «not yet».
+ */
+export function approvalViewFor(
+  orgId: string,
+  row: db.RequisitionRow,
+  user: { id: string; role: string }
+): RequisitionApprovalView {
+  const chain = approvalsOf(row);
+  const step = pendingStep(row);
+  const gate = canApprove(orgId, row, user);
+  const index = step ? chain.findIndex((s) => s.id === step.id) + 1 : 0;
+  return {
+    steps: chain,
+    pending: step,
+    position: step && index > 0 ? { index, total: chain.length } : null,
+    canAct: gate.allowed,
+    reason: gate.allowed ? null : gate.reason,
+    onBehalf: gate.onBehalf,
+  };
+}
+
+/**
+ * One decision. With a chain this decides *the current step*: an approval hands
+ * the request to the next person and only the last signature makes it
+ * «تأییدشده»; a rejection ends it and the steps that never got their turn are
+ * written down as `skipped` rather than left waiting forever.
+ */
 export function decide(
   orgId: string,
   id: string,
@@ -357,46 +531,103 @@ export function decide(
 ): db.RequisitionRow {
   const row = getOrThrow(orgId, id);
   const gate = canApprove(orgId, row, user);
-  if (!gate.allowed) throw new RequisitionError(gate.reason || 'اجازهٔ تأیید ندارید.', gate.reason?.includes('نمی‌تواند') ? 403 : 409, 'NOT_APPROVER');
+  if (!gate.allowed) {
+    // «You are the requester» is a forbidden, not a conflict; «not your turn» is
+    // a conflict with the current state of the chain. The status says which.
+    const forbidden = /درخواست‌دهنده|نمی‌تواند|نمی‌توانید/.test(gate.reason || '');
+    throw new RequisitionError(gate.reason || 'اجازهٔ تأیید ندارید.', forbidden ? 403 : 409, 'NOT_APPROVER');
+  }
 
   const decision = String(body.decision || '') === 'rejected' ? 'rejected' : 'approved';
   const note = String(body.note || '').trim().slice(0, 800);
   if (decision === 'rejected' && note.length < 5) {
     throw new RequisitionError('برای رد، دلیل را بنویسید تا درخواست‌دهنده بداند چه چیزی را باید اصلاح کند.', 400, 'NOTE_REQUIRED');
   }
+
+  const chain = approvalsOf(row);
+  const step = chain.length ? gate.step : null;
+  if (chain.length && !step) throw new RequisitionError('همهٔ مراحل تأیید این درخواست انجام شده است.', 409, 'APPROVAL_DONE');
+
+  // Each step may grant fewer seats; the ceiling is what the earlier signatures
+  // already allowed, so a reduction cannot be undone further down the chain.
+  const ceiling = chain.length ? seatCeiling(row, chain) : row.slots;
   let granted: number | null = null;
   if (decision === 'approved') {
-    granted = body.approvedSlots === undefined || body.approvedSlots === null ? row.slots : Number(body.approvedSlots);
-    if (!Number.isInteger(granted) || granted < 1 || granted > row.slots) {
-      throw new RequisitionError(`تعداد تأییدشده باید بین ۱ تا ${row.slots} باشد (بیش از درخواست، تأیید نمی‌شود).`, 400, 'BAD_APPROVED_SLOTS');
+    granted = body.approvedSlots === undefined || body.approvedSlots === null ? ceiling : Number(body.approvedSlots);
+    if (!Number.isInteger(granted) || granted < 1 || granted > ceiling) {
+      throw new RequisitionError(
+        `تعداد تأییدشده باید بین ۱ تا ${ceiling} باشد (بیش از درخواست، تأیید نمی‌شود).`,
+        400,
+        'BAD_APPROVED_SLOTS'
+      );
     }
   }
+
   const now = new Date().toISOString();
-  const change = decision === 'approved' && granted !== row.slots ? ` — ${row.slots} خواسته شده بود، ${granted} تأیید شد` : '';
+  const actedIndex = step ? chain.findIndex((entry) => entry.id === step.id) : -1;
+  const chainAfter: RequisitionApprovalStep[] = chain.map((entry, index) => {
+    if (step && entry.id === step.id) {
+      return {
+        ...entry,
+        status: decision === 'approved' ? ('approved' as const) : ('rejected' as const),
+        decidedAtISO: now,
+        decidedAtJalali: jalali(now),
+        note: note || null,
+        approvedSlots: decision === 'approved' ? granted : null,
+        onBehalf: gate.onBehalf || undefined,
+      };
+    }
+    // A rejection ends the chain: the steps that never got their turn are
+    // recorded as skipped, not left «waiting» on a request nobody will sign.
+    if (decision === 'rejected' && entry.status === 'pending' && index > actedIndex) {
+      return { ...entry, status: 'skipped' as const };
+    }
+    return entry;
+  });
+
+  const stillWaiting = chainAfter.some((entry) => entry.status === 'pending');
+  const isFinal = chain.length ? !stillWaiting : true;
+  const seatWord = decision === 'approved' && granted !== row.slots ? ` — ${row.slots} خواسته شده بود، ${granted} تأیید شد` : '';
   const selfNote = gate.selfApprovalOnly ? ' (تنها تأییدکنندهٔ فضای کاری، خودِ درخواست‌دهنده بود)' : '';
+  const behalfNote = gate.onBehalf && step ? ` (به‌جای «${step.approverName}»)` : '';
+  const stepPrefix = step ? `مرحلهٔ «${step.label}»: ` : '';
+
+  const historyAction = !isFinal
+    ? decision === 'approved'
+      ? 'step_approved'
+      : 'step_rejected'
+    : decision === 'approved'
+      ? 'approved'
+      : 'rejected';
+
   const next = db.saveRequisition({
     ...row,
-    status: decision === 'approved' ? 'approved' : 'rejected',
-    approvedSlots: decision === 'approved' ? granted : null,
-    decidedAtISO: now,
-    decidedById: user.id,
-    decidedByName: user.name,
-    decisionNote: note || null,
+    approvals: chainAfter,
+    status: decision === 'rejected' ? 'rejected' : isFinal ? 'approved' : 'pending',
+    approvedSlots: decision === 'approved' && isFinal ? granted : null,
+    decidedAtISO: isFinal ? now : row.decidedAtISO,
+    decidedById: isFinal ? user.id : row.decidedById,
+    decidedByName: isFinal ? user.name : row.decidedByName,
+    decisionNote: isFinal ? note || null : row.decisionNote,
     updatedAtISO: now,
     history: pushHistory(
       row,
       user.name,
-      decision === 'approved' ? 'approved' : 'rejected',
-      `${note}${change}${selfNote}`.trim()
+      historyAction,
+      `${stepPrefix}${note}${decision === 'approved' ? seatWord : ''}${behalfNote}${selfNote}`.trim()
     ),
   });
+
+  const label = step ? `مرحلهٔ «${step.label}»` : 'تأیید';
   db.logActivity(
     orgId,
     { id: user.id, name: user.name },
-    decision === 'approved' ? 'requisition.approved' : 'requisition.rejected',
-    decision === 'approved'
-      ? `نیازمندسنجی «${row.title}» تأیید شد (${granted} از ${row.slots} پست)`
-      : `نیازمندسنجی «${row.title}» رد شد — ${note}`,
+    decision === 'rejected' ? 'requisition.rejected' : isFinal ? 'requisition.approved' : 'requisition.updated',
+    decision === 'rejected'
+      ? `نیازمندسنجی «${row.title}» در ${label} رد شد — ${note}`
+      : isFinal
+        ? `نیازمندسنجی «${row.title}» تأیید شد (${granted} از ${row.slots} پست)${behalfNote}`
+        : `${label} نیازمندسنجی «${row.title}» تأیید شد؛ در انتظار امضای بعدی${behalfNote}`,
     {}
   );
   return next;
@@ -681,7 +912,33 @@ export function readSettings(orgId: string): { settings: RequisitionSettings; ap
   };
 }
 
-export function saveSettings(orgId: string, actor: { id: string; name: string }, body: { requireApprovedForPublish?: unknown; approverUserIds?: unknown }): RequisitionSettings {
+/**
+ * Read the configured chain, made safe: known members only, no duplicates (one
+ * person cannot sign twice), at most `CHAIN_MAX_STEPS`, and a label that is never
+ * blank — an unnamed step falls back to the approver's own name.
+ */
+function readChain(orgId: string, raw: unknown, fallback: RequisitionChainStepConfig[]): RequisitionChainStepConfig[] {
+  if (!Array.isArray(raw)) return fallback;
+  const members = new Map(db.listMembers(orgId).map((u) => [u.id, u]));
+  const out: RequisitionChainStepConfig[] = [];
+  const seen = new Set<string>();
+  for (const entry of raw) {
+    if (out.length >= CHAIN_MAX_STEPS) break;
+    const approverId = String((entry as any)?.approverId || '');
+    const member = members.get(approverId);
+    if (!member || seen.has(approverId)) continue;
+    seen.add(approverId);
+    const label = String((entry as any)?.label || '').trim().slice(0, 60) || member.name;
+    out.push({ id: String((entry as any)?.id || `chain-${out.length + 1}`).slice(0, 60), label, approverId });
+  }
+  return out;
+}
+
+export function saveSettings(
+  orgId: string,
+  actor: { id: string; name: string },
+  body: { requireApprovedForPublish?: unknown; approverUserIds?: unknown; chain?: unknown }
+): RequisitionSettings {
   const current = db.getRequisitionSettings(orgId);
   const ids = Array.isArray(body.approverUserIds) ? Array.from(new Set(body.approverUserIds.map((v) => String(v)))) : current.approverUserIds;
   const known = new Set(db.listMembers(orgId).map((u) => u.id));
@@ -689,15 +946,18 @@ export function saveSettings(orgId: string, actor: { id: string; name: string },
   const next: RequisitionSettings = {
     requireApprovedForPublish: body.requireApprovedForPublish === undefined ? current.requireApprovedForPublish : Boolean(body.requireApprovedForPublish),
     approverUserIds,
+    chain: readChain(orgId, body.chain, current.chain),
   };
   db.saveRequisitionSettings(orgId, next);
   db.logActivity(
     orgId,
     actor,
     'requisition.settings',
-    next.requireApprovedForPublish
-      ? 'از این پس انتشار آگهی فقط با نیازمندسنجی تأییدشده ممکن است'
-      : 'قید «انتشار فقط با نیازمندسنجی» خاموش شد',
+    next.chain.length
+      ? `زنجیرهٔ تأیید نیازمندسنجی: ${next.chain.map((step) => step.label).join(' → ')}${next.requireApprovedForPublish ? '؛ انتشار آگهی فقط با نیازمندسنجی تأییدشده' : ''}`
+      : next.requireApprovedForPublish
+        ? 'از این پس انتشار آگهی فقط با نیازمندسنجی تأییدشده ممکن است'
+        : 'قید «انتشار فقط با نیازمندسنجی» خاموش شد؛ تأیید یک‌مرحله‌ای است',
     {}
   );
   return next;

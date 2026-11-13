@@ -37,16 +37,44 @@ import {
   SENIORITY_LABEL,
   WORK_MODE_LABEL,
   type Requisition,
+  type RequisitionApprovalStatus,
+  type RequisitionApprovalView,
   type RequisitionInput,
 } from '../types/requisition';
 
 const money = (n: number | null | undefined) => (n == null ? '—' : `${toPersianDigits(n.toLocaleString('en-US'))} تومان`);
+
+const STEP_STATUS_LABEL: Record<RequisitionApprovalStatus, string> = {
+  pending: 'در انتظار',
+  approved: 'تأیید شد',
+  rejected: 'رد شد',
+  skipped: 'نوبت نرسید',
+};
+
+const STEP_STATUS_TONE: Record<RequisitionApprovalStatus, 'brand' | 'warning' | 'neutral' | 'outline'> = {
+  pending: 'warning',
+  approved: 'brand',
+  rejected: 'neutral',
+  skipped: 'outline',
+};
+
+/**
+ * The most a signature may grant: every step before it could have cut the number,
+ * and the page must offer the same ceiling the server enforces.
+ */
+function seatCeiling(approvals: RequisitionApprovalView['steps'] | undefined, slots: number): number {
+  return (approvals || [])
+    .filter((step) => step.status === 'approved')
+    .reduce((min, step) => Math.min(min, step.approvedSlots ?? slots), slots);
+}
 
 const ACTION_LABEL: Record<string, string> = {
   created: 'ساخته شد',
   edited: 'ویرایش شد',
   submitted: 'برای تأیید فرستاده شد',
   approved: 'تأیید شد',
+  step_approved: 'یک مرحلهٔ تأیید انجام شد',
+  step_rejected: 'یک مرحله رد شد',
   rejected: 'رد شد',
   held: 'متوقف شد',
   resumed: 'از سر گرفته شد',
@@ -72,8 +100,10 @@ export default function RequisitionDetail({ id }: { id: string }) {
   useTitle(row ? `نیازمندسنجی ${row.code}` : 'نیازمندسنجی');
 
   useEffect(() => {
-    if (row && decision === 'approved' && !slotsGranted) setSlotsGranted(String(row.slots));
-  }, [row, decision, slotsGranted]);
+    if (row && decision === 'approved' && !slotsGranted) {
+      setSlotsGranted(String(seatCeiling(q.data?.approval?.steps, row.slots)));
+    }
+  }, [row, decision, slotsGranted, q.data]);
 
   const run = async (key: string, fn: () => Promise<unknown>, message: string) => {
     setBusy(key);
@@ -113,6 +143,10 @@ export default function RequisitionDetail({ id }: { id: string }) {
   }
 
   const granted = row.approvedSlots ?? row.slots;
+  const approval = q.data?.approval;
+  const pendingStep = approval?.pending || null;
+  const position = approval?.position || null;
+  const ceiling = seatCeiling(approval?.steps, row.slots);
   const editable = row.status === 'draft' || row.status === 'rejected';
   const members = (settingsQ.data?.approvers || []).map((u) => ({ id: u.id, name: u.name }));
   const departments = (org?.departments || []).map((d) => ({ id: d.id, name: d.name }));
@@ -175,22 +209,88 @@ export default function RequisitionDetail({ id }: { id: string }) {
 
       {row.status === 'pending' && (
         <Card className="mb-4">
-          <CardHeader title="این درخواست منتظر تأیید است" subtitle={q.data?.cannotApproveReason || 'تأییدکننده می‌تواند تعداد کمتری پست تأیید کند.'} icon={FileCheck2} />
-          {q.data?.canApprove ? (
-            <div className="flex flex-wrap gap-2">
-              <Button icon={CheckCircle2} onClick={() => { setDecision('approved'); setSlotsGranted(String(row.slots)); setNote(''); }}>
-                تأیید
-              </Button>
-              <Button variant="secondary" icon={XCircle} onClick={() => { setDecision('rejected'); setNote(''); }}>
-                رد
-              </Button>
-            </div>
+          <CardHeader
+            title={pendingStep ? `در انتظار «${pendingStep.label}»` : 'این درخواست منتظر تأیید است'}
+            subtitle={
+              position
+                ? `مرحلهٔ ${toPersianDigits(position.index)} از ${toPersianDigits(position.total)} — ${pendingStep?.approverName || ''}`
+                : q.data?.cannotApproveReason || 'تأییدکننده می‌تواند تعداد کمتری پست تأیید کند.'
+            }
+            icon={FileCheck2}
+            action={position ? <Chip tone="warning">{`مرحلهٔ ${toPersianDigits(position.index)} از ${toPersianDigits(position.total)}`}</Chip> : undefined}
+          />
+          {q.data?.approval.canAct ? (
+            <>
+              {q.data.approval.onBehalf && pendingStep && (
+                <Callout tone="warning" icon={AlertTriangle} className="mb-3">
+                  این مرحله در اختیار «{pendingStep.approverName}» است. تأیید شما در جای او انجام می‌شود و در تاریخچه با همین توضیح ثبت می‌شود.
+                </Callout>
+              )}
+              {q.data.selfApprovalOnly && (
+                <Callout tone="info" icon={AlertTriangle} className="mb-3">
+                  در این فضای کاری تأییدکنندهٔ دیگری نیست؛ تأیید شما با همین توضیح در تاریخچه می‌ماند.
+                </Callout>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button icon={CheckCircle2} onClick={() => { setDecision('approved'); setSlotsGranted(String(ceiling)); setNote(''); }}>
+                  تأیید
+                </Button>
+                <Button variant="secondary" icon={XCircle} onClick={() => { setDecision('rejected'); setNote(''); }}>
+                  رد
+                </Button>
+              </div>
+            </>
           ) : (
             <p className="text-[12px] text-ink-3 leading-relaxed">
-              {row.requestedByName} این درخواست را فرستاده است؛ تأیید با شخص دیگری است
-              {settingsQ.data?.settings.approverUserIds.length ? ' (تأییدکنندگان تعیین‌شده یا مدیر فضای کاری).' : ' (مدیر یا مالک فضای کاری).'}
+              {q.data?.approval.reason ||
+                `${row.requestedByName} این درخواست را فرستاده است؛ تأیید با شخص دیگری است`}
             </p>
           )}
+        </Card>
+      )}
+
+      {row.approvals.length > 0 && (
+        <Card className="mb-4">
+          <CardHeader
+            title="زنجیرهٔ تأیید"
+            subtitle="ترتیب از بالا به پایین است؛ درخواست تا امضای آخرین مرحله «تأییدشده» نمی‌شود"
+            icon={FileCheck2}
+            action={<Chip tone="outline">{`${toPersianDigits(row.approvals.filter((s) => s.status === 'approved').length)} از ${toPersianDigits(row.approvals.length)}`}</Chip>}
+          />
+          <ol className="flex flex-col gap-2">
+            {row.approvals.map((step, i) => (
+              <li
+                key={step.id}
+                className={`flex flex-wrap items-start justify-between gap-2 rounded-control border px-3 py-2 ${
+                  step.status === 'pending' ? 'border-review/40 bg-review-soft/40' : 'border-line-2 bg-canvas'
+                }`}
+              >
+                <div className="flex items-start gap-2 min-w-0">
+                  <span className="mt-0.5 w-5 h-5 rounded-full bg-line-2 text-ink-3 flex items-center justify-center text-[10.5px] font-bold shrink-0 hv-num">
+                    {toPersianDigits(i + 1)}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-[12.5px] text-ink font-medium">
+                      {step.label} — <span className="text-ink-2">{step.approverName}</span>
+                      {step.onBehalf && <span className="text-ink-4"> (به‌جای ایشان)</span>}
+                    </p>
+                    <p className="text-[11px] text-ink-4 mt-0.5">
+                      {step.decidedAtJalali
+                        ? `${STEP_STATUS_LABEL[step.status]}، ${step.decidedAtJalali}`
+                        : step.status === 'skipped'
+                          ? 'نوبت این مرحله نرسید؛ پیش از آن رد شد'
+                          : step.status === 'pending'
+                            ? 'در انتظار امضا'
+                            : STEP_STATUS_LABEL[step.status]}
+                      {step.approvedSlots !== null && `، ${toPersianDigits(step.approvedSlots)} پست تأیید کرد`}
+                    </p>
+                    {step.note && <p className="text-[11.5px] text-ink-3 mt-1 leading-relaxed">{step.note}</p>}
+                  </div>
+                </div>
+                <Chip tone={STEP_STATUS_TONE[step.status]}>{STEP_STATUS_LABEL[step.status]}</Chip>
+              </li>
+            ))}
+          </ol>
         </Card>
       )}
 
@@ -370,7 +470,13 @@ export default function RequisitionDetail({ id }: { id: string }) {
       <Modal
         open={Boolean(decision)}
         onClose={() => setDecision(null)}
-        title={decision === 'approved' ? 'تأیید نیازمندسنجی' : 'رد نیازمندسنجی'}
+        title={
+          decision === 'approved'
+            ? pendingStep
+              ? `تأیید مرحلهٔ «${pendingStep.label}»`
+              : 'تأیید نیازمندسنجی'
+            : 'رد نیازمندسنجی'
+        }
         size="md"
         footer={
           <div className="flex justify-end gap-2">
@@ -388,9 +494,13 @@ export default function RequisitionDetail({ id }: { id: string }) {
                     api.requisitions.decide(row.id, {
                       decision,
                       note: note.trim(),
-                      ...(decision === 'approved' ? { approvedSlots: Number(slotsGranted) || row.slots } : {}),
+                      ...(decision === 'approved' ? { approvedSlots: Number(slotsGranted) || ceiling } : {}),
                     }),
-                  decision === 'approved' ? 'درخواست تأیید شد.' : 'درخواست رد شد.'
+                  decision === 'rejected'
+                    ? 'درخواست رد شد.'
+                    : approval?.position && approval.position.index < approval.position.total
+                      ? 'این مرحله تأیید شد؛ درخواست به مرحلهٔ بعد رفت.'
+                      : 'درخواست تأیید شد.'
                 );
                 if (ok) setDecision(null);
               }}
@@ -404,10 +514,13 @@ export default function RequisitionDetail({ id }: { id: string }) {
           {decision === 'approved' ? (
             <>
               <p className="text-[12.5px] text-ink-2 leading-relaxed">
-                می‌توانید همهٔ {toPersianDigits(row.slots)} پست را تأیید کنید یا کمتر — مثلاً وقتی بودجه فقط دو نفر را می‌کشد. عدد درخواستی روی صفحه می‌ماند و در تاریخچه ثبت می‌شود.
+                می‌توانید همهٔ {toPersianDigits(ceiling)} پست را تأیید کنید یا کمتر — مثلاً وقتی بودجه فقط دو نفر را می‌کشد. عدد درخواستی روی صفحه می‌ماند و در تاریخچه ثبت می‌شود.
+                {approval?.position && approval.position.index < approval.position.total
+                  ? ' تأیید شما درخواست را به مرحلهٔ بعد می‌فرستد؛ تا امضای آخرین مرحله، «تأییدشده» نمی‌شود.'
+                  : ''}
               </p>
               <label className="text-[12px] font-semibold text-ink-2" htmlFor="granted-slots">
-                تعداد پست تأییدشده (۱ تا {toPersianDigits(row.slots)})
+                تعداد پست تأییدشده (۱ تا {toPersianDigits(ceiling)})
               </label>
               <TextInput
                 id="granted-slots"

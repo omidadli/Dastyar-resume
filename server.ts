@@ -48,6 +48,7 @@ import { scimRoutes } from './server/routes/scim';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
 import { assessmentProviderRoutes } from './server/routes/assessment-providers';
+import { backgroundPublicRoutes, backgroundRoutes } from './server/routes/background';
 import { videoPublicRoutes, videoRoutes } from './server/routes/video';
 import { transcriptPublicRoutes, transcriptRoutes } from './server/routes/transcripts';
 import { onboardingRoutes } from './server/routes/onboarding';
@@ -136,6 +137,7 @@ async function startServer() {
   app.use('/api', schedulingPublicRoutes()); // public «choose an interview time» page
   app.use('/api', surveyPublicRoutes()); // public «تجربهٔ کارجو» survey page
   app.use('/api', assessmentPublicRoutes()); // public «آزمون و ارزیابی» page
+  app.use('/api', backgroundPublicRoutes()); // public «رضایت استعلام سوءپیشینه» page
   app.use('/api', videoPublicRoutes()); // public «مصاحبهٔ ویدئویی» recording page
   app.use('/api', transcriptPublicRoutes()); // signed playback of a transcript's recording
   app.use('/api', statusPublicRoutes()); // «پیگیری درخواست» — the candidate's own status page
@@ -164,6 +166,7 @@ async function startServer() {
   app.use('/api', surveyRoutes()); // candidate-experience surveys (NPS)
   app.use('/api', assessmentRoutes()); // «آزمون و ارزیابی»: catalogue, send, result
   app.use('/api', assessmentProviderRoutes()); // «بازارچهٔ آزمون»: outside test services
+  app.use('/api', backgroundRoutes()); // «استعلام سوءپیشینه»: the manual ledger
   app.use('/api', videoRoutes()); // «مصاحبهٔ ویدئویی»: questions, invite, watch, rate
   app.use('/api', transcriptRoutes()); // «رونویسی گفتار»: audio, subtitle, manual text
   app.use('/api', onboardingRoutes()); // «تحویل پس از استخدام»: checklist, start date, welcome mail

@@ -208,6 +208,8 @@ curl -X POST https://hovida.example.ir/api/v1/candidates/res_…/decision \
 | `automation.run` | اجرای اتوماسیون جذب |
 | `automation.approved` | تأیید پیشنهاد اتوماسیون |
 | `comment.added` | یادداشت تیمی روی کارجو |
+| `background.requested` | ثبت درخواست استعلام سوءپیشینه از مرجع |
+| `background.result` | ثبت نتیجهٔ گواهی (فقط یک واژه، نه متن گواهی) |
 | `ping` | فقط هنگام «ارسال آزمایشی» — مشترک‌شدنی نیست |
 
 ### بدنهٔ درخواست
@@ -366,7 +368,35 @@ fragment بازمی‌گردد و پاسخ callback سرآیند `Referrer-Polic
 
 ---
 
-## ۵د) آزمون و ارزیابی (داخل برنامه + قرارداد ارائه‌دهنده)
+## ۵د) استعلام سوءپیشینه (داخل برنامه + صفحهٔ عمومی رضایت)
+
+```http
+GET    /api/background/:resumeId              → { check, notice, noticeVersion, rules, canManage }   (همهٔ اعضا؛ عضو «restricted»)
+POST   /api/background/:resumeId              → { check, notice }        (مدیر) body: { authority, purpose }
+PATCH  /api/background/checks/:id             → { check }               (مدیر؛ فقط پیش از درخواست)
+POST   /api/background/checks/:id/consent-link→ { check, emailed, error, url }   (مدیر)
+POST   /api/background/checks/:id/consent     → { check }               (مدیر) body: { method: signed_form|in_person, note }
+POST   /api/background/checks/:id/request     → { check }               (مدیر) body: { reference, requestedAtISO?, dueAtISO? }
+POST   /api/background/checks/:id/result      → { check }               (مدیر) body: { verdict: clear|record_found|inconclusive, issuedAtISO?, issuedBy?, note? }
+POST   /api/background/checks/:id/decision    → { check }               (مدیر) body: { outcome: proceed|hold|withdraw, note }   ← دلیل ≥ ۱۰ نویسه
+POST   /api/background/checks/:id/cancel      → { check }               (مدیر)
+POST   /api/background/checks/:id/documents   → { check }               (مدیر) body: { fileName, fileBase64 }
+GET    /api/background/checks/:id/documents/:docId  → فایل (inline, no-store)
+DELETE /api/background/checks/:id/documents/:docId  → { check }         (مدیر؛ فایل واقعاً از دیسک پاک می‌شود)
+
+GET  /api/background/public/:token            → { background }          (عمومی)
+POST /api/background/public/:token/open       → { background }          («دیده شد»)
+POST /api/background/public/:token/consent    → { background }          body: { name, agreed: true }
+POST /api/background/public/:token/decline    → { background }          body: { reason? }
+```
+
+`verdict` فقط **نقل قول** است و هیچ امتیاز، مرحله یا تصمیمی را تغییر نمی‌دهد. عضو تیم فقط
+وضعیت را می‌بیند (`restricted: true`)، نه نتیجه، نه فایل، نه یادداشت تصمیم. کدهای خطا و
+جدول کامل در [`BACKGROUND-CHECK.md`](BACKGROUND-CHECK.md) است.
+
+---
+
+## ۵ذ) آزمون و ارزیابی (داخل برنامه + قرارداد ارائه‌دهنده)
 
 ```http
 GET    /api/assessments/templates?jobTitle=…  → { templates, suggestedId }
@@ -569,4 +599,5 @@ POST  /api/hris/push            → { push: { ok, status, error, rows, … } }
 | حذف کارجو | حذف دادهٔ شخصی باید از رابط کاربری و با تأیید صریح انجام شود |
 | دانلود فایل رزومه | فایل با لینک امضاشده و کوتاه‌عمر سرو می‌شود؛ در API عمومی باز نمی‌شود |
 | افزودن عضو یا تغییر نقش | مدیریت هویت از مسیر ورود سازمانی انجام می‌شود |
+| استعلام سوءپیشینه | رضایت کارجو، تصویر گواهی و تصمیم حساس است؛ هیچ کلید API نمی‌تواند استعلام بسازد، نتیجه ثبت کند یا فایل گواهی را بخواند |
 | کیت مصاحبه | محتوای مصاحبه با نقش و معیار گره خورده و از نشست کاربر ساخته می‌شود؛ برای یکپارچه‌سازی، فهرست بانک را می‌توان از همین مسیر داخلی خواند |

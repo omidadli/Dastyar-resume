@@ -76,6 +76,8 @@ const Schedule = lazyPage(() => import('./pages/Schedule'));
 const Survey = lazyPage(() => import('./pages/Survey'));
 const ReferenceForm = lazyPage(() => import('./pages/ReferenceForm'));
 const References = lazyPage(() => import('./pages/References'));
+const BackgroundCheck = lazyPage(() => import('./pages/BackgroundCheck'));
+const BackgroundConsent = lazyPage(() => import('./pages/BackgroundConsent'));
 const CodeChallenge = lazyPage(() => import('./pages/CodeChallenge'));
 const PsychTest = lazyPage(() => import('./pages/PsychTest'));
 const PsychReview = lazyPage(() => import('./pages/PsychReview'));
@@ -170,6 +172,14 @@ function appPage(pathname: string): React.ReactNode {
     return (
       <Suspense fallback={<PageFallback />}>
         <CodeReview resumeId={m.id} />
+      </Suspense>
+    );
+  }
+  m = matchPath('/app/candidates/:id/background', pathname);
+  if (m) {
+    return (
+      <Suspense fallback={<PageFallback />}>
+        <BackgroundCheck resumeId={m.id} />
       </Suspense>
     );
   }
@@ -290,6 +300,8 @@ function Routes() {
     );
   }
   // «استعلام مرجع» — the referee's page, opened by someone outside the company.
+  m = matchPath('/background/:token', pathname);
+  if (m) return <BackgroundConsent token={m.token} />;
   m = matchPath('/reference/:token', pathname);
   if (m) {
     return (

@@ -907,6 +907,10 @@ export function CandidatePanel({ record, jobTitle, criteria, stages, onChange, o
                   <Button size="sm" variant="ghost" icon={Heart} onClick={() => setSurveyOpen(true)} disabled={hidden}>
                     نظرسنجی تجربه
                   </Button>
+                  {/* «استعلام سوءپیشینه» — a paper process, kept with consent first. */}
+                  <Button size="sm" variant="ghost" icon={ShieldCheck} onClick={() => navigate(`/app/candidates/${record.id}/background`)} disabled={hidden}>
+                    استعلام سوءپیشینه
+                  </Button>
                   {/* «استعلام مرجع» has a page of its own — consent, referees, answers. */}
                   <Button size="sm" variant="ghost" icon={UserRoundCheck} onClick={() => navigate(`/app/candidates/${record.id}/references`)} disabled={hidden}>
                     استعلام مرجع

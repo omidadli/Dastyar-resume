@@ -72,6 +72,7 @@ import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
 import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
 import type { ProviderCheck, ProviderTest } from '../src/types/assessment-provider';
+import type { BackgroundCheck } from '../src/types/background-check';
 import type { VideoAnswer, VideoInvite, VideoQuestion, VideoSettings } from '../src/types/video';
 import type { Transcript } from '../src/types/transcript';
 import type { MeetingSummary } from '../src/types/summary';
@@ -199,6 +200,8 @@ export interface StoreSnapshot {
   assessments?: AssessmentInviteRow[];
   /** «بازارچهٔ آزمون» — outside test services a workspace connected. */
   assessmentProviders?: AssessmentProviderRow[];
+  /** «استعلام سوءپیشینه» — a manual ledger of criminal-record checks. */
+  backgroundChecks?: BackgroundCheckRow[];
   /** «مصاحبهٔ ویدئویی» — invitations, questions and the recorded answers. */
   videoInvites?: VideoInviteRow[];
   /** Per-job video questions, keyed `<orgId>:<jobId>`. */
@@ -597,6 +600,19 @@ export type AssessmentProviderRow = {
   updatedByName: string | null;
 };
 
+/**
+ * A criminal-record check as stored. `consentUrl` is derived at read time, so it
+ * is not part of the row; `token` is the candidate's consent link.
+ */
+export type BackgroundCheckRow = Omit<BackgroundCheck, 'consentUrl' | 'restricted'> & {
+  orgId: string;
+  token: string;
+  /** When the candidate first opened her consent page — «دیده شد» vs «در انتظار». */
+  consentViewedAtISO: string | null;
+  updatedAtISO: string;
+  updatedByName: string | null;
+};
+
 export type OfferRow = JobOffer & {
   orgId: string;
   /** Random, unguessable; the public link is /offer/<token>. */
@@ -647,6 +663,7 @@ const requisitions = new Map<string, RequisitionRow>();
 const requisitionSettings = new Map<string, RequisitionSettings>();
 const assessments = new Map<string, AssessmentInviteRow>();
 const assessmentProviders = new Map<string, AssessmentProviderRow>();
+const backgroundChecks = new Map<string, BackgroundCheckRow>();
 const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
 const transcripts = new Map<string, TranscriptRow>();
@@ -721,6 +738,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   for (const [k, v] of Object.entries(snap.requisitionSettings || {})) requisitionSettings.set(k, v);
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
   snap.assessmentProviders?.forEach((x) => assessmentProviders.set(x.id, x));
+  snap.backgroundChecks?.forEach((x) => backgroundChecks.set(x.id, x));
   snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
   snap.transcripts?.forEach((x) => transcripts.set(x.id, x));
@@ -773,6 +791,7 @@ function clearMemory() {
   codeInvites.clear();
   assessments.clear();
   assessmentProviders.clear();
+  backgroundChecks.clear();
   videoInvites.clear();
   videoSettings.clear();
   transcripts.clear();
@@ -917,6 +936,7 @@ function snapshot(): StoreSnapshot {
     requisitionSettings: Object.fromEntries(requisitionSettings),
     assessments: Array.from(assessments.values()),
     assessmentProviders: Array.from(assessmentProviders.values()),
+    backgroundChecks: Array.from(backgroundChecks.values()),
     videoInvites: Array.from(videoInvites.values()),
     videoSettings: Object.fromEntries(videoSettings),
     transcripts: Array.from(transcripts.values()),
@@ -1450,6 +1470,11 @@ export function deleteOrg(id: string) {
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
   for (const [k, v] of assessmentProviders) if (v.orgId === id) assessmentProviders.delete(k);
+  for (const [k, v] of backgroundChecks)
+    if (v.orgId === id) {
+      backgroundChecks.delete(k);
+      deletePrefixQuietly(`background/${id}/${k}-`);
+    }
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
   for (const [k, v] of webhookDeliveries) if (v.orgId === id) webhookDeliveries.delete(k);
   retentionPolicies.delete(id);
@@ -2124,6 +2149,11 @@ export function deleteResume(rec: ResumeRecord) {
   for (const [k, v] of codeInvites) if (v.resumeId === rec.id) codeInvites.delete(k);
   for (const [k, v] of psychInvites) if (v.resumeId === rec.id) psychInvites.delete(k);
   for (const [k, v] of referenceCases) if (v.resumeId === rec.id) referenceCases.delete(k);
+  for (const [k, v] of backgroundChecks)
+    if (v.resumeId === rec.id) {
+      backgroundChecks.delete(k);
+      deletePrefixQuietly(`background/${v.orgId}/${k}-`);
+    }
   // The original may itself have been a duplicate, so the whole scope is rebuilt.
   refreshDuplicateScope(rec.orgId, rec.departmentId);
   recomputeJob(rec.jobId);
@@ -3083,6 +3113,32 @@ export function openAssessmentFor(orgId: string, resumeId: string): AssessmentIn
   return listAssessments(orgId, { resumeId }).find((a) => a.status === 'sent' || a.status === 'started') || null;
 }
 
+// ------------------------------------------------------- background checks ----
+
+export function listBackgroundChecks(orgId: string, filter: { resumeId?: string } = {}): BackgroundCheckRow[] {
+  return Array.from(backgroundChecks.values())
+    .filter((r) => r.orgId === orgId)
+    .filter((r) => (filter.resumeId ? r.resumeId === filter.resumeId : true))
+    .sort((a, b) => b.createdAtISO.localeCompare(a.createdAtISO));
+}
+
+export function getBackgroundCheck(orgId: string, id: string): BackgroundCheckRow | null {
+  const r = backgroundChecks.get(id);
+  return r && r.orgId === orgId ? r : null;
+}
+
+export function findBackgroundCheckByToken(token: string): BackgroundCheckRow | null {
+  if (!token) return null;
+  for (const r of backgroundChecks.values()) if (r.token === token) return r;
+  return null;
+}
+
+export function saveBackgroundCheck(row: BackgroundCheckRow): BackgroundCheckRow {
+  backgroundChecks.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
 // ------------------------------------------------------------ retention ----
 
 export function getRetention(orgId: string): RetentionPolicy | null {
@@ -3229,6 +3285,7 @@ export interface ErasedCounts {
   referees: number;
   codeInvites: number;
   psychInvites: number;
+  backgroundChecks: number;
 }
 
 /**
@@ -3239,7 +3296,7 @@ export interface ErasedCounts {
 export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | null {
   const rec = getResume(orgId, resumeId);
   if (!rec) return null;
-  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0, summaries: 0, statusLinks: 0, rooms: 0, referees: 0, codeInvites: 0, psychInvites: 0 };
+  const counts: ErasedCounts = { resumes: 0, surveys: 0, notes: 0, interviews: 0, offers: 0, messages: 0, scorecards: 0, links: 0, automations: 0, assessments: 0, videos: 0, transcripts: 0, onboarding: 0, summaries: 0, statusLinks: 0, rooms: 0, referees: 0, codeInvites: 0, psychInvites: 0, backgroundChecks: 0 };
   for (const [k, v] of comments) if (v.orgId === orgId && v.resumeId === resumeId) { comments.delete(k); counts.notes++; }
   for (const [k, v] of interviews) if (v.orgId === orgId && v.resumeId === resumeId) { interviews.delete(k); counts.interviews++; }
   for (const [k, v] of interviewRooms) if (v.orgId === orgId && v.resumeId === resumeId) { interviewRooms.delete(k); counts.rooms++; }
@@ -3255,6 +3312,13 @@ export function eraseCandidate(orgId: string, resumeId: string): ErasedCounts | 
   for (const [k, v] of codeInvites) if (v.orgId === orgId && v.resumeId === resumeId) { codeInvites.delete(k); counts.codeInvites++; }
   for (const [k, v] of psychInvites) if (v.orgId === orgId && v.resumeId === resumeId) { psychInvites.delete(k); counts.psychInvites++; }
   for (const [k, v] of referenceCases) if (v.orgId === orgId && v.resumeId === resumeId) referenceCases.delete(k);
+  // The certificate image is personal data of the highest order: the bytes go too.
+  for (const [k, v] of backgroundChecks)
+    if (v.orgId === orgId && v.resumeId === resumeId) {
+      backgroundChecks.delete(k);
+      deletePrefixQuietly(`background/${orgId}/${k}-`);
+      counts.backgroundChecks++;
+    }
   for (const [k, v] of assessments) if (v.orgId === orgId && v.resumeId === resumeId) { assessments.delete(k); counts.assessments++; }
   for (const [k, v] of summaries)
     if (v.orgId === orgId && v.resumeId === resumeId) {
@@ -3506,6 +3570,11 @@ function dropJobIntegrations(job: { id: string; orgId: string | null }) {
   for (const [k, v] of codeInvites) if (v.orgId === job.orgId && doomedResumes.has(v.resumeId)) codeInvites.delete(k);
   for (const [k, v] of psychInvites) if (v.orgId === job.orgId && doomedResumes.has(v.resumeId)) psychInvites.delete(k);
   for (const [k, v] of referenceCases) if (v.orgId === job.orgId && doomedResumes.has(v.resumeId)) referenceCases.delete(k);
+  for (const [k, v] of backgroundChecks)
+    if (v.orgId === job.orgId && v.resumeId && doomedResumes.has(v.resumeId)) {
+      backgroundChecks.delete(k);
+      deletePrefixQuietly(`background/${v.orgId}/${k}-`);
+    }
   for (const [k, v] of assessments) if (v.orgId === job.orgId && v.jobId === job.id) assessments.delete(k);
   for (const [k, v] of videoInvites) if (v.orgId === job.orgId && v.jobId === job.id) { videoInvites.delete(k); deletePrefixQuietly(`videos/${job.orgId}/${k}/`); }
   videoSettings.delete(`${job.orgId}:${job.id}`);
@@ -4493,6 +4562,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       : undefined,
     assessments: Array.isArray(raw.assessments)
       ? raw.assessments.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.token) && isStr(a.resumeId) && isStr(a.templateId))
+      : undefined,
+    backgroundChecks: Array.isArray(raw.backgroundChecks)
+      ? raw.backgroundChecks.filter((b: any) => b && isStr(b.id) && isStr(b.orgId) && isStr(b.resumeId) && isStr(b.token) && isStr(b.status))
       : undefined,
     assessmentProviders: Array.isArray(raw.assessmentProviders)
       ? raw.assessmentProviders.filter((p: any) => p && isStr(p.id) && isStr(p.orgId) && isStr(p.name) && typeof p.baseUrl === 'string')

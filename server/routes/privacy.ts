@@ -56,6 +56,21 @@ export function privacyRoutes(): express.Router {
         },
         scorecards: db.listFeedback(org.id, { resumeId: rec.id }).map(db.withoutOrg),
         schedulingLinks: db.listSchedulingLinks(org.id, { resumeId: rec.id }).map((l) => ({ id: l.id, createdAtISO: l.createdAtISO, status: l.status })),
+        // «استعلام سوءپیشینه» is the most sensitive row we hold: a DSAR must
+        // show it, including the consent text the candidate agreed to.
+        backgroundChecks: db.listBackgroundChecks(org.id, { resumeId: rec.id }).map((b) => ({
+          id: b.id,
+          status: b.status,
+          authority: b.authority,
+          purpose: b.purpose,
+          reference: b.reference,
+          consent: b.consent,
+          requestedAtISO: b.requestedAtISO,
+          result: b.result,
+          decision: b.decision,
+          documents: b.documents.map((d) => ({ fileName: d.fileName, uploadedAtISO: d.uploadedAtISO })),
+          createdAtISO: b.createdAtISO,
+        })),
         activity,
       };
       res.setHeader('Content-Disposition', `attachment; filename="candidate-${rec.id}.json"`);

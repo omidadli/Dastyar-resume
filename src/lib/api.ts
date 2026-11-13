@@ -87,6 +87,14 @@ import type { ReferralProgramInput, ReferralsPayload } from '../types/referrals'
 import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
 import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
 import type {
+  BackgroundCheck,
+  BackgroundDecisionInput,
+  BackgroundInput,
+  BackgroundPayload,
+  BackgroundResultInput,
+  PublicBackgroundConsent,
+} from '../types/background-check';
+import type {
   AssessmentProviderPublic,
   ProviderCatalog,
   ProviderInput,
@@ -789,6 +797,41 @@ export const api = {
       start: (token: string) => post<{ assessment: PublicAssessment }>(`/api/assessment/public/${encodeURIComponent(token)}/start`, {}),
       submit: (token: string, answers: Record<string, string | number>) =>
         post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
+    },
+  },
+  /** «استعلام سوءپیشینه» — the manual ledger, with consent first. */
+  background: {
+    get: (resumeId: string) => get<BackgroundPayload>(`/api/background/${encodeURIComponent(resumeId)}`),
+    create: (resumeId: string, b: BackgroundInput) => post<BackgroundPayload>(`/api/background/${encodeURIComponent(resumeId)}`, b),
+    update: (id: string, b: BackgroundInput) => patch<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}`, b),
+    sendConsentLink: (id: string) =>
+      post<{ check: BackgroundCheck; emailed: boolean; error: string | null; url: string }>(
+        `/api/background/checks/${encodeURIComponent(id)}/consent-link`,
+        {},
+        { timeoutMs: 60_000 }
+      ),
+    recordConsent: (id: string, b: { method: 'signed_form' | 'in_person'; note: string }) =>
+      post<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}/consent`, b),
+    request: (id: string, b: { reference: string; requestedAtISO?: string | null; dueAtISO?: string | null }) =>
+      post<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}/request`, b),
+    result: (id: string, b: BackgroundResultInput) =>
+      post<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}/result`, b),
+    decide: (id: string, b: BackgroundDecisionInput) =>
+      post<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}/decision`, b),
+    cancel: (id: string) => post<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}/cancel`, {}),
+    upload: (id: string, b: { fileName: string; fileBase64: string }) =>
+      post<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}/documents`, b, { timeoutMs: 60_000 }),
+    documentUrl: (id: string, docId: string) =>
+      `/api/background/checks/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`,
+    removeDocument: (id: string, docId: string) =>
+      del<{ check: BackgroundCheck }>(`/api/background/checks/${encodeURIComponent(id)}/documents/${encodeURIComponent(docId)}`),
+    public: {
+      get: (token: string) => get<{ background: PublicBackgroundConsent }>(`/api/background/public/${encodeURIComponent(token)}`),
+      open: (token: string) => post<{ background: PublicBackgroundConsent }>(`/api/background/public/${encodeURIComponent(token)}/open`, {}),
+      consent: (token: string, b: { name: string; agreed: boolean }) =>
+        post<{ background: PublicBackgroundConsent }>(`/api/background/public/${encodeURIComponent(token)}/consent`, b),
+      decline: (token: string, b: { reason?: string } = {}) =>
+        post<{ background: PublicBackgroundConsent }>(`/api/background/public/${encodeURIComponent(token)}/decline`, b),
     },
   },
   /** «بازارچهٔ آزمون» — outside test services and their tests. */

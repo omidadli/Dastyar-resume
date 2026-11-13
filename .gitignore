@@ -9,3 +9,6 @@ coverage/
 data/
 dist-mount/
 .wrangler/
+
+# live preview data (local demo workspace, never committed)
+preview-data/

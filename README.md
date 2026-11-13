@@ -121,6 +121,7 @@ NODE_ENV=production npm start
 - **گردش تأیید پیشنهاد** (۱ تا ۳ مرحله، تأیید/رد با یادداشت، بستن ارسال تا تأیید آخر) → [`docs/OFFER-APPROVAL.md`](docs/OFFER-APPROVAL.md).
 - **آزمون و ارزیابی** (۵ آزمون / ۴۵ پرسش: قضاوت موقعیتی، نمونه‌کار، نمایهٔ پنج‌بُعدی رفتار؛ لینک عمومی یک‌بارمصرف، کلید امتیاز روشن) → [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
 - **بازارچهٔ آزمون** (سرویس آزمون بیرونی با دو حالت «API» و «لینک»؛ «آماده» فقط بعد از یک بررسی واقعی، کلید رمزنگاری‌شده، ثبت نتیجه با `externalRef` و scope باریک، نتیجهٔ دستی برای مراکز سنجش بدون API) → [`docs/ASSESSMENT-MARKETPLACE.md`](docs/ASSESSMENT-MARKETPLACE.md).
+- **استعلام سوءپیشینه** (دفتر ثبتِ رضایت‌محور: لینک رضایت کارجو یا فرم امضاشده، شمارهٔ نامه، تصویر گواهی، سه واژهٔ نتیجه، تصمیم انسانی با دلیل؛ **بدون ادعای اتصال به مرجع**، بدون رد خودکار، فقط مدیر) → [`docs/BACKGROUND-CHECK.md`](docs/BACKGROUND-CHECK.md).
 - **ورود سازمانی (SSO)** (OIDC با Google Workspace، Microsoft 365، Okta یا Keycloak؛ دامنه‌های مجاز، ورود خودکار اعضا، «فقط SSO») → [`docs/SSO.md`](docs/SSO.md).
 - **غربالگری بی‌طرف** (پنهان‌سازی هویت سمت سرور، بستن تماس تا آشکارسازی، ثبت آشکارسازی) → [`docs/BLIND-SCREENING.md`](docs/BLIND-SCREENING.md).
 - **تجربهٔ کارجو (نظرسنجی و NPS)** (لینک عمومی، فرم دو دقیقه‌ای، محاسبهٔ NPS و گزارش) → [`docs/EXPERIENCE-SURVEY.md`](docs/EXPERIENCE-SURVEY.md).
@@ -277,6 +278,7 @@ docs/SSO.md               ورود سازمانی با OIDC: راه‌انداز
 docs/ASSESSMENT.md        آزمون و ارزیابی: بانک، امتیازدهی، قرارداد ارائه‌دهنده
 docs/ASSESSMENT-MARKETPLACE.md  بازارچهٔ آزمون: سرویس بیرونی، دو حالت، قرارداد، خطاها
 docs/OFFER-APPROVAL.md    گردش تأیید پیشنهاد: زنجیره، قواعد، خطاها
+docs/BACKGROUND-CHECK.md  استعلام سوءپیشینه: رضایت، مرجع، نتیجه، تصمیم، حذف
 ```
 
 سیستم طراحی (رنگ‌ها، تایپوگرافی، اجزا و قواعد دسترس‌پذیری) در [`docs/DESIGN-SYSTEM.md`](docs/DESIGN-SYSTEM.md) مستند شده است.

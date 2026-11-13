@@ -50,5 +50,19 @@ export interface CandidateDataExport {
   messages: { emails: unknown[]; sms: unknown[] };
   scorecards: unknown[];
   schedulingLinks: { id: string; createdAtISO: string; status: string }[];
+  /** «استعلام سوءپیشینه» — consent, reference, verdict and the decision. */
+  backgroundChecks: {
+    id: string;
+    status: string;
+    authority: string;
+    purpose: string;
+    reference: string;
+    consent: unknown;
+    requestedAtISO: string | null;
+    result: unknown;
+    decision: unknown;
+    documents: { fileName: string; uploadedAtISO: string }[];
+    createdAtISO: string;
+  }[];
   activity: { type: string; text: string; atISO: string }[];
 }

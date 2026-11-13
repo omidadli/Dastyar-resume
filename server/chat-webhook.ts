@@ -29,6 +29,8 @@ export const CHAT_EVENTS = [
   'survey.answered',
   'assessment.sent',
   'assessment.completed',
+  'background.requested',
+  'background.result',
 ] as const;
 
 export type ChatEvent = (typeof CHAT_EVENTS)[number];

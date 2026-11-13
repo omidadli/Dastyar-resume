@@ -71,6 +71,7 @@ import type { AutomationProposal, AutomationSettings } from '../src/types/automa
 import type { JobOffer, OfferStatus } from '../src/types/offers';
 import type { SchedulingLink } from '../src/types/scheduling';
 import type { AssessmentAnswerInput, AssessmentInvite } from '../src/types/assessment';
+import type { ProviderCheck, ProviderTest } from '../src/types/assessment-provider';
 import type { VideoAnswer, VideoInvite, VideoQuestion, VideoSettings } from '../src/types/video';
 import type { Transcript } from '../src/types/transcript';
 import type { MeetingSummary } from '../src/types/summary';
@@ -196,6 +197,8 @@ export interface StoreSnapshot {
   requisitionSettings?: Record<string, RequisitionSettings>;
   /** «آزمون و ارزیابی» — invitations, answers and scores. */
   assessments?: AssessmentInviteRow[];
+  /** «بازارچهٔ آزمون» — outside test services a workspace connected. */
+  assessmentProviders?: AssessmentProviderRow[];
   /** «مصاحبهٔ ویدئویی» — invitations, questions and the recorded answers. */
   videoInvites?: VideoInviteRow[];
   /** Per-job video questions, keyed `<orgId>:<jobId>`. */
@@ -574,6 +577,26 @@ export type AssessmentInviteRow = AssessmentInvite & {
   answers: Record<string, AssessmentAnswerInput['value']> | null;
 };
 
+export type AssessmentProviderRow = {
+  id: string;
+  orgId: string;
+  name: string;
+  mode: 'api' | 'link';
+  baseUrl: string;
+  sessionPath: string;
+  checkPath: string;
+  /** AES-256-GCM ciphertext; the plain key is never stored. */
+  apiKeyEnc: string | null;
+  /** Last four characters, for telling two keys apart on screen. */
+  apiKeyHint: string | null;
+  tests: ProviderTest[];
+  lastCheck: ProviderCheck | null;
+  createdAtISO: string;
+  createdByName: string | null;
+  updatedAtISO: string;
+  updatedByName: string | null;
+};
+
 export type OfferRow = JobOffer & {
   orgId: string;
   /** Random, unguessable; the public link is /offer/<token>. */
@@ -623,6 +646,7 @@ const psychNorms = new Map<string, PsychNormConfig>();
 const requisitions = new Map<string, RequisitionRow>();
 const requisitionSettings = new Map<string, RequisitionSettings>();
 const assessments = new Map<string, AssessmentInviteRow>();
+const assessmentProviders = new Map<string, AssessmentProviderRow>();
 const videoInvites = new Map<string, VideoInviteRow>();
 const videoSettings = new Map<string, VideoSettings>();
 const transcripts = new Map<string, TranscriptRow>();
@@ -696,6 +720,7 @@ function loadSnapshotIntoMemory(snap: StoreSnapshot) {
   snap.requisitions?.forEach((x) => requisitions.set(x.id, x));
   for (const [k, v] of Object.entries(snap.requisitionSettings || {})) requisitionSettings.set(k, v);
   snap.assessments?.forEach((x) => assessments.set(x.id, x));
+  snap.assessmentProviders?.forEach((x) => assessmentProviders.set(x.id, x));
   snap.videoInvites?.forEach((x) => videoInvites.set(x.id, x));
   for (const [k, v] of Object.entries(snap.videoSettings || {})) videoSettings.set(k, v);
   snap.transcripts?.forEach((x) => transcripts.set(x.id, x));
@@ -747,6 +772,7 @@ function clearMemory() {
   referees.clear();
   codeInvites.clear();
   assessments.clear();
+  assessmentProviders.clear();
   videoInvites.clear();
   videoSettings.clear();
   transcripts.clear();
@@ -890,6 +916,7 @@ function snapshot(): StoreSnapshot {
     requisitions: Array.from(requisitions.values()),
     requisitionSettings: Object.fromEntries(requisitionSettings),
     assessments: Array.from(assessments.values()),
+    assessmentProviders: Array.from(assessmentProviders.values()),
     videoInvites: Array.from(videoInvites.values()),
     videoSettings: Object.fromEntries(videoSettings),
     transcripts: Array.from(transcripts.values()),
@@ -1422,6 +1449,7 @@ export function deleteOrg(id: string) {
   for (const [k, v] of statusLinks) if (v.orgId === id) statusLinks.delete(k);
   for (const [k, v] of smsLog) if (v.orgId === id) smsLog.delete(k);
   for (const [k, v] of apiKeys) if (v.orgId === id) apiKeys.delete(k);
+  for (const [k, v] of assessmentProviders) if (v.orgId === id) assessmentProviders.delete(k);
   for (const [k, v] of webhooks) if (v.orgId === id) webhooks.delete(k);
   for (const [k, v] of webhookDeliveries) if (v.orgId === id) webhookDeliveries.delete(k);
   retentionPolicies.delete(id);
@@ -2737,6 +2765,40 @@ export function saveAssessment(row: AssessmentInviteRow): AssessmentInviteRow {
   assessments.set(row.id, row);
   scheduleSave();
   return row;
+}
+
+/** A provider writes its result with the ref it was given, not with our id. */
+export function findAssessmentByExternalRef(orgId: string, ref: string): AssessmentInviteRow | null {
+  if (!ref) return null;
+  for (const a of assessments.values()) if (a.orgId === orgId && a.externalRef === ref) return a;
+  return null;
+}
+
+// ------------------------------------------------------ assessment providers ----
+
+export function listAssessmentProviders(orgId: string): AssessmentProviderRow[] {
+  return Array.from(assessmentProviders.values())
+    .filter((p) => p.orgId === orgId)
+    .sort((a, b) => a.createdAtISO.localeCompare(b.createdAtISO));
+}
+
+export function getAssessmentProvider(orgId: string, id: string): AssessmentProviderRow | null {
+  const p = assessmentProviders.get(id);
+  return p && p.orgId === orgId ? p : null;
+}
+
+export function saveAssessmentProvider(row: AssessmentProviderRow): AssessmentProviderRow {
+  assessmentProviders.set(row.id, row);
+  scheduleSave();
+  return row;
+}
+
+export function deleteAssessmentProvider(orgId: string, id: string): boolean {
+  const p = getAssessmentProvider(orgId, id);
+  if (!p) return false;
+  assessmentProviders.delete(id);
+  scheduleSave();
+  return true;
 }
 
 // ---------------------------------------------------------- psych invites ----
@@ -4431,6 +4493,9 @@ export function validateSnapshot(raw: any): StoreSnapshot {
       : undefined,
     assessments: Array.isArray(raw.assessments)
       ? raw.assessments.filter((a: any) => a && isStr(a.id) && isStr(a.orgId) && isStr(a.token) && isStr(a.resumeId) && isStr(a.templateId))
+      : undefined,
+    assessmentProviders: Array.isArray(raw.assessmentProviders)
+      ? raw.assessmentProviders.filter((p: any) => p && isStr(p.id) && isStr(p.orgId) && isStr(p.name) && typeof p.baseUrl === 'string')
       : undefined,
     referenceCases: Array.isArray(raw.referenceCases)
       ? raw.referenceCases.filter((c: any) => c && isStr(c.id) && isStr(c.orgId) && isStr(c.resumeId))

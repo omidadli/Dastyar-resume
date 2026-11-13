@@ -300,6 +300,8 @@ export const CHAT_EVENT_LABEL: Record<string, string> = {
   'automation.approved': 'تأیید پیشنهاد اتوماسیون',
   'comment.added': 'یادداشت تیمی روی کارجو',
   'survey.sent': 'ارسال نظرسنجی تجربهٔ کارجو',
+  'assessment.sent': 'ارسال یا آماده‌سازی آزمون',
+  'assessment.completed': 'نتیجهٔ آزمون ثبت‌شده',
   'reference.consent': 'ثبت رضایت کارجو برای استعلام مرجع',
   'reference.sent': 'ارسال درخواست معرفی',
   'reference.reminded': 'یادآوری به مرجع',

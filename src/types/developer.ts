@@ -7,8 +7,11 @@
  * both can be revoked from the settings page in one click.
  */
 
-/** Read-only keys can list; a write key may also record a decision. */
-export type ApiScope = 'read' | 'write';
+/**
+ * `read` lists; `write` may also record a decision; `assessments` is the narrow
+ * door a test provider needs — it can write one result and nothing else.
+ */
+export type ApiScope = 'read' | 'write' | 'assessments';
 
 export interface ApiKeyPublic {
   id: string;

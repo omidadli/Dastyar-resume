@@ -47,6 +47,7 @@ import { jobBoardRoutes } from './server/routes/jobboard';
 import { scimRoutes } from './server/routes/scim';
 import { surveyPublicRoutes, surveyRoutes } from './server/routes/survey';
 import { assessmentPublicRoutes, assessmentRoutes } from './server/routes/assessments';
+import { assessmentProviderRoutes } from './server/routes/assessment-providers';
 import { videoPublicRoutes, videoRoutes } from './server/routes/video';
 import { transcriptPublicRoutes, transcriptRoutes } from './server/routes/transcripts';
 import { onboardingRoutes } from './server/routes/onboarding';
@@ -162,6 +163,7 @@ async function startServer() {
   app.use('/api', commentRoutes());
   app.use('/api', surveyRoutes()); // candidate-experience surveys (NPS)
   app.use('/api', assessmentRoutes()); // «آزمون و ارزیابی»: catalogue, send, result
+  app.use('/api', assessmentProviderRoutes()); // «بازارچهٔ آزمون»: outside test services
   app.use('/api', videoRoutes()); // «مصاحبهٔ ویدئویی»: questions, invite, watch, rate
   app.use('/api', transcriptRoutes()); // «رونویسی گفتار»: audio, subtitle, manual text
   app.use('/api', onboardingRoutes()); // «تحویل پس از استخدام»: checklist, start date, welcome mail

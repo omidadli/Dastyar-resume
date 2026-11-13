@@ -86,6 +86,12 @@ import type { CandidateDataExport, RetentionPolicy, RetentionRunResult } from '.
 import type { ReferralProgramInput, ReferralsPayload } from '../types/referrals';
 import type { ExperienceReport, PublicSurvey, SurveyInvite, SurveyStage, SurveySubmitInput } from '../types/survey';
 import type { AssessmentInvite, AssessmentTemplateSummary, PublicAssessment } from '../types/assessment';
+import type {
+  AssessmentProviderPublic,
+  ProviderCatalog,
+  ProviderInput,
+  ProviderListPayload,
+} from '../types/assessment-provider';
 import type { PublicVideoInvite, VideoInvite, VideoOverview, VideoSettings } from '../types/video';
 import type { Transcript, TranscriptStatusPayload } from '../types/transcript';
 import type { OnboardingOverview, OnboardingPlan } from '../types/onboarding';
@@ -784,6 +790,24 @@ export const api = {
       submit: (token: string, answers: Record<string, string | number>) =>
         post<{ assessment: PublicAssessment; thanks: string }>(`/api/assessment/public/${encodeURIComponent(token)}/submit`, { answers }),
     },
+  },
+  /** «بازارچهٔ آزمون» — outside test services and their tests. */
+  assessmentProviders: {
+    list: () => get<ProviderListPayload>('/api/assessment-providers'),
+    get: (id: string) => get<{ provider: AssessmentProviderPublic }>(`/api/assessment-providers/${encodeURIComponent(id)}`),
+    create: (b: ProviderInput) => post<{ provider: AssessmentProviderPublic }>('/api/assessment-providers', b),
+    update: (id: string, b: ProviderInput) =>
+      patch<{ provider: AssessmentProviderPublic }>(`/api/assessment-providers/${encodeURIComponent(id)}`, b),
+    remove: (id: string) => del<{ removed: true; keptInvites: number }>(`/api/assessment-providers/${encodeURIComponent(id)}`),
+    check: (id: string) => post<{ provider: AssessmentProviderPublic }>(`/api/assessment-providers/${encodeURIComponent(id)}/check`, {}, { timeoutMs: 30_000 }),
+    catalog: (jobTitle?: string) =>
+      get<{
+        templates: AssessmentTemplateSummary[];
+        providers: ProviderCatalog[];
+        suggestedId: string;
+      }>(`/api/assessments/catalog${jobTitle ? `?jobTitle=${encodeURIComponent(jobTitle)}` : ''}`),
+    createInvite: (b: { resumeId: string; providerId: string; testId: string; jobId?: string; externalUrl?: string }) =>
+      post<{ assessment: AssessmentInvite }>('/api/assessments/provider', b),
   },
   status: {
     links: (resumeId: string) => get<{ items: StatusLink[] }>(`/api/resumes/${encodeURIComponent(resumeId)}/status-links`),

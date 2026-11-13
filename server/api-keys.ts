@@ -28,6 +28,11 @@ const KEY_RE = /^hvd_sk_([a-f0-9]{16})_([A-Za-z0-9_-]{32,})$/;
 export const API_SCOPES: { id: ApiScope; label: string; hint: string }[] = [
   { id: 'read', label: 'فقط خواندن', hint: 'فهرست فرصت‌ها و کاندیداها را می‌خواند؛ هیچ چیزی را تغییر نمی‌دهد.' },
   { id: 'write', label: 'خواندن و ثبت تصمیم', hint: 'علاوه بر خواندن، می‌تواند تصمیم «تأیید / رد / نیاز به بررسی» ثبت کند.' },
+  {
+    id: 'assessments',
+    label: 'ثبت نتیجهٔ آزمون بیرونی',
+    hint: 'فقط برای سرویس آزمون: نتیجهٔ یک دعوت را با شناسهٔ خودش ثبت می‌کند؛ نه خواندن رزومه، نه تصمیم، نه ارسال ایمیل.',
+  },
 ];
 
 export class ApiKeyError extends Error {
@@ -49,9 +54,9 @@ function normalizeScopes(input: unknown): ApiScope[] {
   const list = Array.isArray(input) ? input : [];
   const out: ApiScope[] = [];
   for (const value of list) {
-    if (value === 'read' || value === 'write') out.push(value);
+    if (value === 'read' || value === 'write' || value === 'assessments') out.push(value);
   }
-  // Any key can read; «write» implies it.
+  // Any key can read; every other scope implies it.
   if (!out.includes('read')) out.unshift('read');
   return Array.from(new Set(out));
 }
@@ -176,6 +181,14 @@ export function requireApiKey(minScope: ApiScope = 'read') {
     }
     if (minScope === 'write' && !row.scopes.includes('write')) {
       return res.status(403).json({ error: 'این کلید فقط اجازهٔ خواندن دارد.', code: 'SCOPE_REQUIRED' });
+    }
+    // A provider key is deliberately narrow: results only. A `write` key from
+    // before this scope existed keeps working, so nothing breaks on upgrade.
+    if (minScope === 'assessments' && !row.scopes.includes('assessments') && !row.scopes.includes('write')) {
+      return res.status(403).json({
+        error: 'این کلید اجازهٔ ثبت نتیجهٔ آزمون را ندارد؛ کلیدی با دسترسی «ثبت نتیجهٔ آزمون بیرونی» بسازید.',
+        code: 'SCOPE_REQUIRED',
+      });
     }
     // Counted on every call: the settings page must show real usage, and the
     // snapshot write itself is debounced by the store.

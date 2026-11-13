@@ -18,6 +18,14 @@ export type AssessmentStatus = 'sent' | 'started' | 'completed' | 'expired' | 'c
 /** Where the numbers came from: this page, or an outside provider's API. */
 export type AssessmentSource = 'hovida' | 'external';
 
+/**
+ * Who produced the invitation:
+ *   • `hovida`   — a test from HOVIDA's own bank, taken on `/assess/<token>`.
+ *   • `provider` — a test that lives at an outside service; the row tracks the
+ *     invitation and the result, the candidate sits the test elsewhere.
+ */
+export type AssessmentDriver = 'hovida' | 'provider';
+
 export interface AssessmentOption {
   id: string;
   label: string;
@@ -63,6 +71,8 @@ export interface PublicAssessment {
   scale: AssessmentScalePoint[];
   questions: AssessmentQuestionPublic[];
   template: { id: string; name: string; kind: AssessmentKind };
+  /** For a provider-hosted test: the page explains who runs it and links there. */
+  provider?: { name: string; url: string; note: string } | null;
 }
 
 export interface AssessmentDimensionScore {
@@ -98,6 +108,16 @@ export interface AssessmentInvite {
   note: string | null;
   /** The public link — only inside the workspace. */
   url?: string;
+  /** Present on every row; older rows without it are read as `hovida`. */
+  driver?: AssessmentDriver;
+  providerId?: string | null;
+  providerName?: string | null;
+  /** The provider's own test id/name, for the vendor's support desk. */
+  providerTestId?: string | null;
+  /** The referee the provider knows this invitation by. */
+  externalRef?: string | null;
+  /** Where the candidate actually takes the test (outside HOVIDA). */
+  externalUrl?: string | null;
 }
 
 export interface AssessmentAnswerInput {

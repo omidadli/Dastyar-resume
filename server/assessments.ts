@@ -33,6 +33,14 @@ import type {
 } from '../src/types/assessment';
 import type { AssessmentTemplate } from './assessment-bank';
 import { mailBrandOf } from './mail-brand';
+import {
+  ProviderError,
+  createProviderSession,
+  getProviderRow,
+  newExternalRef,
+  readinessOf,
+} from './assessment-providers';
+import type { ProviderTest } from '../src/types/assessment-provider';
 
 export class AssessmentError extends Error {
   status: number;
@@ -109,6 +117,14 @@ export function publicView(row: db.AssessmentInviteRow): PublicAssessment {
         : { id: q.id, type: 'scale' as const, text: q.text }
     ),
     template: { id: row.templateId, name: row.templateName, kind: row.kind },
+    provider:
+      row.driver === 'provider'
+        ? {
+            name: row.providerName || 'سرویس آزمون بیرونی',
+            url: row.externalUrl || '',
+            note: 'این آزمون در سرویس بیرونی برگزار می‌شود؛ پاسخ‌ها همان‌جا ثبت می‌شوند و نتیجه به پروندهٔ شما اضافه می‌شود.',
+          }
+        : null,
   };
 }
 
@@ -200,6 +216,7 @@ export function createInvite(orgId: string, actor: { id: string; name: string } 
     questionCount: tpl.questions.length,
     note: null,
     answers: null,
+    driver: 'hovida',
   };
   // `createdByName` is not part of the public type; the history line carries it.
   db.saveAssessment(row);
@@ -208,6 +225,126 @@ export function createInvite(orgId: string, actor: { id: string; name: string } 
     resumeId: row.resumeId,
   });
   return row;
+}
+
+export interface CreateProviderInviteInput {
+  resumeId?: unknown;
+  providerId?: unknown;
+  testId?: unknown;
+  jobId?: unknown;
+  /** `link` mode: the provider's own test URL, pasted once by HR. */
+  externalUrl?: unknown;
+}
+
+/**
+ * An invitation for a test that lives elsewhere.
+ *
+ * In `api` mode the provider's session is opened on send, not here — creating a
+ * link must never call an outside service. In `link` mode the URL is required
+ * up front, because it is the thing that will be mailed.
+ */
+export function createProviderInvite(
+  orgId: string,
+  actor: { id: string; name: string } | null,
+  input: CreateProviderInviteInput
+): db.AssessmentInviteRow {
+  const rec = typeof input.resumeId === 'string' ? db.getResume(orgId, input.resumeId) : null;
+  if (!rec) throw new AssessmentError('رزومه یافت نشد.', 404, 'RESUME_NOT_FOUND');
+
+  let provider: db.AssessmentProviderRow;
+  try {
+    provider = getProviderRow(orgId, typeof input.providerId === 'string' ? input.providerId : '');
+  } catch {
+    throw new AssessmentError('این سرویس آزمون پیدا نشد.', 404, 'PROVIDER_NOT_FOUND');
+  }
+  const testId = typeof input.testId === 'string' ? input.testId : '';
+  const test: ProviderTest | undefined = provider.tests.find((t) => t.id === testId);
+  if (!test) throw new AssessmentError('این آزمون در فهرست سرویس نیست.', 400, 'PROVIDER_TEST_NOT_FOUND');
+
+  const readiness = readinessOf(provider);
+  if (!readiness.ready) {
+    throw new AssessmentError(
+      `سرویس «${provider.name}» هنوز آماده نیست: ${readiness.reason || 'تنظیمات کامل نشده است.'}`,
+      409,
+      'PROVIDER_NOT_READY'
+    );
+  }
+
+  const open = db.openAssessmentFor(orgId, rec.id);
+  if (open && open.templateId === providerTestTemplateId(provider.id, test.id) && new Date(open.expiresAtISO).getTime() > Date.now()) {
+    throw new AssessmentError('برای این کارجو همین آزمون باز است؛ همان را بفرستید یا لغو کنید.', 409, 'ASSESSMENT_OPEN');
+  }
+
+  let externalUrl: string | null = null;
+  if (provider.mode === 'link') {
+    const raw = typeof input.externalUrl === 'string' ? input.externalUrl.trim() : '';
+    let parsed: URL;
+    try {
+      parsed = new URL(raw);
+    } catch {
+      throw new AssessmentError('نشانی آزمون سرویس را وارد کنید (با https).', 400, 'EXTERNAL_URL_REQUIRED');
+    }
+    if (parsed.protocol !== 'https:') {
+      throw new AssessmentError('نشانی آزمون باید https باشد.', 400, 'EXTERNAL_URL_HTTPS');
+    }
+    externalUrl = parsed.toString();
+  }
+
+  const job = rec.jobId ? db.getJob(orgId, rec.jobId) : null;
+  const stamp = new Date();
+  const row: db.AssessmentInviteRow = {
+    id: db.uid('asm'),
+    orgId,
+    token: crypto.randomBytes(18).toString('base64url'),
+    resumeId: rec.id,
+    jobId: rec.jobId || null,
+    jobTitle: job?.roleTitle || null,
+    templateId: providerTestTemplateId(provider.id, test.id),
+    templateName: test.name,
+    kind: test.kind,
+    candidateName: rec.candidateName || null,
+    candidateEmail: rec.contact?.email?.toLowerCase() || null,
+    status: 'sent',
+    source: 'external',
+    createdAtISO: stamp.toISOString(),
+    sentAtISO: null,
+    startedAtISO: null,
+    completedAtISO: null,
+    expiresAtISO: new Date(stamp.getTime() + ASSESSMENT_TTL_DAYS * 86_400_000).toISOString(),
+    score: null,
+    band: null,
+    dimensions: null,
+    answeredCount: 0,
+    questionCount: 0,
+    note: null,
+    answers: null,
+    driver: 'provider',
+    providerId: provider.id,
+    providerName: provider.name,
+    providerTestId: test.externalId || test.id,
+    externalRef: newExternalRef(),
+    externalUrl,
+  };
+  db.saveAssessment(row);
+  db.logActivity(orgId, actor, 'assessment.sent', `آزمون بیرونی «${test.name}» را برای «${row.candidateName || 'کارجو'}» آماده کرد`, {
+    jobId: row.jobId,
+    resumeId: row.resumeId,
+  });
+  return row;
+}
+
+/** The local template id of a provider test — how the panel tells the two kinds apart. */
+export function providerTestTemplateId(providerId: string, testId: string): string {
+  return `provider:${providerId}:${testId}`;
+}
+
+/** `provider:<providerId>:<testId>` → the two halves, or null for a bank test. */
+export function splitProviderTemplateId(templateId: string): { providerId: string; testId: string } | null {
+  if (!templateId.startsWith('provider:')) return null;
+  const [, providerId, ...rest] = templateId.split(':');
+  const testId = rest.join(':');
+  if (!providerId || !testId) return null;
+  return { providerId, testId };
 }
 
 export function cancelInvite(orgId: string, id: string, actor: { id: string; name: string } | null): db.AssessmentInviteRow {
@@ -250,25 +387,122 @@ export function invitationText(row: db.AssessmentInviteRow, orgName: string, url
   };
 }
 
+/**
+ * The mail for a provider-hosted test: shorter, and it does not sell the test.
+ * No score expectation, no «آزمون شخصیت» claim we cannot stand behind.
+ */
+export function providerInvitationText(
+  row: db.AssessmentInviteRow,
+  orgName: string,
+  url: string
+): { subject: string; body: string } {
+  return {
+    subject: `یک ارزیابی برای ${row.jobTitle ? `«${row.jobTitle}» — ` : ''}${orgName}`,
+    body: [
+      `${row.candidateName || 'سلام'} عزیز،`,
+      '',
+      `برای آشنایی بهتر با شیوهٔ کار شما در ${row.jobTitle ? `نقش «${row.jobTitle}» در ` : ''}${orgName}، یک ارزیابی «${row.templateName}» داریم.`,
+      ...(row.providerName ? [`این ارزیابی در سرویس «${row.providerName}» برگزار می‌شود و لینک زیر مخصوص شماست.`] : []),
+      '',
+      'لینک آزمون:',
+      url,
+      '',
+      `این لینک تا ${formatJalaliDate(tehranJalaliOf(new Date(row.expiresAtISO)), true)} باز است.`,
+      'نتیجه در کنار رزومه و گفت‌وگوی ما خوانده می‌شود، نه به‌تنهایی.',
+      '',
+      'با احترام،',
+      orgName,
+    ].join('\n'),
+  };
+}
+
+/**
+ * Sends an invitation. For a provider test in `api` mode this is also the moment
+ * the provider's session is opened — the only outbound call, and it happens
+ * because a human pressed «ارسال». Every failure is reported and nothing is
+ * mailed: a half-sent invitation is worse than a visible error.
+ */
 export async function sendInvite(orgId: string, id: string, url: string, actor: { id: string; name: string } | null): Promise<SendResult> {
-  const row = db.getAssessment(orgId, id);
-  if (!row) throw new AssessmentError('آزمون پیدا نشد.', 404, 'ASSESSMENT_NOT_FOUND');
-  if (row.status === 'completed') throw new AssessmentError('این کارجو آزمون را تکمیل کرده است.', 409, 'ALREADY_COMPLETED');
-  if (row.status === 'cancelled') throw new AssessmentError('این آزمون لغو شده است.', 409, 'CANCELLED');
-  if (!row.candidateEmail) throw new AssessmentError('برای این کارجو ایمیل ثبت نشده است؛ لینک را کپی کنید و از صندوق خودتان بفرستید.', 409, 'NO_EMAIL');
+  const fetched = db.getAssessment(orgId, id);
+  if (!fetched) throw new AssessmentError('آزمون پیدا نشد.', 404, 'ASSESSMENT_NOT_FOUND');
+  if (fetched.status === 'completed') throw new AssessmentError('این کارجو آزمون را تکمیل کرده است.', 409, 'ALREADY_COMPLETED');
+  if (fetched.status === 'cancelled') throw new AssessmentError('این آزمون لغو شده است.', 409, 'CANCELLED');
+  if (!fetched.candidateEmail) throw new AssessmentError('برای این کارجو ایمیل ثبت نشده است؛ لینک را کپی کنید و از صندوق خودتان بفرستید.', 409, 'NO_EMAIL');
+  const candidateEmail = fetched.candidateEmail;
+  // Check the mailbox *before* dialling a vendor: opening a session we cannot
+  // deliver the link for would bill the customer for nothing.
   const secrets = db.resolveOrgSecrets(orgId);
   if (!isEmailConfigured(secrets)) {
     throw new AssessmentError('ایمیل سازمان وصل نیست؛ لینک را کپی کنید و از صندوق خودتان بفرستید.', 409, 'EMAIL_NOT_CONFIGURED');
   }
+  const invite: db.AssessmentInviteRow = { ...fetched, candidateEmail };
+
+  let row: db.AssessmentInviteRow = invite;
+  let target = url;
+  if (invite.driver === 'provider' && invite.providerId) {
+    const prov = db.getAssessmentProvider(orgId, invite.providerId);
+    if (!prov) throw new AssessmentError('سرویس آزمون این دعوت حذف شده است؛ آن را دوباره وصل کنید.', 409, 'PROVIDER_GONE');
+    if (prov.mode === 'api') {
+      if (invite.externalUrl) {
+        // Already opened once (a retry of a failed mail): reuse the same session.
+        target = invite.externalUrl;
+      } else {
+        const test = prov.tests.find((t) => invite.templateId === providerTestTemplateId(prov.id, t.id));
+        if (!test) throw new AssessmentError('این آزمون دیگر در فهرست سرویس نیست.', 409, 'PROVIDER_TEST_NOT_FOUND');
+        try {
+          const session = await createProviderSession(prov, {
+            test,
+            candidateName: invite.candidateName,
+            candidateEmail,
+            externalRef: invite.externalRef || invite.id,
+            expiresAtISO: invite.expiresAtISO,
+          });
+          row = db.saveAssessment({ ...invite, externalUrl: session.url, externalRef: invite.externalRef || invite.id });
+          target = session.url;
+        } catch (err) {
+          const message = err instanceof ProviderError ? err.message : 'سرویس آزمون جلسه را نساخت.';
+          db.logActivity(orgId, actor, 'assessment.sent', `ساخت جلسهٔ آزمون «${invite.templateName}» در سرویس «${prov.name}» ناموفق بود`, {
+            jobId: invite.jobId,
+            resumeId: invite.resumeId,
+          });
+          throw new AssessmentError(message, 502, err instanceof ProviderError ? err.code : 'PROVIDER_FAILED');
+        }
+      }
+    } else if (!invite.externalUrl) {
+      throw new AssessmentError('نشانی آزمون سرویس ثبت نشده است؛ آن را در همان دعوت وارد کنید.', 409, 'EXTERNAL_URL_REQUIRED');
+    } else {
+      target = invite.externalUrl;
+    }
+  }
+
   const org = db.getOrg(orgId);
-  const { subject, body } = invitationText(row, org?.name || 'سازمان', url);
+  const { subject, body } =
+    row.driver === 'provider' ? providerInvitationText(row, org?.name || 'سازمان', target) : invitationText(row, org?.name || 'سازمان', target);
   try {
-    await sendMail(secrets.email!, { to: row.candidateEmail, subject, text: body, brand: mailBrandOf(org) });
+    await sendMail(secrets.email!, { to: candidateEmail, subject, text: body, brand: mailBrandOf(org) });
   } catch (err: any) {
     throw new AssessmentError(friendlySmtpError(err), 502, 'EMAIL_FAILED');
   }
   const stamp = new Date();
   const next = db.saveAssessment({ ...row, sentAtISO: stamp.toISOString() });
+  // Every mail we send belongs in the candidate's file, exactly like an offer
+  // mail — «چه چیزی برای این نفر فرستادیم؟» must have one answer.
+  db.saveEmail({
+    id: db.uid('eml'),
+    orgId,
+    resumeId: row.resumeId,
+    candidateName: row.candidateName,
+    jobId: row.jobId,
+    to: candidateEmail,
+    subject,
+    body,
+    status: 'sent',
+    error: null,
+    sentAtISO: stamp.toISOString(),
+    sentAtJalali: formatJalaliDate(tehranJalaliOf(stamp), true),
+    sentByName: actor?.name || null,
+    attachments: [],
+  });
   db.logActivity(orgId, actor, 'assessment.sent', `آزمون «${row.templateName}» را برای «${row.candidateName || 'کارجو'}» فرستاد`, {
     jobId: row.jobId,
     resumeId: row.resumeId,
@@ -278,6 +512,9 @@ export async function sendInvite(orgId: string, id: string, url: string, actor: 
 
 /** Records the first open, so HR can tell «فرستاده شد» from «دیده شد». */
 export function markStarted(row: db.AssessmentInviteRow): db.AssessmentInviteRow {
+  // A provider-hosted test is not «در حال پاسخ» just because the info page was
+  // opened: the candidate answers somewhere else.
+  if (row.driver === 'provider') return row;
   if (row.status !== 'sent') return row;
   return db.saveAssessment({ ...row, status: 'started' as AssessmentStatus, startedAtISO: new Date().toISOString() });
 }
@@ -294,6 +531,9 @@ function readAnswers(input: unknown): Record<string, AssessmentAnswerInput['valu
 
 /** The candidate's submission. Every question must be answered, once. */
 export function submitAnswers(row: db.AssessmentInviteRow, raw: unknown): db.AssessmentInviteRow {
+  if (row.driver === 'provider') {
+    throw new AssessmentError('این آزمون در سرویس بیرونی برگزار می‌شود؛ پاسخ‌ها همان‌جا ثبت می‌شود.', 409, 'PROVIDER_HOSTED');
+  }
   if (row.status === 'completed') throw new AssessmentError('پاسخ شما پیش‌تر ثبت شده است؛ سپاسگزاریم.', 409, 'ALREADY_COMPLETED');
   if (row.status === 'cancelled') throw new AssessmentError('این آزمون لغو شده است.', 409, 'CANCELLED');
   if (new Date(row.expiresAtISO).getTime() < Date.now()) {
@@ -363,10 +603,12 @@ export function recordExternal(
           score: Math.max(0, Math.min(100, Math.round(Number(d?.score) || 0))),
         }))
     : [];
-  if (rawScore === null && !dimensions.length) {
-    throw new AssessmentError('نتیجهٔ بیرونی باید نمره یا ابعاد داشته باشد.', 400, 'NO_RESULT');
-  }
   const note = typeof input.note === 'string' ? input.note.trim().slice(0, 600) : null;
+  // A provider may return a verdict in words («قبول»، «سطح B۲») with no number.
+  // That is a real result and is stored as one — never invented into a score.
+  if (rawScore === null && !dimensions.length && !(note && note.length >= 3)) {
+    throw new AssessmentError('نتیجهٔ بیرونی باید نمره، ابعاد یا یادداشت داشته باشد.', 400, 'NO_RESULT');
+  }
   const score = rawScore === null ? null : Math.round(rawScore);
   const stamp = new Date();
   const next = db.saveAssessment({
@@ -386,6 +628,38 @@ export function recordExternal(
   return next;
 }
 
+export interface ProviderResultInput {
+  /** What the provider was told to send back with every result. */
+  externalRef?: unknown;
+  /** The HOVIDA id, for a provider that was given the whole URL instead. */
+  assessmentId?: unknown;
+  score?: unknown;
+  dimensions?: unknown;
+  note?: unknown;
+}
+
+/**
+ * The provider's way back in. The referee is `externalRef` — a value the
+ * provider received when the session was opened — so a provider never needs to
+ * know our internal ids, and a result can only land on its own workspace.
+ */
+export function recordProviderResult(
+  orgId: string,
+  input: ProviderResultInput,
+  actor: { id: string; name: string } | null
+): db.AssessmentInviteRow {
+  const ref = typeof input.externalRef === 'string' ? input.externalRef.trim() : '';
+  let row: db.AssessmentInviteRow | null = ref ? db.findAssessmentByExternalRef(orgId, ref) : null;
+  if (!row && typeof input.assessmentId === 'string') {
+    row = db.getAssessment(orgId, input.assessmentId);
+  }
+  if (!row) throw new AssessmentError('دعوتی با این شناسه پیدا نشد.', 404, 'ASSESSMENT_NOT_FOUND');
+  if (row.driver !== 'provider') {
+    throw new AssessmentError('این دعوت مربوط به آزمون‌های خود هویدا است؛ نتیجه‌اش با پاسخ کارجو ثبت می‌شود.', 409, 'NOT_PROVIDER_TEST');
+  }
+  return recordExternal(orgId, row.id, { score: input.score, dimensions: input.dimensions, note: input.note }, actor);
+}
+
 /** Overdue links are marked, never deleted. */
 export function expireOld(orgId: string): void {
   const now = Date.now();
@@ -398,6 +672,7 @@ export function expireOld(orgId: string): void {
 
 /** What a candidate can do with an old link, read from the row itself. */
 export function canAnswer(row: db.AssessmentInviteRow): boolean {
+  if (row.driver === 'provider') return false;
   if (row.status === 'completed' || row.status === 'cancelled') return false;
   return new Date(row.expiresAtISO).getTime() >= Date.now();
 }

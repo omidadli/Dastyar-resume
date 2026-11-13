@@ -18,6 +18,7 @@ import {
   cancelInvite,
   canAnswer,
   createInvite,
+  createProviderInvite,
   markStarted,
   publicView,
   recordExternal,
@@ -28,6 +29,7 @@ import {
   templateSummaries,
   viewOf,
 } from '../assessments';
+import { listProviders, readinessOf, getProviderRow } from '../assessment-providers';
 
 function originOf(req: Request): string {
   const fixed = (process.env.PUBLIC_URL || '').trim();
@@ -140,6 +142,61 @@ export function assessmentRoutes() {
           external: completed.filter((a) => a.source === 'external').length,
         },
       });
+    })
+  );
+
+  /**
+   * Everything the send dialog can offer in one read: HOVIDA's own bank plus
+   * every provider test the workspace has set up. A provider that is not ready
+   * still appears, with the reason — hiding it would look like a missing test.
+   */
+  r.get(
+    '/assessments/catalog',
+    h(async (req, res) => {
+      const { org } = ctxOf(req);
+      const providers = listProviders(org.id).map((p) => ({
+        id: p.id,
+        name: p.name,
+        mode: p.mode,
+        state: p.state,
+        reason: p.reason,
+        tests: p.tests.map((t) => ({
+          id: t.id,
+          name: t.name,
+          kind: t.kind,
+          durationMinutes: t.durationMinutes,
+          dimensions: t.dimensions,
+          scoring: t.scoring,
+          note: t.note,
+          ready: readinessOf(getProviderRow(org.id, p.id)).ready,
+          reason: readinessOf(getProviderRow(org.id, p.id)).reason,
+        })),
+      }));
+      res.json({ templates: templateSummaries(), providers, suggestedId: suggestTemplateId(str(req.query.jobTitle, 160)) });
+    })
+  );
+
+  /**
+   * A provider-hosted invitation. In `api` mode nothing leaves the server here;
+   * in `link` mode the URL the candidate will open is required up front.
+   */
+  r.post(
+    '/assessments/provider',
+    h(async (req, res) => {
+      const { org, user } = ctxOf(req);
+      if (blockedByBlind(org, res)) return;
+      try {
+        const row = createProviderInvite(org.id, { id: user.id, name: user.name }, {
+          resumeId: req.body?.resumeId,
+          providerId: req.body?.providerId,
+          testId: req.body?.testId,
+          jobId: req.body?.jobId,
+          externalUrl: req.body?.externalUrl,
+        });
+        res.status(201).json({ assessment: viewOf(row, originOf(req)) });
+      } catch (err) {
+        fail(res, err);
+      }
     })
   );
 

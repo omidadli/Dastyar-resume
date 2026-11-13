@@ -17,7 +17,7 @@ import * as db from '../db';
 import { apiOf, requireApiKey } from '../api-keys';
 import { h, int, oneOf, str } from './util';
 import { blindLabel, blindOn } from '../blind';
-import { AssessmentError, recordExternal } from '../assessments';
+import { AssessmentError, recordExternal, recordProviderResult } from '../assessments';
 import { appVersion } from '../version';
 import type { DecisionStatus, MatchFilter, NoveltyFilter } from '../../src/types/screening';
 
@@ -229,6 +229,49 @@ export function apiV1Routes(): express.Router {
         send(res, {
           assessment: {
             id: row.id,
+            status: row.status,
+            source: row.source,
+            score: row.score,
+            band: row.band,
+            dimensions: row.dimensions,
+            completedAtISO: row.completedAtISO,
+          },
+        });
+      } catch (err) {
+        if (err instanceof AssessmentError) return send(res, { error: err.message, code: err.code }, err.status);
+        throw err;
+      }
+    })
+  );
+
+  /**
+   * The provider's return path when it was given `externalRef` instead of an id.
+   * One narrow scope, one call, no read access to anything else — a test vendor
+   * should not need the key that can read every résumé in the workspace.
+   */
+  r.post(
+    '/v1/results',
+    requireApiKey('assessments'),
+    h(async (req, res) => {
+      const { key, org } = apiOf(req);
+      const actor = { id: `apikey:${key.id}`, name: `کلید API «${key.name}»` };
+      try {
+        const row = recordProviderResult(
+          org.id,
+          {
+            externalRef: req.body?.externalRef,
+            assessmentId: req.body?.assessmentId,
+            score: req.body?.score,
+            dimensions: req.body?.dimensions,
+            note: req.body?.note,
+          },
+          actor
+        );
+        send(res, {
+          assessment: {
+            id: row.id,
+            externalRef: row.externalRef || null,
+            providerName: row.providerName || null,
             status: row.status,
             source: row.source,
             score: row.score,

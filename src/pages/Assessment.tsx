@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, CheckCircle2, ClipboardList, Clock3, Send, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCircle2, ClipboardList, Clock3, ExternalLink, Send, ShieldCheck } from 'lucide-react';
 import { HovidaLogo } from '../components/brand/Logo';
 import { Button, Callout, Chip, Spinner, toast } from '../components/ui';
 import { api } from '../lib/api';
@@ -122,7 +122,28 @@ export default function Assessment({ token }: { token: string }) {
                 </Callout>
               )}
 
-              {!done && !closed && (
+              {data.provider && !done && !closed && (
+                <div className="mt-2">
+                  <Callout tone="info" icon={ExternalLink} title={`این آزمون در «${data.provider.name}» برگزار می‌شود`}>
+                    {data.provider.note}
+                  </Callout>
+                  {data.provider.url ? (
+                    <a
+                      href={data.provider.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-3 inline-flex items-center gap-2 h-11 px-4 rounded-[10px] bg-brand-strong text-white text-[13px] font-bold"
+                    >
+                      رفتن به آزمون
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  ) : (
+                    <p className="mt-2 text-[12px] text-ink-3">لینک آزمون هنوز آماده نشده است؛ منابع انسانی آن را جداگانه می‌فرستد.</p>
+                  )}
+                </div>
+              )}
+
+              {!done && !closed && !data.provider && (
                 <>
                   {page === 0 && (
                     <>

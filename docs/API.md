@@ -377,6 +377,15 @@ POST   /api/assessments/:id/send              → { assessment, emailed }
 POST   /api/assessments/:id/cancel            → { assessment }
 POST   /api/assessments/:id/result            → { assessment }   (نتیجهٔ ارائه‌دهنده/انسانی)
 
+GET    /api/assessments/catalog?jobTitle=…    → { templates, providers, suggestedId }
+
+GET    /api/assessment-providers               → { items, contract, summary }   (همهٔ اعضا)
+POST   /api/assessment-providers               → { provider }   (مدیر)
+PATCH  /api/assessment-providers/:id           → { provider }   (مدیر)
+POST   /api/assessment-providers/:id/check     → { provider }   (GET واقعی به /health؛ نتیجه همان چیزی است که می‌ماند)
+DELETE /api/assessment-providers/:id           → { removed, keptInvites }   (مدیر؛ نتیجه‌های ثبت‌شده می‌مانند)
+POST   /api/assessments/provider               → { assessment }   (آزمون یک سرویس بیرونی)
+
 GET    /api/assessment/public/:token          → { assessment, canAnswer }   (عمومی)
 POST   /api/assessment/public/:token/start    → { assessment }
 POST   /api/assessment/public/:token/submit   → { assessment, thanks }      (یک‌بار)
@@ -386,8 +395,13 @@ POST   /api/assessment/public/:token/submit   → { assessment, thanks }      (�
 
 ```http
 GET  /api/v1/assessments/:id           (scope: read)
-POST /api/v1/assessments/:id/result    (scope: write)  body: { score?, dimensions?, note? }
+POST /api/v1/results                   (scope: assessments)  body: { externalRef, score?, dimensions?, note? }
+POST /api/v1/assessments/:id/result    (scope: write)         body: { score?, dimensions?, note? }
 ```
+
+`scope: assessments` عمداً باریک است: فقط ثبت نتیجه، با `externalRef`ی که هنگام ساخت جلسه
+به سرویس داده شد. نه خواندن رزومه، نه تصمیم، نه ارسال ایمیل. کلید `write` قبلی هم برای
+سازگاری همچنان کار می‌کند.
 
 نتیجهٔ بیرونی با `source: "external"` ثبت می‌شود. صفحهٔ عمومی هیچ امتیاز گزینه، هیچ نام
 بُعد و هیچ شناسهٔ داخلی دریافت نمی‌کند. جدول کامل، فرمول امتیاز و «چه چیزی این نیست» در

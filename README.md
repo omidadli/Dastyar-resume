@@ -119,7 +119,8 @@ NODE_ENV=production npm start
 - **نگه‌داری داده و حذف دادهٔ شخصی (DSAR)** (سیاست روزشمار، ناشناس‌سازی، خروجی و پاک‌سازی) → [`docs/DATA-RETENTION.md`](docs/DATA-RETENTION.md).
 - **ورود دومرحله‌ای** (QR برنامهٔ احراز هویت، کدهای بازیابی، بازنشانی توسط مدیر) → [`docs/TWO-FACTOR.md`](docs/TWO-FACTOR.md).
 - **گردش تأیید پیشنهاد** (۱ تا ۳ مرحله، تأیید/رد با یادداشت، بستن ارسال تا تأیید آخر) → [`docs/OFFER-APPROVAL.md`](docs/OFFER-APPROVAL.md).
-- **آزمون و ارزیابی** (۵ آزمون / ۴۵ پرسش: قضاوت موقعیتی، نمونه‌کار، نمایهٔ پنج‌بُعدی رفتار؛ لینک عمومی یک‌بارمصرف، کلید امتیاز روشن، قرارداد ارائه‌دهندهٔ بیرونی) → [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
+- **آزمون و ارزیابی** (۵ آزمون / ۴۵ پرسش: قضاوت موقعیتی، نمونه‌کار، نمایهٔ پنج‌بُعدی رفتار؛ لینک عمومی یک‌بارمصرف، کلید امتیاز روشن) → [`docs/ASSESSMENT.md`](docs/ASSESSMENT.md).
+- **بازارچهٔ آزمون** (سرویس آزمون بیرونی با دو حالت «API» و «لینک»؛ «آماده» فقط بعد از یک بررسی واقعی، کلید رمزنگاری‌شده، ثبت نتیجه با `externalRef` و scope باریک، نتیجهٔ دستی برای مراکز سنجش بدون API) → [`docs/ASSESSMENT-MARKETPLACE.md`](docs/ASSESSMENT-MARKETPLACE.md).
 - **ورود سازمانی (SSO)** (OIDC با Google Workspace، Microsoft 365، Okta یا Keycloak؛ دامنه‌های مجاز، ورود خودکار اعضا، «فقط SSO») → [`docs/SSO.md`](docs/SSO.md).
 - **غربالگری بی‌طرف** (پنهان‌سازی هویت سمت سرور، بستن تماس تا آشکارسازی، ثبت آشکارسازی) → [`docs/BLIND-SCREENING.md`](docs/BLIND-SCREENING.md).
 - **تجربهٔ کارجو (نظرسنجی و NPS)** (لینک عمومی، فرم دو دقیقه‌ای، محاسبهٔ NPS و گزارش) → [`docs/EXPERIENCE-SURVEY.md`](docs/EXPERIENCE-SURVEY.md).
@@ -214,6 +215,7 @@ npm run test:inbox            # کارتابل تأیید: نوبت هر نفر�
 npm run test:jobboard         # انتشار در جاب‌بورد: متن آماده، لینک درخواست، فیلدهای نامعلوم و ثبت وضعیت (۳۹ بررسی)
 npm run test:offers           # پیشنهاد شغلی، امضا، نسخه‌بندی مذاکره، گردش تأیید و سقف ارسال (۱۰۴ بررسی)
 npm run test:assessment       # بانک آزمون، امتیازدهی، صفحهٔ عمومی و قرارداد ارائه‌دهنده (۷۰ بررسی)
+npm run test:marketplace      # بازارچهٔ آزمون: سرویس بیرونی، آمادگی، خطاها، ثبت نتیجه (۸۷ بررسی)
 npm run test:sso              # ورود سازمانی با یک ارائه‌دهندهٔ OIDC درون‌فرایندی (۵۳ بررسی)
 npm run test:team             # گزارش عملکرد تیم و هزینهٔ هر استخدام
 npm run test:collab test:blind test:retention test:survey test:2fa test:kit test:developer test:scheduling
@@ -273,6 +275,7 @@ docs/INTERVIEW-KIT.md     کیت مصاحبه: بانک پرسش و چیدمان
 docs/TEAM-AND-COST.md     عملکرد تیم و هزینهٔ هر استخدام (فرمول، API، محدودیت‌ها)
 docs/SSO.md               ورود سازمانی با OIDC: راه‌اندازی، قواعد امنیتی، خطاها
 docs/ASSESSMENT.md        آزمون و ارزیابی: بانک، امتیازدهی، قرارداد ارائه‌دهنده
+docs/ASSESSMENT-MARKETPLACE.md  بازارچهٔ آزمون: سرویس بیرونی، دو حالت، قرارداد، خطاها
 docs/OFFER-APPROVAL.md    گردش تأیید پیشنهاد: زنجیره، قواعد، خطاها
 ```
 

@@ -66,6 +66,7 @@ export default function CandidatePage({ id }: { id: string }) {
             record={item}
             jobTitle={job?.roleTitle}
             criteria={job?.understanding.criteria}
+            stages={job?.stages}
             variant="page"
             onChange={(r) => q.setData((d) => (d ? { ...d, record: { ...d.record, ...r } } : d))}
             onDeleted={() => navigate(job ? `/app/jobs/${job.id}` : '/app/candidates', { replace: true, force: true })}

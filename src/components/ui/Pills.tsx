@@ -1,7 +1,8 @@
 import React from 'react';
-import { Cpu, Sparkles, type LucideIcon } from 'lucide-react';
-import type { AnalysisEngine, Confidence, DecisionStatus, JobStatus, ResumeCategory } from '../../types/screening';
+import { Cpu, CopyCheck, Sparkle, Sparkles, type LucideIcon } from 'lucide-react';
+import type { AnalysisEngine, Confidence, DecisionStatus, DuplicateReason, JobStatus, ResumeCategory } from '../../types/screening';
 import { CONFIDENCE_LABEL, DECISION_META, JOB_STATUS_META, matchMeta } from '../../lib/match';
+import { faDate } from '../../lib/format';
 
 const PILL = 'inline-flex items-center gap-1 rounded-full border font-semibold whitespace-nowrap leading-none';
 
@@ -23,6 +24,54 @@ export function DecisionPill({ status, size = 'md', className = '' }: { status: 
     <span className={`${PILL} ${m.pill} ${size === 'sm' ? 'h-6 px-2 text-[11.5px]' : 'h-7 px-2.5 text-xs'} ${className}`}>
       <Icon className="w-3.5 h-3.5" strokeWidth={2} />
       {m.label}
+    </span>
+  );
+}
+
+const DUPLICATE_REASON_LABEL: Record<DuplicateReason, string> = {
+  file: 'فایل یکسان',
+  text: 'متن یکسان رزومه',
+  email: 'ایمیل یکسان',
+  phone: 'شماره تماس یکسان',
+};
+
+/**
+ * «تکراری» / «جدید» نسبت به سابقهٔ همین دپارتمان. A duplicate always says where
+ * it was seen first, so the recruiter can open the earlier record.
+ */
+export function NoveltyPill({
+  novelty,
+  duplicateOf,
+  size = 'sm',
+  className = '',
+}: {
+  novelty?: 'new' | 'duplicate' | 'unknown' | null;
+  duplicateOf?: { roleTitle: string | null; createdAtISO: string; reason: DuplicateReason } | null;
+  size?: 'sm' | 'md';
+  className?: string;
+}) {
+  if (!novelty || novelty === 'unknown') return null;
+  const sizeCls = size === 'sm' ? 'h-6 px-2 text-[11.5px]' : 'h-7 px-2.5 text-xs';
+  if (novelty === 'duplicate') {
+    const reason = duplicateOf ? DUPLICATE_REASON_LABEL[duplicateOf.reason] : 'رزومهٔ تکراری';
+    const where = duplicateOf ? ` در «${duplicateOf.roleTitle || 'همین دپارتمان'}» (${faDate(duplicateOf.createdAtISO)})` : '';
+    return (
+      <span
+        title={`این رزومه پیش‌تر${where} ثبت شده بود — ${reason}. دوباره تحلیل شد اما کاندید تازه‌ای نیست.`}
+        className={`${PILL} ${sizeCls} bg-line-2 text-ink-2 border-line-strong ${className}`}
+      >
+        <CopyCheck className="w-3.5 h-3.5" strokeWidth={2.1} />
+        تکراری
+      </span>
+    );
+  }
+  return (
+    <span
+      title="در سابقهٔ این دپارتمان رزومهٔ یکسانی پیدا نشد؛ این کاندید تازه است."
+      className={`${PILL} ${sizeCls} bg-high-soft text-high-ink border-high/25 ${className}`}
+    >
+      <Sparkle className="w-3.5 h-3.5" strokeWidth={2.1} />
+      جدید
     </span>
   );
 }

@@ -3,7 +3,7 @@ import { Archive, ChevronLeft, Cpu, MailCheck } from 'lucide-react';
 import type { ResumeListItem } from '../../types/screening';
 import { candidateName, faRelative, toPersianDigits } from '../../lib/format';
 import { matchMeta } from '../../lib/match';
-import { Checkbox, Chip, DecisionPill, MatchMeter, MatchPill, Monogram, ScoreBadge, Skeleton } from '../ui';
+import { Checkbox, Chip, DecisionPill, MatchMeter, MatchPill, Monogram, NoveltyPill, ScoreBadge, Skeleton } from '../ui';
 
 export interface CandidateTableProps {
   items: ResumeListItem[];
@@ -127,6 +127,11 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                               <bdi>{r.facts?.lastRole || '—'}</bdi>
                               {r.facts?.yearsExperience != null && `، ${toPersianDigits(r.facts.yearsExperience)} سال`}
                             </p>
+                            {!compact && r.novelty && r.novelty !== 'unknown' && (
+                              <span className="inline-flex mt-1">
+                                <NoveltyPill novelty={r.novelty} duplicateOf={r.duplicateOf} />
+                              </span>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -168,7 +173,10 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                         </td>
                       )}
                       <td className={`px-2 py-3 border-b border-line-2 ${compact ? 'pl-4' : ''}`}>
-                        <DecisionPill status={r.decisionStatus} size="sm" />
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <DecisionPill status={r.decisionStatus} size="sm" />
+                          {compact && <NoveltyPill novelty={r.novelty} duplicateOf={r.duplicateOf} />}
+                        </div>
                       </td>
                       {!compact && (
                         <td className="pl-4 py-3 border-b border-line-2 text-ink-4">
@@ -229,6 +237,7 @@ export function CandidateTable({ items, loading, activeId, onOpen, selected, onT
                       </p>
                       <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                         <MatchPill category={r.category} size="sm" />
+                        <NoveltyPill novelty={r.novelty} duplicateOf={r.duplicateOf} />
                         {r.decisionStatus !== 'none' && <DecisionPill status={r.decisionStatus} size="sm" />}
                         <Signals r={r} />
                       </div>
